@@ -1,0 +1,21 @@
+# Full failure drill: 4-minute mixed load, solr2 frozen (SIGSTOP) at t=60 and
+# thawed at t=120, then hard-killed at t=150 and restored at t=200.
+# Run: solrlab drill examples/drill-node-loss.yaml
+collection: products
+seed: 42
+load:
+  rps: 50
+  duration: 240
+  ramp: 15
+  queries: queries/default.yaml
+  index_rps: 10
+chaos:
+  - { at: 60,  action: pause,   node: solr2 }
+  - { at: 120, action: unpause, node: solr2 }
+  - { at: 150, action: kill,    node: solr2 }
+  - { at: 200, action: start,   node: solr2 }
+report: drill-node-loss
+# Gates: fail (exit 1) if the drill regresses — e.g. in CI across versions.
+assert:
+  - "dropped=0"
+  - "p50_ms<100"

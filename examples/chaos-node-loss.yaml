@@ -1,0 +1,16 @@
+# Timed chaos drill: run alongside a load test, then read the story in the
+# report timeline. `pause` (frozen JVM) at t=30 is the realistic failure;
+# unpause at t=75, then a hard kill + recovery cycle.
+steps:
+  - at: 30
+    action: pause
+    node: solr2
+  - at: 75
+    action: unpause
+    node: solr2
+  - at: 120
+    action: kill
+    node: solr2
+  - at: 180
+    action: start
+    node: solr2

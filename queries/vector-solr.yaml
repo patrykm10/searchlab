@@ -1,0 +1,18 @@
+# kNN load for Solr: {RAND_VECTOR:dims} expands to a bracketed vector inside
+# the {!knn} local-params syntax. dims must match the field.
+queries:
+  - name: knn_10
+    weight: 6
+    params:
+      q: "{!knn f=vec topK=10}{RAND_VECTOR:384}"
+      fl: "id,title_t,score"
+  - name: knn_100
+    weight: 1              # deeper topK: the latency lever
+    params:
+      q: "{!knn f=vec topK=100}{RAND_VECTOR:384}"
+      rows: 100
+  - name: knn_filtered      # pre-filtered kNN: where perf gets interesting
+    weight: 3
+    params:
+      q: "{!knn f=vec topK=10}{RAND_VECTOR:384}"
+      fq: "category_s:category_s_0"

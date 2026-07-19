@@ -1,0 +1,43 @@
+# solrlab data profile: e-commerce-ish shape with knobs for the pathologies
+# that matter (cardinality, skew, text length, multivalued fields).
+fields:
+  id:
+    type: id            # doc-0, doc-1, ... (set uuid: true for random ids)
+  title_t:
+    type: text
+    min_words: 3
+    max_words: 10
+  body_t:
+    type: text
+    min_words: 50
+    max_words: 300
+  category_s:
+    type: categorical
+    cardinality: 50
+    zipf: 1.1           # skewed: a few categories dominate, like real data
+  brand_s:
+    type: categorical
+    cardinality: 500
+    prefix: brand
+  price_f:
+    type: float
+    min: 1
+    max: 5000
+  stock_i:
+    type: int
+    min: 0
+    max: 10000
+  created_dt:
+    type: date
+    days_back: 730
+  active_b:
+    type: bool
+    true_ratio: 0.9
+  tags_ss:
+    type: multivalued
+    min_values: 1
+    max_values: 8
+    of:
+      type: categorical
+      cardinality: 200
+      prefix: tag

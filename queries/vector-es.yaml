@@ -1,0 +1,13 @@
+# kNN load for elasticsearch: {RAND_VECTOR:dims} as the whole value becomes a
+# real JSON array. num_candidates is the recall/latency lever.
+queries:
+  - name: knn_10
+    weight: 6
+    body:
+      knn: { field: vec, query_vector: "{RAND_VECTOR:384}", k: 10, num_candidates: 50 }
+      size: 10
+  - name: knn_deep
+    weight: 1
+    body:
+      knn: { field: vec, query_vector: "{RAND_VECTOR:384}", k: 100, num_candidates: 500 }
+      size: 100

@@ -1,0 +1,21 @@
+# Query templates for elasticsearch/opensearch engines: `body` is the search
+# DSL; {RAND_WORD} / {RAND_INT:lo:hi} substitution works anywhere in it.
+queries:
+  - name: keyword_search
+    weight: 6
+    body:
+      query: { match: { body_t: "{RAND_WORD}" } }
+      size: 10
+  - name: filtered_search
+    weight: 3
+    body:
+      query:
+        bool:
+          must: { match: { title_t: "{RAND_WORD}" } }
+          filter: { range: { price_f: { gte: "{RAND_INT:1:100}", lte: "{RAND_INT:500:5000}" } } }
+      size: 10
+  - name: agg_heavy
+    weight: 1
+    body:
+      size: 0
+      aggs: { by_category: { terms: { field: category_s.keyword, size: 50 } } }

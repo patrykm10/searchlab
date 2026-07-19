@@ -1,0 +1,28 @@
+# solrlab query templates. Weighted mix; {RAND_WORD} and {RAND_INT:lo:hi}
+# are substituted per request so query caches don't fake your latency numbers.
+queries:
+  - name: keyword_search
+    weight: 6
+    params:
+      q: "body_t:{RAND_WORD}"
+      rows: 10
+  - name: filtered_search
+    weight: 3
+    params:
+      q: "title_t:{RAND_WORD}"
+      fq: "price_f:[{RAND_INT:1:100} TO {RAND_INT:500:5000}]"
+      rows: 10
+  - name: facet_heavy
+    weight: 1
+    params:
+      q: "*:*"
+      rows: 0
+      facet: "true"
+      facet.field: "category_s"
+      facet.limit: 50
+  - name: deep_paging_antipattern
+    weight: 0            # enable (weight > 0) to reproduce deep-paging pain
+    params:
+      q: "*:*"
+      start: "{RAND_INT:10000:100000}"
+      rows: 10

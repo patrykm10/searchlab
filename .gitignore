@@ -1,0 +1,8 @@
+.venv/
+.solrlab/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.jsonl
+.DS_Store
+.github/workflows/ci.yml

@@ -1,0 +1,23 @@
+# Repro profile: high-cardinality faceting pain. Facet on user_id_s and watch
+# the heap. Pair with a small heap (--heap 512m) to reproduce OOM/GC pressure.
+fields:
+  id:
+    type: id
+    uuid: true
+  user_id_s:
+    type: keyword
+    length: 16          # effectively unique -> worst-case facet cardinality
+  session_s:
+    type: keyword
+    length: 12
+  event_s:
+    type: categorical
+    cardinality: 20
+    zipf: 1.3
+  payload_t:
+    type: text
+    min_words: 20
+    max_words: 80
+  ts_dt:
+    type: date
+    days_back: 30

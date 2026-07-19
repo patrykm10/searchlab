@@ -1,0 +1,60 @@
+title: "Leader election: kill a node and watch"
+requires: "a cluster with >= 2 nodes and a collection with replicas on both"
+intro: |
+  Every shard has exactly one leader replica: writes go through it, and it
+  coordinates. When the leader's node dies, ZooKeeper notices the session
+  drop and the surviving replicas elect a new leader. Reading about it takes
+  a minute; causing it is better.
+steps:
+  - say: "First, the healthy state — note the live node count:"
+  - http:
+      path: "/admin/collections"
+      params: { action: CLUSTERSTATUS, wt: json }
+      show: "cluster.live_nodes"
+      expect: { path: "cluster.live_nodes", op: len_gte, value: 2 }
+  - ask: "What actually tells the cluster a node has died?"
+    options:
+      - "the node sends a shutdown message"
+      - "its ZooKeeper session expires"
+      - "the other nodes' pings time out"
+    answer: 1
+    why: >
+      Each node holds an ephemeral znode in ZooKeeper. Hard-kill the process
+      and the session expires (no goodbye needed) — the ephemeral node
+      vanishes, and that disappearance IS the death notice.
+  - wait: |
+      Open ANOTHER terminal and hard-crash a node:
+
+          solrlab chaos kill solr2
+
+      I'll watch the cluster state and notice when ZooKeeper does.
+    url: "/admin/collections"
+    params: { action: CLUSTERSTATUS, wt: json }
+    until: { path: "cluster.live_nodes", op: len_eq, value: 1 }
+  - say: |
+      There it is — live_nodes dropped. Any shard whose leader lived on that
+      node has now elected a new leader from its surviving replicas (check
+      the Admin UI's cloud graph if you're curious which). Queries kept
+      working the whole time IF every shard still had at least one live
+      replica; writes to re-led shards paused only for the election itself.
+  - ask: "During the election window, queries against the affected shard..."
+    options:
+      - "fail until a leader exists"
+      - "keep working — any replica can serve reads"
+      - "get queued on the new leader"
+    answer: 1
+    why: >
+      Reads don't need a leader; any active replica serves them. Leadership
+      matters for WRITES, which need a single ordering point.
+  - wait: |
+      Bring it back and watch recovery:
+
+          solrlab chaos start solr2
+    url: "/admin/collections"
+    params: { action: CLUSTERSTATUS, wt: json }
+    until: { path: "cluster.live_nodes", op: len_gte, value: 2 }
+  - say: |
+      The returning replicas don't just rejoin — they RECOVER: sync missed
+      updates from the current leader (peer sync for small gaps, full index
+      replication for big ones), then rejoin as followers. The old leader
+      does NOT get its job back; leadership is not seniority.

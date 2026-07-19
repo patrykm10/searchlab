@@ -1,0 +1,59 @@
+title: "Commits: why your document isn't searchable yet"
+requires: "a cluster with a collection named 'products' (quickstart makes one)"
+intro: |
+  The most common Solr surprise: you indexed a document, queried, and it
+  isn't there. Nothing is wrong — you just met the commit model. Let's
+  reproduce the surprise on purpose.
+steps:
+  - say: |
+      We'll add a document WITHOUT committing, then search for it.
+  - http:
+      method: POST
+      path: "/products/update"
+      params: { wt: json }
+      json: [ { id: "lesson-doc-1", title_t: "the invisible document" } ]
+      show: "responseHeader.status"
+  - http:
+      path: "/products/select"
+      params: { q: "id:lesson-doc-1", wt: json }
+      show: "response.numFound"
+  - say: |
+      numFound: 0 — yet the update returned status 0 (success). The document
+      is durably in the transaction log and in an in-memory buffer, but
+      search runs against a SEARCHER: an immutable view opened over the index
+      files at some earlier moment. Until a new searcher opens, new documents
+      are invisible.
+  - ask: "What makes the document searchable?"
+    options:
+      - "flushing the transaction log"
+      - "opening a new searcher (soft or hard commit with openSearcher)"
+      - "waiting for the merge scheduler"
+    answer: 1
+    why: >
+      Visibility = new searcher. A soft commit opens one cheaply (no fsync);
+      a hard commit with openSearcher=true does it durably. The tlog is
+      about durability, merges are about housekeeping — neither grants
+      visibility by itself.
+  - say: "Commit and look again:"
+  - http:
+      path: "/products/update"
+      params: { commit: "true", wt: json }
+      show: "responseHeader.status"
+  - http:
+      path: "/products/select"
+      params: { q: "id:lesson-doc-1", wt: json }
+      show: "response.numFound"
+      expect: { path: "response.numFound", op: eq, value: 1 }
+  - say: |
+      There it is. In production nobody commits per document — autoSoftCommit
+      (maxTime ~1-10s) gives near-real-time visibility, autoCommit
+      (openSearcher=false) gives durability, and explicit commits from
+      clients are usually a bug. That's also why solrlab's indexer uses
+      commitWithin instead of hammering commit.
+  - http:
+      method: POST
+      path: "/products/update"
+      params: { commit: "true", wt: json }
+      json: { delete: { id: "lesson-doc-1" } }
+      show: "responseHeader.status"
+  - say: "(cleaned up after ourselves.)"

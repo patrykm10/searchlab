@@ -1,0 +1,23 @@
+# Vector search lab profile: 500k of these at dims 384 gives HNSW something
+# real to chew on. Vectors are generated around 16 centroids (clustered like
+# real embeddings — uniform random vectors are pathological for ANN).
+fields:
+  id:
+    type: id
+  title_t:
+    type: text
+    min_words: 3
+    max_words: 12
+  category_s:
+    type: categorical
+    cardinality: 16
+    zipf: 1.1
+  vec:
+    type: vector
+    dims: 384            # match your embedding model (e.g. MiniLM=384, ada=1536)
+    clusters: 16
+    cluster_std: 0.15
+    similarity: cosine
+    solr:                # HNSW build knobs (Solr fieldType)
+      hnswMaxConnections: 16
+      hnswBeamWidth: 100

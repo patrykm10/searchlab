@@ -1,0 +1,91 @@
+# Complex query mix: beyond simple term/range lookups — boosting, faceting,
+# grouping, highlighting, stats, and multi-field relevance tuning. Same
+# {RAND_WORD} / {RAND_INT:lo:hi} substitution rules apply.
+queries:
+  - name: edismax_multifield
+    weight: 4
+    params:
+      q: "{RAND_WORD}"
+      defType: edismax
+      qf: "title_t^3 body_t"
+      fq: "active_b:true"
+      rows: 10
+
+  - name: boolean_compound
+    weight: 3
+    params:
+      q: "(title_t:{RAND_WORD} OR body_t:{RAND_WORD}) AND category_s:*"
+      fq: "price_f:[{RAND_INT:1:2000} TO {RAND_INT:2001:5000}]"
+      rows: 10
+
+  - name: function_boost
+    weight: 3
+    params:
+      q: "body_t:{RAND_WORD}"
+      defType: edismax
+      bf: "recip(price_f,1,1000,1000)"
+      boost: "if(active_b,1.0,0.5)"
+      rows: 10
+
+  - name: facet_pivot
+    weight: 2
+    params:
+      q: "*:*"
+      rows: 0
+      facet: "true"
+      facet.pivot: "category_s,brand_s"
+      facet.limit: 20
+
+  - name: range_facet_combo
+    weight: 2
+    params:
+      q: "*:*"
+      fq: "stock_i:[{RAND_INT:0:5000} TO {RAND_INT:5001:10000}]"
+      rows: 0
+      facet: "true"
+      facet.field: "category_s"
+      facet.range: "price_f"
+      f.price_f.facet.range.start: 0
+      f.price_f.facet.range.end: 5000
+      f.price_f.facet.range.gap: 500
+
+  - name: grouped_search
+    weight: 2
+    params:
+      q: "title_t:{RAND_WORD}"
+      group: "true"
+      group.field: "category_s"
+      group.limit: 3
+      rows: 10
+
+  - name: highlighted_search
+    weight: 2
+    params:
+      q: "body_t:{RAND_WORD}"
+      hl: "true"
+      hl.fl: "body_t,title_t"
+      hl.snippets: 2
+      rows: 10
+
+  - name: stats_component
+    weight: 1
+    params:
+      q: "category_s:{RAND_WORD}"
+      rows: 0
+      stats: "true"
+      stats.field: "price_f"
+
+  - name: sorted_multifield
+    weight: 2
+    params:
+      q: "*:*"
+      fq: "tags_ss:tag{RAND_INT:1:200}"
+      sort: "price_f desc, stock_i asc"
+      rows: 10
+
+  - name: deep_paging_antipattern
+    weight: 0            # enable (weight > 0) to reproduce deep-paging pain
+    params:
+      q: "*:*"
+      start: "{RAND_INT:10000:100000}"
+      rows: 10

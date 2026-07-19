@@ -1,0 +1,12 @@
+# kNN load for opensearch (query-DSL knn clause).
+queries:
+  - name: knn_10
+    weight: 6
+    body:
+      size: 10
+      query: { knn: { vec: { vector: "{RAND_VECTOR:384}", k: 10 } } }
+  - name: knn_deep
+    weight: 1
+    body:
+      size: 100
+      query: { knn: { vec: { vector: "{RAND_VECTOR:384}", k: 100 } } }

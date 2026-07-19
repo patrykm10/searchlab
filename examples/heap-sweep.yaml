@@ -1,0 +1,21 @@
+# Which heap does this workload need? Six cells: 3 heap sizes x 2 collectors.
+# Run: solrlab sweep examples/heap-sweep.yaml   (expect several minutes)
+collection: products
+base:
+  engine: solr
+  solr_nodes: 2
+matrix:
+  heap: ["512m", "1g", "2g"]
+  gc_tune: ["", "-XX:+UseZGC -XX:+ZGenerational"]
+workload:
+  gen:
+    profile: profiles/default.yaml
+    count: 50k
+    seed: 42
+  load:
+    rps: 50
+    duration: 60
+    ramp: 10
+    queries: queries/default.yaml
+    index_rps: 10
+report: heap-sweep

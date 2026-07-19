@@ -1,0 +1,42 @@
+title: "SolrCloud anatomy: nodes, shards, replicas, ZooKeeper"
+requires: "a running cluster (solrlab up) with at least one collection"
+intro: |
+  Ten minutes on what the pieces actually are — against your real cluster,
+  not a diagram.
+steps:
+  - say: |
+      A NODE is one Solr JVM. A COLLECTION is a logical index. A SHARD is a
+      horizontal slice of a collection's documents. A REPLICA is one physical
+      copy of one shard, living on some node. ZooKeeper holds the map of all
+      of it — which replicas exist, where they live, who leads.
+
+      Let's look at yours:
+  - run: "solrlab status"
+  - pause: true
+  - say: |
+      Now the raw truth, straight from the Collections API — this is what
+      ZooKeeper's cluster state looks like:
+  - http:
+      path: "/admin/collections"
+      params: { action: CLUSTERSTATUS, wt: json }
+      show: "cluster.live_nodes"
+  - ask: "A document is routed to exactly one..."
+    options:
+      - "node"
+      - "shard"
+      - "replica"
+    answer: 1
+    why: >
+      Routing (by default a hash of the id) picks the shard. The document is
+      then stored on EVERY replica of that shard — that's what replication
+      means — and replicas live on nodes.
+  - ask: "If a collection has 2 shards with replicationFactor 2, how many cores exist?"
+    options: ["2", "4", "depends on the number of nodes"]
+    answer: 1
+    why: >
+      2 shards x 2 copies = 4 replicas = 4 cores. Nodes don't change the
+      count, only where those cores are placed.
+  - say: |
+      Key mental model: nodes are hardware, shards are math, replicas are
+      files. Solr's job is keeping the three in agreement; ZooKeeper's job is
+      remembering what "agreement" currently means.
