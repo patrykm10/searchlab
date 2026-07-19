@@ -50,7 +50,11 @@ h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.1em;
 
 /* ---------- controls ---------- */
 .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
-.cards.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
+#tuningblock { margin-top: 30px; border-top: 1.5px solid var(--line); padding-top: 24px; }
+#tuningblock h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 4px; }
+#tuningblock > .desc { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+#knobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px 40px; }
 .knob { margin-bottom: 14px; }
 .knob .krow { display: flex; align-items: baseline; justify-content: space-between; }
 .knob .krow label { color: var(--ink); font-family: var(--sans); font-size: 13px;
@@ -193,7 +197,7 @@ canvas { width: 100%; height: 150px; display: block;
 <section id="controls">
   <h2>Controls</h2>
   <div id="demonote">Demo mode — controls disabled</div>
-  <div class="cards four">
+  <div class="cards">
 
     <div class="card">
       <h3>Load test</h3>
@@ -236,13 +240,15 @@ canvas { width: 100%; height: 150px; display: block;
       </div>
     </div>
 
-    <div class="card">
-      <h3>Tuning</h3>
-      <div class="desc">Adjust how the engine behaves. Changes go live within seconds.</div>
-      <div id="knobs"><span class="desc">Loading current settings…</span></div>
-    </div>
-
   </div>
+
+  <div id="tuningblock">
+    <h3>Tuning</h3>
+    <div class="desc">Adjust how the engine behaves. Changes go live within seconds — no restart.</div>
+    <div id="tuning-note" class="desc" style="display:none"></div>
+    <div id="knobs"><span class="desc">Loading current settings…</span></div>
+  </div>
+
   <div id="strip"></div>
 </section>
 
@@ -464,6 +470,9 @@ async function loadTuning(collection) {
       $("knobs").innerHTML = `<span class="desc">${esc(out.error || "Not available.")}</span>`;
       return;
     }
+    const note = $("tuning-note");
+    note.style.display = out.note ? "block" : "none";
+    note.textContent = out.note || "";
     $("knobs").innerHTML = Object.entries(out.registry).map(([name, k]) => {
       const val = out.values[name] ?? k.default;
       return `<div class="knob">

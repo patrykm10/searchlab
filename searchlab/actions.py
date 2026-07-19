@@ -177,10 +177,10 @@ class ActionRunner:
         if self.spec.engine != "solr":
             return {"ok": False, "error": "Tuning is Solr-only for now."}
         try:
-            values = tuning.read_tuning(self.spec, collection)
+            state = tuning.tuning_state(self.spec, collection)
         except Exception as e:
             return {"ok": False, "error": str(e)}
-        return {"ok": True, "values": values, "registry": tuning.registry()}
+        return {"ok": True, **state}
 
     def tune(self, collection: str, name: str, value: float) -> dict:
         if not collection:

@@ -130,6 +130,10 @@ def wait_healthy(spec: ClusterSpec, timeout: int = 180) -> None:
 
 def create_collection(spec: ClusterSpec, name: str, shards: int = 1,
                       replicas: int = 1, config_set: str = "_default") -> None:
+    if spec.engine == "solr" and config_set == "_default":
+        from .configset import CONFIGSET_NAME, ensure_lab_configset
+        if ensure_lab_configset(spec):
+            config_set = CONFIGSET_NAME
     spec.eng().create_index(spec, name, shards, replicas, config_set)
 
 

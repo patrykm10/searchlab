@@ -1,12 +1,19 @@
 """Live-tunable Solr settings, exposed to the control panel as plain knobs.
 
-Built on Solr's Config API: `set-property` writes an overlay to ZooKeeper
-and the affected cores reload automatically — the knob takes effect within
-seconds, no restart. Only properties on Solr's editable whitelist are
-offered, each described in terms of the trade-off it controls rather than
-its solrconfig.xml path.
+Two mechanisms, one UX:
 
-Solr-only for now; ES/OS index-settings equivalents can join later.
+- Whitelist knobs use the Config API's `set-property` (commit timing, cache
+  sizes/autowarm) — Solr writes an overlay to ZooKeeper and reloads the
+  affected cores automatically.
+- Merge/indexing knobs (`user_prop: True`) aren't on Solr's editable
+  whitelist, so the lab's configset parameterizes them as ${searchlab.*}
+  references in solrconfig.xml (see configset.py) and `set-user-property`
+  makes them live the same way. On collections created without the lab
+  configset these knobs are omitted from the API response rather than
+  silently doing nothing.
+
+Either way: knob turn -> overlay in ZK -> automatic core reload -> live in
+seconds, no restart. Solr-only for now; ES/OS equivalents can join later.
 """
 
 from __future__ import annotations
@@ -48,13 +55,77 @@ KNOBS: dict[str, dict] = {
                 "the same searches repeat; costs memory.",
         "unit": "entries", "min": 64, "max": 8192, "default": 512, "scale": 1,
     },
+    "doc_cache": {
+        "path": "query.documentCache.size",
+        "label": "Document cache size",
+        "desc": "How many fetched documents are kept in memory. Helps when "
+                "the same documents appear in many result pages.",
+        "unit": "entries", "min": 64, "max": 8192, "default": 512, "scale": 1,
+    },
+    "filter_autowarm": {
+        "path": "query.filterCache.autowarmCount",
+        "label": "Cache pre-warming",
+        "desc": "How many filter-cache entries are recomputed after each "
+                "commit. More keeps queries fast right after a commit, but "
+                "makes each commit slower.",
+        "unit": "entries", "min": 0, "max": 512, "default": 0, "scale": 1,
+    },
+    "commit_max_docs": {
+        "path": "updateHandler.autoCommit.maxDocs",
+        "label": "Save after N documents",
+        "desc": "Also save to disk once this many new documents pile up, "
+                "regardless of the time interval. Useful under heavy "
+                "indexing bursts.",
+        "unit": "docs", "min": 1000, "max": 1000000, "default": 25000, "scale": 1,
+    },
+    # ---- merge/indexing knobs: need the lab configset (user properties) ----
+    "ram_buffer_mb": {
+        "path": "searchlab.ramBufferMB", "user_prop": True,
+        "config_probe": "indexConfig.ramBufferSizeMB",
+        "label": "Indexing memory buffer",
+        "desc": "How much indexed data is held in memory before being "
+                "written out as a new segment. Bigger means fewer, larger "
+                "segments and less merge churn — at the cost of memory.",
+        "unit": "MB", "min": 16, "max": 2048, "default": 100, "scale": 1,
+    },
+    "segments_per_tier": {
+        "path": "searchlab.segmentsPerTier", "user_prop": True,
+        "config_probe": "indexConfig.mergePolicyFactory",
+        "label": "Merge threshold",
+        "desc": "How many segments are allowed to accumulate before they "
+                "get merged. Lower keeps the index compact and searches "
+                "fast but burns more CPU and disk on merging.",
+        "unit": "segments", "min": 2, "max": 50, "default": 10, "scale": 1,
+    },
+    "max_merged_mb": {
+        "path": "searchlab.maxMergedSegMB", "user_prop": True,
+        "config_probe": "indexConfig.mergePolicyFactory",
+        "label": "Largest merged segment",
+        "desc": "The biggest segment the merger will create. Smaller spreads "
+                "the index over more segments; bigger concentrates it but "
+                "makes the heaviest merges heavier.",
+        "unit": "MB", "min": 256, "max": 20480, "default": 5120, "scale": 1,
+    },
+    "deletes_pct": {
+        "path": "searchlab.deletesPctAllowed", "user_prop": True,
+        "config_probe": "indexConfig.mergePolicyFactory",
+        "label": "Deleted-document tolerance",
+        "desc": "What share of the index may be dead (updated or deleted) "
+                "documents before merging cleans them out. Lower keeps the "
+                "index lean; higher defers the cleanup cost.",
+        "unit": "%", "min": 20, "max": 50, "default": 33, "scale": 1,
+    },
 }
 
 
-def registry() -> dict:
-    """Knob metadata for the UI (everything except the Solr path)."""
-    return {name: {k: v for k, v in spec.items() if k != "path"}
-            for name, spec in KNOBS.items()}
+_META_KEYS = ("path", "user_prop", "config_probe")
+
+
+def registry(names=None) -> dict:
+    """Knob metadata for the UI (internal wiring keys stripped)."""
+    return {name: {k: v for k, v in spec.items() if k not in _META_KEYS}
+            for name, spec in KNOBS.items()
+            if names is None or name in names}
 
 
 def _dig(config: dict, dotted: str):
@@ -66,20 +137,55 @@ def _dig(config: dict, dotted: str):
     return cur
 
 
-def read_tuning(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> dict:
-    """Current effective knob values (in UI units) from the collection config."""
+def _knob_available(knob: dict, config: dict) -> bool:
+    """User-prop knobs only work when the lab configset parameterized them."""
+    if not knob.get("user_prop"):
+        return True
+    return _dig(config, knob["config_probe"]) is not None
+
+
+def tuning_state(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> dict:
+    """Current values + registry for the knobs this collection supports."""
     with httpx.Client(timeout=timeout) as client:
         r = client.get(f"{spec.base_url()}/{collection}/config", params={"wt": "json"})
         r.raise_for_status()
         config = r.json().get("config", {})
-    out: dict[str, float | int | None] = {}
+        try:
+            r = client.get(f"{spec.base_url()}/{collection}/config/overlay",
+                           params={"wt": "json"})
+            r.raise_for_status()
+            userprops = r.json().get("overlay", {}).get("userProps", {})
+        except httpx.HTTPError:
+            userprops = {}
+
+    values: dict[str, float | int | None] = {}
+    merge_missing = False
     for name, knob in KNOBS.items():
-        raw = _dig(config, knob["path"])
+        if not _knob_available(knob, config):
+            merge_missing = True
+            continue
+        raw = userprops.get(knob["path"]) if knob.get("user_prop") \
+            else _dig(config, knob["path"])
+        if isinstance(raw, str):
+            try:
+                raw = float(raw)
+            except ValueError:
+                raw = None
         if isinstance(raw, (int, float)) and raw > 0:
-            out[name] = round(raw / knob["scale"], 3)
+            values[name] = round(raw / knob["scale"], 3)
         else:
-            out[name] = None  # unset/disabled in config; UI shows the default
+            values[name] = None  # unset/disabled; UI shows the default
+    out = {"values": values, "registry": registry(values.keys())}
+    if merge_missing:
+        out["note"] = ("Merge and indexing-buffer knobs need a collection created "
+                       "by this version of searchlab — recreate the collection to "
+                       "enable them.")
     return out
+
+
+def read_tuning(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> dict:
+    """Current effective knob values (in UI units); see tuning_state."""
+    return tuning_state(spec, collection, timeout)["values"]
 
 
 def apply_tuning(spec: ClusterSpec, collection: str, name: str, value: float,
@@ -92,8 +198,9 @@ def apply_tuning(spec: ClusterSpec, collection: str, name: str, value: float,
         raise ValueError(
             f"{knob['label']} must be between {knob['min']} and {knob['max']} {knob['unit']}.")
     solr_value = int(value * knob["scale"])
+    command = "set-user-property" if knob.get("user_prop") else "set-property"
     with httpx.Client(timeout=timeout) as client:
         r = client.post(f"{spec.base_url()}/{collection}/config",
-                        json={"set-property": {knob["path"]: solr_value}})
+                        json={command: {knob["path"]: solr_value}})
         r.raise_for_status()
         return r.json()
