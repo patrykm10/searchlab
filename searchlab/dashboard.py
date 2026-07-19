@@ -185,6 +185,15 @@ def make_handler(spec: ClusterSpec, demo: bool,
                     snap["insights"] = insights.analyze(snap)
                 snap["actions"] = runner.state() if runner else {"demo": True}
                 self._json(200, snap)
+            elif path == "/api/tuning":
+                if runner is None:
+                    return self._json(200, {"ok": False, "error": "Demo mode."})
+                qs = parse_qs(urlparse(self.path).query)
+                coll = (qs.get("collection") or [""])[0]
+                try:
+                    self._json(200, runner.read_tuning(coll))
+                except (SystemExit, Exception) as e:  # noqa: BLE001
+                    self._json(500, {"ok": False, "error": str(e) or type(e).__name__})
             elif path == "/api/logs":
                 if logs is None:
                     return self._json(200, {"latest": 0, "lines": [], "error": None})
@@ -214,6 +223,9 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return runner.commit(coll)
             if path == "/api/optimize":
                 return runner.optimize(coll)
+            if path == "/api/tune":
+                return runner.tune(coll, str(body.get("name", "")),
+                                   float(body.get("value", 0)))
             return {"ok": False, "error": f"unknown action: {path}"}
 
         def do_POST(self):

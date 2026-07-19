@@ -15,6 +15,7 @@ from concurrent.futures import Future
 from pathlib import Path
 
 from . import cluster as cl
+from . import tuning
 from .datagen import generate_to_file
 from .indexer import index_file
 from .loadtest import LoadControl, run_load
@@ -167,6 +168,33 @@ class ActionRunner:
 
         threading.Thread(target=job, daemon=True).start()
         return {"ok": True}
+
+    # -------------------------------------------------------------- tuning --
+
+    def read_tuning(self, collection: str) -> dict:
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Tuning is Solr-only for now."}
+        try:
+            values = tuning.read_tuning(self.spec, collection)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "values": values, "registry": tuning.registry()}
+
+    def tune(self, collection: str, name: str, value: float) -> dict:
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Tuning is Solr-only for now."}
+        try:
+            tuning.apply_tuning(self.spec, collection, name, value)
+        except Exception as e:
+            return self._done("tune", False, str(e))
+        knob = tuning.KNOBS[name]
+        return self._done(
+            "tune", True,
+            f"{knob['label']} set to {value:g} {knob['unit']} — live within a few seconds.")
 
     # ----------------------------------------------------------------- state --
 
