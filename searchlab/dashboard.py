@@ -29,6 +29,7 @@ import httpx
 from . import metrics as m
 from .actions import ActionRunner
 from .cluster import WORKDIR, ClusterSpec, cluster_overview
+from .insights import InsightsEngine
 from .logstream import FakeLogStream, LogStream
 
 
@@ -157,6 +158,7 @@ def make_handler(spec: ClusterSpec, demo: bool,
     demo_state = _DemoState(spec) if demo else None
     page = _load_page()
     lock = threading.Lock()
+    insights = InsightsEngine()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # quiet
@@ -180,6 +182,7 @@ def make_handler(spec: ClusterSpec, demo: bool,
             elif path == "/api/snapshot":
                 with lock:
                     snap = demo_state.snapshot() if demo_state else _live_snapshot(spec)
+                    snap["insights"] = insights.analyze(snap)
                 snap["actions"] = runner.state() if runner else {"demo": True}
                 self._json(200, snap)
             elif path == "/api/logs":
