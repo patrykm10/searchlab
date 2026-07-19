@@ -185,6 +185,15 @@ def make_handler(spec: ClusterSpec, demo: bool,
                     snap["insights"] = insights.analyze(snap)
                 snap["actions"] = runner.state() if runner else {"demo": True}
                 self._json(200, snap)
+            elif path == "/api/topology":
+                if runner is None:
+                    return self._json(200, {"ok": False, "error": "Demo mode."})
+                qs = parse_qs(urlparse(self.path).query)
+                coll = (qs.get("collection") or [""])[0]
+                try:
+                    self._json(200, runner.topology(coll))
+                except (SystemExit, Exception) as e:  # noqa: BLE001
+                    self._json(500, {"ok": False, "error": str(e) or type(e).__name__})
             elif path == "/api/tuning":
                 if runner is None:
                     return self._json(200, {"ok": False, "error": "Demo mode."})
@@ -226,6 +235,12 @@ def make_handler(spec: ClusterSpec, demo: bool,
             if path == "/api/tune":
                 return runner.tune(coll, str(body.get("name", "")),
                                    float(body.get("value", 0)))
+            if path == "/api/replica/add":
+                return runner.add_replica(coll, str(body.get("shard", "")),
+                                          str(body.get("type", "NRT")))
+            if path == "/api/replica/remove":
+                return runner.remove_replica(coll, str(body.get("shard", "")),
+                                             str(body.get("replica", "")))
             return {"ok": False, "error": f"unknown action: {path}"}
 
         def do_POST(self):

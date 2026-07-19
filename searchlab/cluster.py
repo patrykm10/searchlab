@@ -146,6 +146,59 @@ def cluster_overview(spec: ClusterSpec) -> dict:
     return spec.eng().cluster_overview(spec)
 
 
+def collection_detail(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> dict:
+    """Shard/replica topology from CLUSTERSTATUS (Solr only).
+
+    {shards: {name: {replicas: {rname: {node, type, state, leader}}}}}
+    """
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(f"{spec.base_url()}/admin/collections",
+                       params={"action": "CLUSTERSTATUS", "collection": collection,
+                               "wt": "json"})
+        r.raise_for_status()
+        coll = r.json()["cluster"]["collections"][collection]
+    shards: dict = {}
+    for sname, shard in coll.get("shards", {}).items():
+        replicas = {}
+        for rname, rep in shard.get("replicas", {}).items():
+            replicas[rname] = {
+                "node": rep.get("node_name", "").split(":")[0],
+                "core": rep.get("core"),
+                "type": rep.get("type", "NRT"),
+                "state": rep.get("state"),
+                "leader": rep.get("leader") == "true",
+            }
+        shards[sname] = {"state": shard.get("state"), "replicas": replicas}
+    return {"shards": shards}
+
+
+REPLICA_TYPES = ("NRT", "TLOG", "PULL")
+
+
+def add_replica(spec: ClusterSpec, collection: str, shard: str,
+                replica_type: str = "NRT", timeout: float = 180.0) -> dict:
+    """ADDREPLICA: place a new replica of `shard` somewhere in the cluster."""
+    if replica_type not in REPLICA_TYPES:
+        raise ValueError(f"Replica type must be one of {', '.join(REPLICA_TYPES)}.")
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(f"{spec.base_url()}/admin/collections",
+                       params={"action": "ADDREPLICA", "collection": collection,
+                               "shard": shard, "type": replica_type, "wt": "json"})
+        r.raise_for_status()
+        return r.json()
+
+
+def delete_replica(spec: ClusterSpec, collection: str, shard: str, replica: str,
+                   timeout: float = 120.0) -> dict:
+    """DELETEREPLICA: remove one named replica from a shard."""
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(f"{spec.base_url()}/admin/collections",
+                       params={"action": "DELETEREPLICA", "collection": collection,
+                               "shard": shard, "replica": replica, "wt": "json"})
+        r.raise_for_status()
+        return r.json()
+
+
 def commit(spec: ClusterSpec, collection: str, timeout: float = 60.0) -> dict:
     """Hard commit (Solr) / refresh (ES/OS): make recent updates searchable.
 

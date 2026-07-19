@@ -136,12 +136,22 @@ canvas { width: 100%; height: 150px; display: block;
   vertical-align: -1px; }
 
 /* summary table */
-#summary { margin-top: 30px; font-family: var(--mono); font-size: 12px;
+.mtable { margin-top: 30px; font-family: var(--mono); font-size: 12px;
   font-variant-numeric: tabular-nums; width: 100%; border-collapse: collapse; }
-#summary td, #summary th { text-align: left; padding: 7px 18px 7px 0;
+.mtable td, .mtable th { text-align: left; padding: 7px 18px 7px 0;
   border-top: 1px solid var(--line); }
-#summary th { font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em;
+.mtable th { font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em;
   font-size: 10px; color: var(--faint); border-top: none; }
+.leadchip { color: var(--cobalt); border: 1px solid var(--cobalt); font-size: 9px;
+  padding: 0 5px; letter-spacing: 0.08em; }
+.xbtn { background: none; border: none; cursor: pointer; color: var(--faint);
+  font-family: var(--mono); font-size: 13px; padding: 0 4px; }
+.xbtn:hover { color: var(--cobalt); }
+.xbtn:disabled { color: var(--line); cursor: default; }
+#topo-controls { margin-top: 16px; display: flex; align-items: baseline; gap: 12px;
+  flex-wrap: wrap; }
+.state-active { color: var(--cobalt); }
+.state-recovering, .state-down { color: var(--ink); font-weight: 700; }
 .health-GREEN { color: var(--cobalt); }
 .health-YELLOW, .health-RED { color: var(--ink); font-weight: 700; }
 
@@ -155,6 +165,26 @@ canvas { width: 100%; height: 150px; display: block;
 #log .warn { color: var(--ink); border-left: 2px solid var(--cobalt); padding-left: 8px;
   display: block; }
 #log .sys { color: var(--faint); font-style: italic; display: block; }
+#log .tag { display: inline-block; font-size: 9px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--cobalt); border: 1px solid var(--cobalt);
+  padding: 0 5px; margin-right: 7px; cursor: help; white-space: nowrap;
+  vertical-align: 1px; }
+
+/* ---------- chart range + hover ---------- */
+#ranges { float: right; display: inline-flex; gap: 14px; }
+.rangebtn { background: none; border: none; cursor: pointer; font-family: var(--mono);
+  font-size: 11px; letter-spacing: 0.08em; color: var(--faint); padding: 0 2px 2px;
+  border-bottom: 1.5px solid transparent; }
+.rangebtn:hover { color: var(--cobalt); }
+.rangebtn.active { color: var(--cobalt); border-bottom-color: var(--cobalt); }
+#tip { position: fixed; display: none; background: #fff; border: 1.5px solid var(--ink);
+  font-family: var(--mono); font-size: 11px; padding: 8px 10px; pointer-events: none;
+  z-index: 50; min-width: 150px; font-variant-numeric: tabular-nums; }
+#tip .twhen { color: var(--faint); font-size: 10px; margin-bottom: 5px; }
+#tip .trow { display: flex; gap: 14px; justify-content: space-between; }
+#tip i { width: 8px; height: 8px; display: inline-block; margin-right: 6px; }
+#xline { position: fixed; display: none; width: 1px; background: var(--cobalt);
+  opacity: 0.45; pointer-events: none; z-index: 49; }
 
 /* ---------- health ---------- */
 .finding { padding: 14px 0 14px 18px; border-top: 1px solid var(--line); }
@@ -253,7 +283,13 @@ canvas { width: 100%; height: 150px; display: block;
 </section>
 
 <section>
-  <h2>Live signals</h2>
+  <h2>Live signals
+    <span id="ranges">
+      <button class="rangebtn active" data-w="300">5m</button>
+      <button class="rangebtn" data-w="900">15m</button>
+      <button class="rangebtn" data-w="3600">1h</button>
+    </span>
+  </h2>
   <div class="chartgrid">
     <div class="chart">
       <h4>Load test latency <b id="v-lt">—</b></h4>
@@ -276,7 +312,22 @@ canvas { width: 100%; height: 150px; display: block;
       <div class="legend" id="lg-rate"></div>
     </div>
   </div>
-  <table id="summary"></table>
+  <table id="summary" class="mtable"></table>
+</section>
+
+<section id="topo-section" style="display:none">
+  <h2>Topology</h2>
+  <table id="topo" class="mtable"></table>
+  <div id="topo-controls">
+    <label for="topo-shard">Add a replica to</label>
+    <select id="topo-shard"></select>
+    <select id="topo-type">
+      <option value="NRT" title="Full copy that indexes in real time and can become leader. The default.">NRT — real-time copy</option>
+      <option value="TLOG" title="Follows the leader's transaction log instead of indexing itself; cheaper to run, can still take over as leader.">TLOG — log follower</option>
+      <option value="PULL" title="Read-only copy that periodically pulls the finished index; cheapest, adds query capacity, can never become leader.">PULL — read-only copy</option>
+    </select>
+    <button class="btn" id="btn-addreplica">Add replica</button>
+  </div>
 </section>
 
 <section>
@@ -293,15 +344,21 @@ canvas { width: 100%; height: 150px; display: block;
 
 <script>
 "use strict";
-const WINDOW_S = 300, POLL_MS = 2000;
+const KEEP_S = 3600, POLL_MS = 2000;
+let windowS = 300;   // selectable: 300 / 900 / 3600
 const INKS = ["#14161a", "#2743c7", "#5b6068", "#9aa0a8"];
 const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [] };
+const chartMeta = {};   // canvas id -> data for hover hit-testing
 let lastOk = 0, logCursor = 0, demo = false, dragging = false, rpsDebounce = null;
 
 const $ = id => document.getElementById(id);
 
-function push(arr, t, v) { arr.push([t, v]); const cut = t - WINDOW_S;
+function push(arr, t, v) { arr.push([t, v]); const cut = t - KEEP_S;
   while (arr.length && arr[0][0] < cut) arr.shift(); }
+
+function windowLabel() {
+  return windowS >= 3600 ? "-1 h" : "-" + Math.round(windowS / 60) + " min";
+}
 
 function fmt(n, d = 0) { return n == null ? "—" : Number(n).toFixed(d); }
 
@@ -315,26 +372,29 @@ function drawChart(canvas, seriesMap, colors, unit) {
   const [g, W, H] = setupCanvas(canvas), now = Date.now() / 1000;
   g.clearRect(0, 0, W, H);
   g.strokeStyle = "rgba(20,22,26,.06)"; g.lineWidth = 1;
-  for (let x = W; x > 0; x -= W / (WINDOW_S / 30)) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  const gridStep = windowS >= 3600 ? 600 : windowS >= 900 ? 120 : 30;
+  for (let x = W; x > 0; x -= W / (windowS / gridStep)) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
   for (const f of [.25, .5, .75]) { g.beginPath(); g.moveTo(0, H * f); g.lineTo(W, H * f); g.stroke(); }
 
   let vmax = 1;
-  for (const s of Object.values(seriesMap)) for (const [, v] of s) vmax = Math.max(vmax, v);
+  const cut = now - windowS;
+  for (const s of Object.values(seriesMap))
+    for (const [t, v] of s) if (t >= cut) vmax = Math.max(vmax, v);
   vmax *= 1.15;
 
   const names = Object.keys(seriesMap).sort();
   names.forEach((name, i) => {
-    const s = seriesMap[name]; if (!s.length) return;
+    const s = seriesMap[name].filter(([t]) => t >= cut); if (!s.length) return;
     g.strokeStyle = colors[i % colors.length];
     g.lineWidth = 1.5; g.lineJoin = "round"; g.lineCap = "round";
     g.beginPath();
     s.forEach(([t, v], j) => {
-      const x = W - (now - t) / WINDOW_S * W, y = H - (v / vmax) * (H - 8) - 4;
+      const x = W - (now - t) / windowS * W, y = H - (v / vmax) * (H - 8) - 4;
       j ? g.lineTo(x, y) : g.moveTo(x, y);
     });
     g.stroke();
     const [t, v] = s[s.length - 1];
-    const x = W - (now - t) / WINDOW_S * W, y = H - (v / vmax) * (H - 8) - 4;
+    const x = W - (now - t) / windowS * W, y = H - (v / vmax) * (H - 8) - 4;
     g.fillStyle = g.strokeStyle;
     g.beginPath(); g.arc(x, y, 2.5, 0, 7); g.fill();
   });
@@ -342,8 +402,10 @@ function drawChart(canvas, seriesMap, colors, unit) {
   g.fillStyle = "#9aa0a8";
   g.font = "10px ui-monospace, monospace";
   g.fillText(vmax.toFixed(0) + " " + unit, 5, 12);
-  g.fillText("-5 min", 5, H - 6);
+  g.fillText(windowLabel(), 5, H - 6);
   g.fillText("now", W - 30, H - 6);
+
+  chartMeta[canvas.id] = { seriesMap, colors, unit, now, W, H };
 }
 
 function legend(el, names, colors) {
@@ -512,6 +574,102 @@ function renderHealth(findings) {
      <p>${esc(f.detail)}</p></div>`).join("");
 }
 
+/* ---------- chart range + hover ---------- */
+
+for (const b of document.querySelectorAll(".rangebtn")) {
+  b.addEventListener("click", () => {
+    windowS = Number(b.dataset.w);
+    document.querySelectorAll(".rangebtn").forEach(x => x.classList.toggle("active", x === b));
+    poll();
+  });
+}
+
+const tip = document.createElement("div"); tip.id = "tip"; document.body.appendChild(tip);
+const xline = document.createElement("div"); xline.id = "xline"; document.body.appendChild(xline);
+
+function attachHover(c) {
+  c.addEventListener("mousemove", ev => {
+    const meta = chartMeta[c.id]; if (!meta) return;
+    const r = c.getBoundingClientRect();
+    const t = meta.now - (meta.W - (ev.clientX - r.left)) / meta.W * windowS;
+    const names = Object.keys(meta.seriesMap).sort();
+    let rows = "";
+    names.forEach((name, i) => {
+      const s = meta.seriesMap[name]; if (!s.length) return;
+      let best = null, bd = Infinity;
+      for (const [st, sv] of s) {
+        const d = Math.abs(st - t);
+        if (d < bd) { bd = d; best = sv; }
+      }
+      if (best == null || bd > Math.max(windowS / 40, 6)) return;
+      rows += `<div class="trow"><span><i style="background:${meta.colors[i % meta.colors.length]}"></i>${esc(name)}</span><b>${fmt(best, 1)} ${esc(meta.unit)}</b></div>`;
+    });
+    if (!rows) { tip.style.display = "none"; xline.style.display = "none"; return; }
+    tip.innerHTML = `<div class="twhen">${new Date(t * 1000).toLocaleTimeString()}</div>` + rows;
+    tip.style.display = "block";
+    tip.style.left = Math.min(ev.clientX + 14, window.innerWidth - 190) + "px";
+    tip.style.top = (ev.clientY + 14) + "px";
+    xline.style.display = "block";
+    xline.style.left = ev.clientX + "px";
+    xline.style.top = r.top + "px";
+    xline.style.height = r.height + "px";
+  });
+  c.addEventListener("mouseleave", () => {
+    tip.style.display = "none"; xline.style.display = "none";
+  });
+}
+document.querySelectorAll("canvas").forEach(attachHover);
+
+/* ---------- topology ---------- */
+
+async function pollTopology() {
+  if (demo || !coll()) return;
+  try {
+    const r = await fetch("/api/topology?collection=" + encodeURIComponent(coll()));
+    const out = await r.json();
+    if (!out.ok) { $("topo-section").style.display = "none"; return; }
+    $("topo-section").style.display = "block";
+    const busy = out.busy;
+    let rows = `<tr><th>Shard</th><th>Replica</th><th>Node</th><th>Type</th>
+      <th>State</th><th></th><th></th></tr>`;
+    const shardNames = Object.keys(out.shards).sort();
+    for (const sname of shardNames) {
+      const reps = out.shards[sname].replicas;
+      for (const [rname, rep] of Object.entries(reps).sort()) {
+        rows += `<tr><td>${esc(sname)}</td><td>${esc(rname)}</td>
+          <td>${esc(rep.node)}</td><td>${esc(rep.type)}</td>
+          <td class="state-${esc(rep.state)}">${esc(rep.state)}</td>
+          <td>${rep.leader ? '<span class="leadchip">LEADER</span>' : ""}</td>
+          <td><button class="xbtn" title="Remove this replica" ${busy ? "disabled" : ""}
+            data-shard="${esc(sname)}" data-replica="${esc(rname)}">&times;</button></td></tr>`;
+      }
+    }
+    $("topo").innerHTML = rows;
+    for (const b of $("topo").querySelectorAll(".xbtn")) {
+      b.addEventListener("click", async () => {
+        const out = await post("/api/replica/remove",
+          { collection: coll(), shard: b.dataset.shard, replica: b.dataset.replica });
+        if (out.ok) showStrip("Removing replica " + b.dataset.replica + "…", false);
+        setTimeout(pollTopology, 1500);
+      });
+    }
+    const ssel = $("topo-shard");
+    if (ssel.dataset.opts !== shardNames.join()) {
+      ssel.dataset.opts = shardNames.join();
+      ssel.innerHTML = shardNames.map(s => `<option>${esc(s)}</option>`).join("");
+    }
+    $("btn-addreplica").disabled = busy;
+  } catch (e) { /* retry next tick */ }
+}
+
+$("btn-addreplica").addEventListener("click", async () => {
+  const out = await post("/api/replica/add",
+    { collection: coll(), shard: $("topo-shard").value, type: $("topo-type").value });
+  if (out.ok) showStrip("Adding a " + $("topo-type").value + " replica to "
+    + $("topo-shard").value + " — it will appear once it syncs…", false);
+  setTimeout(pollTopology, 1500);
+});
+
 /* ---------- render ---------- */
 
 function render(snap) {
@@ -578,7 +736,7 @@ function render(snap) {
       hist.ltp50.length = 0; hist.ltp99.length = 0;
     }
   }
-  drawChart($("c-lt"), { "1 p50": hist.ltp50, "2 p99": hist.ltp99 }, ["#9aa0a8", "#2743c7"], "ms");
+  drawChart($("c-lt"), { p50: hist.ltp50, p99: hist.ltp99 }, ["#9aa0a8", "#2743c7"], "ms");
   legend($("lg-lt"), hist.ltp99.length ? ["p50", "p99"] : [], ["#9aa0a8", "#2743c7"]);
 
   drawChart($("c-p99"), hist.p99, INKS, "ms");
@@ -617,11 +775,13 @@ async function pollLogs() {
     }
     if (out.lines && out.lines.length) {
       const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
-      const html = out.lines.map(([, line]) => {
-        const esc = line.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-        if (/\bWARN\b|\bERROR\b/.test(line)) return `<span class="warn">${esc}</span>`;
-        if (line.startsWith("[log stream")) return `<span class="sys">${esc}</span>`;
-        return esc + "\n";
+      const html = out.lines.map(([, line, event]) => {
+        const e = line.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+        const chip = event
+          ? `<span class="tag" title="${esc(event.desc)}">${esc(event.tag)}</span>` : "";
+        if (/\bWARN\b|\bERROR\b/.test(line)) return `<span class="warn">${chip}${e}</span>`;
+        if (line.startsWith("[log stream")) return `<span class="sys">${e}</span>`;
+        return chip + e + "\n";
       }).join("");
       el.insertAdjacentHTML("beforeend", html);
       while (el.childNodes.length > 1000) el.removeChild(el.firstChild);
@@ -633,6 +793,7 @@ async function pollLogs() {
 
 setInterval(poll, POLL_MS); poll();
 setInterval(pollLogs, POLL_MS); pollLogs();
+setInterval(pollTopology, POLL_MS * 2); setTimeout(pollTopology, 500);
 </script>
 </body>
 </html>

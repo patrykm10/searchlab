@@ -124,10 +124,10 @@ def test_logstream_since_semantics():
         ls._append(f"line {i}\n")
     latest, lines = ls.since(0)
     assert latest == 3
-    assert [l for _, l in lines] == ["line 0", "line 1", "line 2"]  # stripped
+    assert [l for _, l, _ in lines] == ["line 0", "line 1", "line 2"]  # stripped
 
     latest, lines = ls.since(2)
-    assert [l for _, l in lines] == ["line 2"]
+    assert [l for _, l, _ in lines] == ["line 2"]
 
     latest, lines = ls.since(99)
     assert lines == []
@@ -141,6 +141,16 @@ def test_logstream_ring_buffer_trims():
     assert latest == 12
     assert len(lines) == 5
     assert lines[0][1] == "line 7"  # oldest retained
+
+
+def test_logstream_classifies_lines():
+    ls = LogStream(compose_file=Path("/dev/null"), maxlen=5)
+    ls._append("solr1 | INFO o.a.s.u.DirectUpdateHandler2 start commit{flags=0,openSearcher=true}")
+    ls._append("solr1 | INFO something entirely unremarkable")
+    _, lines = ls.since(0)
+    assert lines[0][2]["tag"] == "commit"
+    assert "searchable" in lines[0][2]["desc"]
+    assert lines[1][2] is None
 
 
 # ----------------------------------------------------------- handler smoke ---

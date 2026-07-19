@@ -44,6 +44,7 @@ class ActionRunner:
         self._index_future: Future | None = None
         self._index_meta: dict = {}
         self._optimizing = False
+        self._replica_busy = False
         self.last_action: dict | None = None
 
     # ------------------------------------------------------------- helpers --
@@ -168,6 +169,60 @@ class ActionRunner:
 
         threading.Thread(target=job, daemon=True).start()
         return {"ok": True}
+
+    # ------------------------------------------------------------ replicas --
+
+    def topology(self, collection: str) -> dict:
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Replica management is Solr-only for now."}
+        try:
+            detail = cl.collection_detail(self.spec, collection)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "busy": self._replica_busy, **detail}
+
+    def _replica_job(self, action: str, message: str, fn) -> dict:
+        with self._lock:
+            if self._replica_busy:
+                return {"ok": False, "error": "A replica change is already running."}
+            self._replica_busy = True
+
+        def job():
+            try:
+                fn()
+                self._done(action, True, message)
+            except Exception as e:
+                self._done(action, False, str(e))
+            finally:
+                self._replica_busy = False
+
+        threading.Thread(target=job, daemon=True).start()
+        return {"ok": True}
+
+    def add_replica(self, collection: str, shard: str, replica_type: str) -> dict:
+        if not collection or not shard:
+            return {"ok": False, "error": "Pick a collection and shard first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Replica management is Solr-only for now."}
+        if replica_type not in cl.REPLICA_TYPES:
+            return {"ok": False,
+                    "error": f"Replica type must be one of {', '.join(cl.REPLICA_TYPES)}."}
+        return self._replica_job(
+            "add_replica",
+            f"Added a {replica_type} replica to {shard} — it will sync and go active shortly.",
+            lambda: cl.add_replica(self.spec, collection, shard, replica_type))
+
+    def remove_replica(self, collection: str, shard: str, replica: str) -> dict:
+        if not collection or not shard or not replica:
+            return {"ok": False, "error": "Pick a replica to remove first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Replica management is Solr-only for now."}
+        return self._replica_job(
+            "remove_replica",
+            f"Removed replica {replica} from {shard}.",
+            lambda: cl.delete_replica(self.spec, collection, shard, replica))
 
     # -------------------------------------------------------------- tuning --
 

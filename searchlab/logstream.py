@@ -16,13 +16,16 @@ import time
 from collections import deque
 from pathlib import Path
 
+from .loglex import classify
+
 
 class LogStream:
-    """Tail cluster logs into a ring buffer of (seq, line) with monotonic seq."""
+    """Tail cluster logs into a ring buffer of (seq, line, event) triples,
+    where event is loglex's plain-language tag or None."""
 
     def __init__(self, compose_file: Path, maxlen: int = 2000):
         self.compose_file = compose_file
-        self._buf: deque[tuple[int, str]] = deque(maxlen=maxlen)
+        self._buf: deque[tuple[int, str, dict | None]] = deque(maxlen=maxlen)
         self._seq = 0
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
@@ -40,13 +43,14 @@ class LogStream:
     def since(self, seq: int) -> tuple[int, list[list]]:
         """Entries newer than `seq`, plus the latest seq for the next cursor."""
         with self._lock:
-            lines = [[s, line] for s, line in self._buf if s > seq]
+            lines = [[s, line, event] for s, line, event in self._buf if s > seq]
             return self._seq, lines
 
     def _append(self, line: str) -> None:
+        text = line.rstrip("\n")
         with self._lock:
             self._seq += 1
-            self._buf.append((self._seq, line.rstrip("\n")))
+            self._buf.append((self._seq, text, classify(text)))
 
     def _run(self) -> None:
         from .cluster import _compose_cmd
