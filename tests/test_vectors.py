@@ -9,9 +9,9 @@ import random
 import pytest
 from aiohttp import web
 
-from solrlab.datagen import generate
-from solrlab.loadtest import QueryPicker, run_load
-from solrlab.schema import fields_from_profile, mappings_from_profile, vector_field_types
+from searchlab.datagen import generate
+from searchlab.loadtest import QueryPicker, run_load
+from searchlab.schema import fields_from_profile, mappings_from_profile, vector_field_types
 
 VEC_PROFILE = {"fields": {
     "id": {"type": "id"},
@@ -72,7 +72,7 @@ def test_rand_vector_embedded_becomes_bracket_text():
 def test_shipped_vector_templates_load():
     from pathlib import Path
 
-    from solrlab.loadtest import load_queries
+    from searchlab.loadtest import load_queries
     root = Path(__file__).parent.parent / "queries"
     for f in ("vector-solr.yaml", "vector-es.yaml", "vector-os.yaml"):
         assert load_queries(root / f)
@@ -105,8 +105,8 @@ def test_es_vs_os_vector_mappings():
 def test_os_index_gets_knn_setting():
     # bulk shape sanity only; the create-index knn flag is asserted via the
     # settings dict the engine builds
-    import solrlab.engines as E
-    from solrlab.engines import get_engine
+    import searchlab.engines as E
+    from searchlab.engines import get_engine
     captured = {}
 
     class FakeResp:

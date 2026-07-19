@@ -1,11 +1,16 @@
-"""Live cluster dashboard: a strip-chart recorder for your SolrCloud.
+"""Live cluster control panel: watch and steer the lab from one page.
 
 Serves a single self-contained page (no CDN, no build step) that polls
-/api/snapshot and draws pen-recorder traces of p99 latency, heap, and request
-rate, plus node nameplates, cache meters, and update/merge counters.
+/api/snapshot and /api/logs, draws latency/heap/rate charts, tails cluster
+logs, and exposes controls — start/stop/ramp a load test, index documents,
+commit, merge — that POST back here and run on a background event loop.
+
+Must be started from the project directory: cluster state lives in
+./.searchlab (see cluster.WORKDIR), same as every other command.
 
 `--demo` synthesizes plausible signals (heap sawtooth, GC pauses, latency
-spikes) so the UI can be previewed without a running cluster.
+spikes, log lines) so the UI can be previewed without a running cluster;
+controls are disabled in demo mode.
 """
 
 from __future__ import annotations
@@ -17,11 +22,14 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
 from . import metrics as m
+from .actions import ActionRunner
 from .cluster import WORKDIR, ClusterSpec, cluster_overview
+from .logstream import FakeLogStream, LogStream
 
 
 def _live_snapshot(spec: ClusterSpec) -> dict:
@@ -36,7 +44,7 @@ def _live_snapshot(spec: ClusterSpec) -> dict:
 
 
 def _read_live_load() -> dict | None:
-    """Pick up rolling stats written by `solrlab load`; None if stale/absent."""
+    """Pick up rolling stats written by `searchlab load`; None if stale/absent."""
     path = WORKDIR / "live-load.json"
     try:
         data = json.loads(path.read_text())
@@ -141,10 +149,11 @@ class _DemoState:
 
 
 def _load_page() -> bytes:
-    return (resources.files("solrlab") / "templates" / "dashboard.html").read_bytes()
+    return (resources.files("searchlab") / "templates" / "dashboard.html").read_bytes()
 
 
-def make_handler(spec: ClusterSpec, demo: bool):
+def make_handler(spec: ClusterSpec, demo: bool,
+                 runner: ActionRunner | None = None, logs: LogStream | None = None):
     demo_state = _DemoState(spec) if demo else None
     page = _load_page()
     lock = threading.Lock()
@@ -161,24 +170,77 @@ def make_handler(spec: ClusterSpec, demo: bool):
             self.end_headers()
             self.wfile.write(body)
 
+        def _json(self, code: int, obj: dict):
+            self._send(code, json.dumps(obj).encode(), "application/json")
+
         def do_GET(self):
-            if self.path in ("/", "/index.html"):
+            path = urlparse(self.path).path
+            if path in ("/", "/index.html"):
                 self._send(200, page, "text/html; charset=utf-8")
-            elif self.path == "/api/snapshot":
+            elif path == "/api/snapshot":
                 with lock:
                     snap = demo_state.snapshot() if demo_state else _live_snapshot(spec)
-                self._send(200, json.dumps(snap).encode(), "application/json")
+                snap["actions"] = runner.state() if runner else {"demo": True}
+                self._json(200, snap)
+            elif path == "/api/logs":
+                if logs is None:
+                    return self._json(200, {"latest": 0, "lines": [], "error": None})
+                qs = parse_qs(urlparse(self.path).query)
+                try:
+                    since = int(qs.get("since", ["0"])[0])
+                except ValueError:
+                    since = 0
+                latest, lines = logs.since(since)
+                self._json(200, {"latest": latest, "lines": lines, "error": logs.error})
             else:
                 self._send(404, b"not found", "text/plain")
+
+        def _route_post(self, path: str, body: dict) -> dict:
+            if runner is None:
+                return {"ok": False, "error": "Controls are disabled in demo mode."}
+            coll = str(body.get("collection", "")).strip()
+            if path == "/api/load/start":
+                return runner.start_load(coll, float(body.get("rps", 0)))
+            if path == "/api/load/rps":
+                return runner.set_rps(float(body.get("rps", 0)))
+            if path == "/api/load/stop":
+                return runner.stop_load()
+            if path == "/api/index":
+                return runner.index_docs(coll, int(body.get("count", 0)))
+            if path == "/api/commit":
+                return runner.commit(coll)
+            if path == "/api/optimize":
+                return runner.optimize(coll)
+            return {"ok": False, "error": f"unknown action: {path}"}
+
+        def do_POST(self):
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                if not isinstance(body, dict):
+                    raise ValueError
+            except ValueError:
+                return self._json(400, {"ok": False, "error": "invalid JSON body"})
+            try:
+                out = self._route_post(urlparse(self.path).path, body)
+            except (SystemExit, Exception) as e:  # noqa: BLE001 — surface, don't die
+                return self._json(500, {"ok": False, "error": str(e) or type(e).__name__})
+            self._json(200 if out.get("ok") else 409, out)
 
     return Handler
 
 
 def serve(spec: ClusterSpec, port: int = 8990, demo: bool = False) -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(spec, demo))
-    mode = "demo signals" if demo else f"live cluster ({spec.solr_nodes} node(s))"
-    print(f"solrlab dashboard on http://localhost:{port}  [{mode}]  Ctrl-C to stop")
+    runner = None if demo else ActionRunner(spec)
+    logs = FakeLogStream() if demo else LogStream(WORKDIR / "docker-compose.yml")
+    logs.start()
+    server = ThreadingHTTPServer(("127.0.0.1", port),
+                                 make_handler(spec, demo, runner, logs))
+    mode = "demo signals, controls disabled" if demo else f"live cluster ({spec.solr_nodes} node(s))"
+    print(f"searchlab control panel on http://localhost:{port}  [{mode}]  Ctrl-C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         server.shutdown()
+    finally:
+        logs.stop()

@@ -1,4 +1,4 @@
-# solrlab data profile: e-commerce-ish shape with knobs for the pathologies
+# searchlab data profile: e-commerce-ish shape with knobs for the pathologies
 # that matter (cardinality, skew, text length, multivalued fields).
 fields:
   id:

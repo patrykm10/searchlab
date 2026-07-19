@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from solrlab.explain import explain_report, format_explain, format_timing
-from solrlab.learn import builtin_lessons, check_condition, dig, load_lesson, run_lesson
+from searchlab.explain import explain_report, format_explain, format_timing
+from searchlab.learn import builtin_lessons, check_condition, dig, load_lesson, run_lesson
 
 # -------------------------------------------------------------- conditions ---
 

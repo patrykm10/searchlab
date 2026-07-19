@@ -1,5 +1,5 @@
 # Which heap does this workload need? Six cells: 3 heap sizes x 2 collectors.
-# Run: solrlab sweep examples/heap-sweep.yaml   (expect several minutes)
+# Run: searchlab sweep examples/heap-sweep.yaml   (expect several minutes)
 collection: products
 base:
   engine: solr

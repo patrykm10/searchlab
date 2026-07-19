@@ -10,11 +10,11 @@ import pytest
 import yaml
 from aiohttp import web
 
-from solrlab.chaos import _container
-from solrlab.cluster import ClusterSpec, render_compose
-from solrlab.engines import get_engine
-from solrlab.indexer import index_file
-from solrlab.loadtest import QueryPicker, run_load
+from searchlab.chaos import _container
+from searchlab.cluster import ClusterSpec, render_compose
+from searchlab.engines import get_engine
+from searchlab.indexer import index_file
+from searchlab.loadtest import QueryPicker, run_load
 
 
 def test_engine_aliases_and_unknown():
@@ -86,10 +86,10 @@ def test_recursive_body_substitution():
 
 def test_chaos_node_names_per_engine():
     solr_spec = ClusterSpec(solr_nodes=2, zk_nodes=1)
-    assert _container(solr_spec, "2") == "solrlab-solr2"
-    assert _container(solr_spec, "zk1") == "solrlab-zk1"
+    assert _container(solr_spec, "2") == "searchlab-solr2"
+    assert _container(solr_spec, "zk1") == "searchlab-zk1"
     es_spec = ClusterSpec(engine="elasticsearch", solr_nodes=2)
-    assert _container(es_spec, "2") == "solrlab-es2"
+    assert _container(es_spec, "2") == "searchlab-es2"
     with pytest.raises(SystemExit):
         _container(es_spec, "zk1")  # no ZooKeeper in the ES world
 
@@ -175,7 +175,7 @@ async def test_es_metrics_normalization(mock_es):
 def test_shipped_es_queries_load():
     from pathlib import Path
 
-    from solrlab.loadtest import load_queries
+    from searchlab.loadtest import load_queries
     templates = load_queries(Path(__file__).parent.parent / "queries" / "es-default.yaml")
     assert any("body" in t for t in templates)
 
@@ -183,7 +183,7 @@ def test_shipped_es_queries_load():
 # ------------------------------------------------- ES schema + slow logs ---
 
 def test_es_mappings_from_profile():
-    from solrlab.schema import mappings_from_profile
+    from searchlab.schema import mappings_from_profile
     profile = {"fields": {
         "id": {"type": "id"},
         "body_t": {"type": "text"},
@@ -216,7 +216,7 @@ JSON_SLOWLOG = """\
 
 
 def test_parse_classic_slowlog(tmp_path):
-    from solrlab.replay import parse_log
+    from searchlab.replay import parse_log
     p = tmp_path / "slow.log"
     p.write_text(CLASSIC_SLOWLOG)
     entries = parse_log(p, engine="elasticsearch")
@@ -228,7 +228,7 @@ def test_parse_classic_slowlog(tmp_path):
 
 
 def test_parse_json_slowlog(tmp_path):
-    from solrlab.replay import parse_log
+    from searchlab.replay import parse_log
     p = tmp_path / "slow.json.log"
     p.write_text(JSON_SLOWLOG)
     entries = parse_log(p, engine="opensearch")
@@ -238,7 +238,7 @@ def test_parse_json_slowlog(tmp_path):
 
 
 async def test_replay_slowlog_against_mock_es(mock_es, tmp_path):
-    from solrlab.replay import parse_log, replay
+    from searchlab.replay import parse_log, replay
     p = tmp_path / "slow.log"
     p.write_text(CLASSIC_SLOWLOG)
     entries = parse_log(p, engine="elasticsearch")

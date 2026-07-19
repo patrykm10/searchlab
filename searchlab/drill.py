@@ -38,16 +38,16 @@ from .cluster import WORKDIR, ClusterSpec
 def load_drill(path: str | Path) -> dict:
     cfg = yaml.safe_load(Path(path).read_text())
     if not isinstance(cfg, dict) or "collection" not in cfg or "load" not in cfg:
-        sys.exit(f"solrlab: drill {path} needs at least 'collection' and 'load' sections")
+        sys.exit(f"searchlab: drill {path} needs at least 'collection' and 'load' sections")
     load = cfg["load"]
     if "rps" not in load or "duration" not in load:
-        sys.exit("solrlab: drill load section needs 'rps' and 'duration'")
+        sys.exit("searchlab: drill load section needs 'rps' and 'duration'")
     for s in cfg.get("chaos", []):
         if s.get("action") not in ch._ACTIONS or "at" not in s or "node" not in s:
-            sys.exit(f"solrlab: bad chaos step {s} — needs at/action/node, "
+            sys.exit(f"searchlab: bad chaos step {s} — needs at/action/node, "
                      f"action one of {', '.join(ch._ACTIONS)}")
         if float(s["at"]) >= float(load["duration"]):
-            sys.exit(f"solrlab: chaos step at t={s['at']} is outside the "
+            sys.exit(f"searchlab: chaos step at t={s['at']} is outside the "
                      f"{load['duration']}s load window")
     return cfg
 
@@ -113,7 +113,7 @@ async def run_drill(
             "metrics_before": before, "metrics_after": after}
 
 
-def save_drill(outcome: dict, base: str | Path, title: str = "solrlab drill") -> tuple[Path, Path]:
+def save_drill(outcome: dict, base: str | Path, title: str = "searchlab drill") -> tuple[Path, Path]:
     """Write <base>.json and <base>.html; returns both paths."""
     from . import report as rp
 

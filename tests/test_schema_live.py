@@ -9,11 +9,11 @@ import pytest
 from aiohttp import web
 from click.testing import CliRunner
 
-from solrlab.cli import main
-from solrlab.cluster import ClusterSpec
-from solrlab.dashboard import _DemoState
-from solrlab.loadtest import RequestRecord, histogram, run_load, save_report
-from solrlab.schema import apply_schema, fields_from_profile
+from searchlab.cli import main
+from searchlab.cluster import ClusterSpec
+from searchlab.dashboard import _DemoState
+from searchlab.loadtest import RequestRecord, histogram, run_load, save_report
+from searchlab.schema import apply_schema, fields_from_profile
 
 # ----------------------------------------------------------------- schema ---
 

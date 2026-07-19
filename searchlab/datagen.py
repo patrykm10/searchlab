@@ -111,13 +111,13 @@ class FieldGen:
             lo = int(self.cfg.get("min_values", 1))
             hi = int(self.cfg.get("max_values", 5))
             return [inner.value(seq) for _ in range(self.rng.randint(lo, hi))]
-        sys.exit(f"solrlab: unknown field type '{t}' for field '{self.name}'")
+        sys.exit(f"searchlab: unknown field type '{t}' for field '{self.name}'")
 
 
 def load_profile(path: str | Path) -> dict[str, Any]:
     data = yaml.safe_load(Path(path).read_text())
     if "fields" not in data:
-        sys.exit(f"solrlab: profile {path} has no 'fields' section")
+        sys.exit(f"searchlab: profile {path} has no 'fields' section")
     return data
 
 

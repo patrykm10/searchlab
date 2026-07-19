@@ -2,7 +2,7 @@
 
 Latency without recall is meaningless for vector search — HNSW will happily
 answer fast and wrong. This module computes exact ground truth locally
-(brute-force over the generated dataset, which solrlab has on disk anyway),
+(brute-force over the generated dataset, which searchlab has on disk anyway),
 queries the engine's approximate kNN with the same vectors, and reports
 recall@k alongside latency — across a sweep of `num_candidates` (ES) /
 `ef_search`-style settings where the engine exposes one, since that knob IS
@@ -12,7 +12,7 @@ Query vectors are drawn from the same clustered distribution as the data
 (different seed), because recall against in-distribution queries is what
 production will see.
 
-Requires numpy for the ground-truth pass: `pip install solrlab[recall]`.
+Requires numpy for the ground-truth pass: `pip install searchlab[recall]`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _np():
         import numpy
         return numpy
     except ImportError:
-        sys.exit("solrlab: recall needs numpy — pip install 'solrlab[recall]' "
+        sys.exit("searchlab: recall needs numpy — pip install 'searchlab[recall]' "
                  "(or pip install numpy)")
 
 
@@ -41,7 +41,7 @@ def find_vector_field(profile: dict) -> tuple[str, dict]:
     for name, cfg in profile["fields"].items():
         if (cfg or {}).get("type") == "vector":
             return name, cfg
-    sys.exit("solrlab: profile has no vector field")
+    sys.exit("searchlab: profile has no vector field")
 
 
 def load_vectors(data_path: str | Path, field: str):
@@ -54,7 +54,7 @@ def load_vectors(data_path: str | Path, field: str):
             ids.append(str(doc["id"]))
             rows.append(doc[field])
     if not rows:
-        sys.exit(f"solrlab: no docs in {data_path}")
+        sys.exit(f"searchlab: no docs in {data_path}")
     return ids, np.asarray(rows, dtype="float32")
 
 

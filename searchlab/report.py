@@ -145,7 +145,7 @@ td:first-child{color:#666}code{background:#f4f4f4;padding:.1rem .3rem;border-rad
 """
 
 
-def html_report(report_path: str | Path, out: str | Path, title: str = "solrlab load report") -> None:
+def html_report(report_path: str | Path, out: str | Path, title: str = "searchlab load report") -> None:
     report = load_report(report_path)
     html = (
         f"<!doctype html><html><head><meta charset='utf-8'><title>{title}</title>"
@@ -221,7 +221,7 @@ _SWEEP_COLS = [
 
 
 def html_sweep(results: list[dict], out: str | Path,
-               title: str = "solrlab sweep") -> None:
+               title: str = "searchlab sweep") -> None:
     """Config-matrix comparison; the best cell per metric is highlighted
     (lower is better except achieved rps)."""
     best: dict[str, float] = {}
@@ -259,7 +259,7 @@ def html_sweep(results: list[dict], out: str | Path,
     Path(out).write_text(html)
 
 
-def html_gc(pauses_by_node: dict, out: str | Path, title: str = "solrlab gc report") -> None:
+def html_gc(pauses_by_node: dict, out: str | Path, title: str = "searchlab gc report") -> None:
     """Self-contained GC report: per-node pause timeline + text summary."""
     from .gclog import summarize
 
@@ -279,7 +279,7 @@ def html_gc(pauses_by_node: dict, out: str | Path, title: str = "solrlab gc repo
     Path(out).write_text(html)
 
 
-def html_drill(report_path: str | Path, out: str | Path, title: str = "solrlab drill") -> None:
+def html_drill(report_path: str | Path, out: str | Path, title: str = "searchlab drill") -> None:
     """Self-contained drill report: annotated timeline, summary, latency
     histogram, and the before/after metrics diff."""
     report = load_report(report_path)
@@ -323,8 +323,8 @@ def html_compare(path_a: str | Path, path_b: str | Path, out: str | Path) -> Non
             f"<td style='color:{color}'>{delta:+}</td></tr>"
         )
     html = (
-        f"<!doctype html><html><head><meta charset='utf-8'><title>solrlab compare</title>"
-        f"<style>{_STYLE}</style></head><body><h1>solrlab: {name_a} vs {name_b}</h1>"
+        f"<!doctype html><html><head><meta charset='utf-8'><title>searchlab compare</title>"
+        f"<style>{_STYLE}</style></head><body><h1>searchlab: {name_a} vs {name_b}</h1>"
         f"<table><tr><td>metric</td><td>{name_a}</td><td>{name_b}</td><td>delta</td></tr>"
         f"{''.join(rows)}</table>"
         f"<h2>{name_a}</h2>{_svg_timeline(a.get('timeline', []))}"

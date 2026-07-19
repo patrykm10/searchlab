@@ -8,14 +8,14 @@ import json
 import pytest
 from aiohttp import web
 
-from solrlab.gates import (
+from searchlab.gates import (
     check_assertions,
     parse_assertion,
     parse_count,
     parse_duration,
     result_metrics,
 )
-from solrlab.loadtest import run_load
+from searchlab.loadtest import run_load
 
 
 def test_parse_assertion_forms():
@@ -68,7 +68,7 @@ async def mock_solr(aiohttp_server):
 
 
 async def test_result_metrics_match_saved_report(mock_solr, tmp_path):
-    from solrlab.loadtest import save_report
+    from searchlab.loadtest import save_report
     base = f"http://{mock_solr.host}:{mock_solr.port}/solr"
     result = await run_load(base, "t", rps=40, duration=2, seed=1)
     metrics = result_metrics(result)

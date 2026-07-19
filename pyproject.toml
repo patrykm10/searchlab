@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "solrlab"
+name = "searchlab"
 version = "0.14.0"
 description = "Spin up disposable SolrCloud clusters, generate synthetic data, and run open-loop load tests. For learning Solr and reproducing performance issues."
 readme = "README.md"
@@ -20,13 +20,13 @@ dependencies = [
 recall = ["numpy>=1.24"]
 
 [project.scripts]
-solrlab = "solrlab.cli:main"
+searchlab = "searchlab.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["solrlab*"]
+include = ["searchlab*"]
 
 [tool.setuptools.package-data]
-solrlab = ["templates/*.j2", "templates/*.html", "lessons/*.yaml"]
+searchlab = ["templates/*.j2", "templates/*.html", "lessons/*.yaml"]
 
 [tool.ruff]
 line-length = 100

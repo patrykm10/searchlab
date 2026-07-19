@@ -1,4 +1,4 @@
-"""solrlab CLI — disposable SolrCloud clusters, synthetic data, open-loop load tests."""
+"""searchlab CLI — disposable SolrCloud clusters, synthetic data, open-loop load tests."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def main() -> None:
 @click.option("--solr-opts", default="", help="Extra SOLR_OPTS, e.g. -Dsolr.autoSoftCommit.maxTime=1000.")
 @click.option("--base-port", default=8983, show_default=True, help="Host port for solr1; node N gets base+N-1.")
 @click.option("--monitoring/--no-monitoring", default=False, help="Add solr-exporter + Prometheus (:9090) + Grafana (:3000).")
-@click.option("--gc-logs/--no-gc-logs", default=False, help="Mount ./.solrlab/gc-logs/<node> for GC log analysis.")
+@click.option("--gc-logs/--no-gc-logs", default=False, help="Mount ./.searchlab/gc-logs/<node> for GC log analysis.")
 @click.option("--wait/--no-wait", default=True, help="Wait for all nodes to answer pings.")
 def up(engine, solr_version, nodes, zk_nodes, heap, gc_tune, solr_opts, base_port, monitoring, gc_logs, wait):
     """Start a search cluster (SolrCloud, Elasticsearch, or OpenSearch) with Docker Compose."""
@@ -60,7 +60,7 @@ def up(engine, solr_version, nodes, zk_nodes, heap, gc_tune, solr_opts, base_por
         if base_port == 8983:
             base_port = eng.default_port
         if monitoring:
-            raise SystemExit("solrlab: --monitoring is Solr-only for now")
+            raise SystemExit("searchlab: --monitoring is Solr-only for now")
         heap = heap.replace("gb", "g").replace("mb", "m")
     spec = cl.ClusterSpec(
         engine=eng.name, solr_version=version, solr_nodes=nodes, zk_nodes=zk_nodes,
@@ -176,7 +176,7 @@ def load(collection, rps, duration, ramp, queries_path, index_rps, index_profile
     click.echo(result.summary())
     if result.records and all(not r.ok for r in result.records):
         click.echo("\nhint: every request failed — is the cluster healthy and the "
-                   "collection name right? try `solrlab status` / `solrlab doctor`")
+                   "collection name right? try `searchlab status` / `searchlab doctor`")
     if result.dropped:
         click.echo(
             "\nnote: dropped > 0 means the client hit its in-flight cap — "
@@ -217,7 +217,7 @@ def chaos():
 def chaos_kill(node):
     """SIGKILL a node (hard crash, no graceful shutdown). NODE is e.g. solr2 or 2."""
     c = ch.kill(cl.load_spec(), node)
-    click.echo(f"killed {c} — watch leader election / recovery with `solrlab status`")
+    click.echo(f"killed {c} — watch leader election / recovery with `searchlab status`")
 
 
 @chaos.command("pause")
@@ -225,7 +225,7 @@ def chaos_kill(node):
 def chaos_pause(node):
     """SIGSTOP a node: frozen JVM, mimics a huge GC pause or hung process."""
     c = ch.pause(cl.load_spec(), node)
-    click.echo(f"paused {c} — unpause with `solrlab chaos unpause {node}`")
+    click.echo(f"paused {c} — unpause with `searchlab chaos unpause {node}`")
 
 
 @chaos.command("unpause")
@@ -271,7 +271,7 @@ def drill_cmd(drill_yaml, out, assertions):
     click.echo("\n" + outcome["result"].summary())
     base = out or cfg.get("report", "drill")
     json_path, html_path = dr.save_drill(outcome, base,
-                                         title=f"solrlab drill · {Path(drill_yaml).stem}")
+                                         title=f"searchlab drill · {Path(drill_yaml).stem}")
     click.echo(f"\nreport written to {json_path} and {html_path}")
     _check_gates(outcome["result"], list(assertions) + list(cfg.get("assert", [])))
 
@@ -389,10 +389,10 @@ def quickstart(engine, solr_version, nodes, collection, count, rps, duration):
     ))
     click.echo(result.summary())
     click.echo(f"\ncluster is still up — try:\n"
-               f"  solrlab dashboard          (live recorder UI)\n"
-               f"  solrlab load --collection {collection} --rps {rps * 4} --duration 120\n"
-               f"  solrlab chaos pause solr2  (then watch the dashboard)\n"
-               f"  solrlab down               (when finished)")
+               f"  searchlab dashboard          (live recorder UI)\n"
+               f"  searchlab load --collection {collection} --rps {rps * 4} --duration 120\n"
+               f"  searchlab chaos pause solr2  (then watch the dashboard)\n"
+               f"  searchlab down               (when finished)")
 
 
 # ----------------------------------------------------------------- replay ---
@@ -432,7 +432,7 @@ def replay(collection, log_path, speed, rps, loop_count, path_filter, report, ht
         loadtest.save_report(result, report)
         click.echo(f"report written to {report}")
     if html_out:
-        rp.html_report(report, html_out, title="solrlab replay report")
+        rp.html_report(report, html_out, title="searchlab replay report")
         click.echo(f"HTML report written to {html_out}")
     _check_gates(result, assertions)
 
@@ -447,7 +447,7 @@ def gclog(target, html_out):
     """Analyze JVM GC logs: pause tail, throughput lost, Full GC detection.
 
     TARGET is a node name (solr2), a log file path, or empty for all nodes
-    under ./.solrlab/gc-logs (requires `solrlab up --gc-logs`)."""
+    under ./.searchlab/gc-logs (requires `searchlab up --gc-logs`)."""
     if target and Path(target).is_file():
         by_node = {Path(target).name: gcl.parse_gclog(target)}
     else:
@@ -455,7 +455,7 @@ def gclog(target, html_out):
         if target:
             logs = {k: v for k, v in logs.items() if k == target}
             if not logs:
-                raise SystemExit(f"solrlab: no GC logs for node '{target}'")
+                raise SystemExit(f"searchlab: no GC logs for node '{target}'")
         by_node = {}
         for node, files in logs.items():
             pauses = []
@@ -500,12 +500,12 @@ def doctor():
         with socket.socket() as s:
             free = s.connect_ex(("127.0.0.1", port)) != 0
         check(f"port {port} free ({what})", free,
-              "something is already listening — a leftover cluster? try `solrlab down`")
+              "something is already listening — a leftover cluster? try `searchlab down`")
     du = sh.disk_usage("/")
     check("disk space > 5 GB", du.free > 5 * 2**30, f"only {du.free / 2**30:.1f} GB free")
     spec_file = cl.WORKDIR / "spec.json"
     if spec_file.exists():
-        click.echo(f"[note] existing cluster state in {cl.WORKDIR} — `solrlab status` to inspect")
+        click.echo(f"[note] existing cluster state in {cl.WORKDIR} — `searchlab status` to inspect")
     click.echo("\nall checks passed" if not failures else f"\n{failures} check(s) failed")
     if failures:
         raise SystemExit(1)
@@ -618,10 +618,10 @@ def learn_cmd(lesson):
             click.echo(f"  {name:<26} {les['title']}")
             if les.get("requires"):
                 click.echo(f"  {'':<26} requires: {les['requires']}")
-        click.echo("\nrun one: solrlab learn <name>")
+        click.echo("\nrun one: searchlab learn <name>")
         return
     if lesson not in lessons:
-        raise SystemExit(f"solrlab: no lesson '{lesson}' — run `solrlab learn` to list")
+        raise SystemExit(f"searchlab: no lesson '{lesson}' — run `searchlab learn` to list")
     spec = cl.load_spec()
     ln.run_lesson(ln.load_lesson(lessons[lesson]), spec.base_url())
 
@@ -635,7 +635,7 @@ def explain_cmd(query_string, collection):
     e.g. "q=title_t:merge&fq=category_s:x". Solr only."""
     spec = cl.load_spec()
     if spec.engine != "solr":
-        raise SystemExit("solrlab: explain reads Solr's debug component; "
+        raise SystemExit("searchlab: explain reads Solr's debug component; "
                          f"the running cluster is {spec.engine}")
     body = ex.fetch_debug(spec.base_url(), collection, query_string)
     click.echo(ex.explain_report(body))

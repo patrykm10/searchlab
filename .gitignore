@@ -1,5 +1,5 @@
 .venv/
-.solrlab/
+.searchlab/
 __pycache__/
 *.py[cod]
 *.egg-info/

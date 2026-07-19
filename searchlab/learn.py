@@ -9,7 +9,7 @@ one and watch the lesson notice.
 Step types:
   say:   explanation text
   pause: "press enter to continue"
-  run:   a shell command the lesson executes and shows (usually solrlab itself)
+  run:   a shell command the lesson executes and shows (usually searchlab itself)
   http:  a request against the cluster, response shown; optional expect check
   wait:  instruction + polled condition against a cluster URL (the magic step)
   ask:   multiple-choice question; score tracked, explanation shown either way
@@ -58,7 +58,7 @@ def dig(data: Any, path: str) -> Any:
 def check_condition(body: dict, cond: dict) -> bool:
     op = cond.get("op", "eq")
     if op not in _OPS:
-        sys.exit(f"solrlab: unknown condition op '{op}' — valid: {', '.join(_OPS)}")
+        sys.exit(f"searchlab: unknown condition op '{op}' — valid: {', '.join(_OPS)}")
     return _OPS[op](dig(body, cond["path"]), cond["value"])
 
 
@@ -66,22 +66,22 @@ def load_lesson(source: str | Path | dict) -> dict:
     lesson = source if isinstance(source, dict) else yaml.safe_load(Path(source).read_text())
     for key in ("title", "steps"):
         if key not in lesson:
-            sys.exit(f"solrlab: lesson needs '{key}'")
+            sys.exit(f"searchlab: lesson needs '{key}'")
     for i, step in enumerate(lesson["steps"]):
         kind = next((k for k in STEP_TYPES if k in step), None)
         if kind is None:
-            sys.exit(f"solrlab: step {i + 1} has no recognized type "
+            sys.exit(f"searchlab: step {i + 1} has no recognized type "
                      f"({', '.join(sorted(STEP_TYPES))})")
         if kind == "ask" and ("options" not in step or "answer" not in step):
-            sys.exit(f"solrlab: ask step {i + 1} needs 'options' and 'answer'")
+            sys.exit(f"searchlab: ask step {i + 1} needs 'options' and 'answer'")
         if kind == "wait" and "until" not in step:
-            sys.exit(f"solrlab: wait step {i + 1} needs an 'until' condition")
+            sys.exit(f"searchlab: wait step {i + 1} needs an 'until' condition")
     return lesson
 
 
 def builtin_lessons() -> dict[str, dict]:
     out = {}
-    for f in resources.files("solrlab").joinpath("lessons").iterdir():
+    for f in resources.files("searchlab").joinpath("lessons").iterdir():
         if f.name.endswith(".yaml"):
             lesson = yaml.safe_load(f.read_text())
             out[f.name[:-5]] = lesson

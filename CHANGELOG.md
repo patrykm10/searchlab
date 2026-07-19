@@ -20,7 +20,7 @@
 ## 0.13.0
 - `recall`: measure approximate-kNN recall@k against exact ground truth
   computed locally over the generated dataset (numpy, optional extra:
-  `pip install solrlab[recall]`) — query vectors drawn from the same
+  `pip install searchlab[recall]`) — query vectors drawn from the same
   clustered distribution with a different seed (in-distribution but unseen),
   latency reported alongside recall, and `--candidates 20,50,100,500` sweeps
   the ES num_candidates knob to produce the recall/latency tradeoff curve;

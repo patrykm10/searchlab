@@ -48,7 +48,7 @@ steps:
       There it is. In production nobody commits per document — autoSoftCommit
       (maxTime ~1-10s) gives near-real-time visibility, autoCommit
       (openSearcher=false) gives durability, and explicit commits from
-      clients are usually a bug. That's also why solrlab's indexer uses
+      clients are usually a bug. That's also why searchlab's indexer uses
       commitWithin instead of hammering commit.
   - http:
       method: POST

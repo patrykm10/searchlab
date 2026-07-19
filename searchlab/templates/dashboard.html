@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>searchlab — control panel</title>
+<style>
+:root {
+  --paper: #f5f6f4;
+  --ink: #14161a;
+  --muted: #5b6068;
+  --faint: #9aa0a8;
+  --line: #e0e2df;
+  --cobalt: #2743c7;
+  --cobalt-soft: rgba(39, 67, 199, 0.10);
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Helvetica, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+::selection { background: var(--cobalt-soft); }
+html { scrollbar-gutter: stable; }
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--sans); font-size: 15px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 22px 80px; }
+
+/* ---------- header ---------- */
+header {
+  position: sticky; top: 0; z-index: 10; background: var(--paper);
+  border-bottom: 1.5px solid var(--ink);
+}
+.hbar { max-width: 1180px; margin: 0 auto; padding: 14px 22px;
+  display: flex; align-items: baseline; gap: 18px; }
+.wordmark { font-weight: 800; letter-spacing: -0.03em; font-size: 20px; }
+.hmeta { font-family: var(--mono); font-size: 11px; color: var(--muted);
+  letter-spacing: 0.04em; }
+.chip { margin-left: auto; font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  display: flex; align-items: center; gap: 7px; }
+.dot { width: 8px; height: 8px; background: var(--faint); display: inline-block; }
+.chip.live .dot { background: var(--cobalt); }
+.chip.live { color: var(--cobalt); }
+
+/* ---------- sections ---------- */
+section { padding: 34px 0 38px; border-bottom: 1.5px solid var(--line); }
+h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 22px; }
+
+/* ---------- controls ---------- */
+.cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+.card { padding: 0 26px; border-left: 1.5px solid var(--line); }
+.card:first-child { padding-left: 0; border-left: none; }
+.card h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 4px; }
+.card .desc { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.frow { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--faint); }
+select, input[type="number"] {
+  font-family: var(--mono); font-size: 13px; color: var(--ink);
+  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  padding: 7px 9px; outline: none;
+}
+select:focus, input[type="number"]:focus { border-color: var(--cobalt); }
+input[type="number"] { width: 110px; font-variant-numeric: tabular-nums; }
+
+/* buttons: text with animated cobalt underline, portfolio-style */
+.btn {
+  display: inline-block; background: none; border: none; cursor: pointer;
+  font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--ink);
+  padding: 2px 0; border-bottom: 1.5px solid var(--line); border-radius: 0;
+  transition: color .2s cubic-bezier(.16,1,.3,1), border-color .2s cubic-bezier(.16,1,.3,1);
+}
+.btn:hover { color: var(--cobalt); border-bottom-color: var(--cobalt); }
+.btn:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 3px; }
+.btn:disabled { color: var(--faint); border-bottom-color: var(--line); cursor: default; }
+.btn.primary { border-bottom-color: var(--cobalt); }
+.btn.preset { font-family: var(--mono); font-size: 12px; font-weight: 500; }
+
+/* slider */
+.sliderrow { display: flex; align-items: center; gap: 14px; margin: 6px 0 16px; }
+input[type="range"] {
+  flex: 1; appearance: none; -webkit-appearance: none; height: 1.5px;
+  background: var(--line); outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 14px; height: 14px; background: var(--ink); border-radius: 0; cursor: pointer;
+}
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:focus-visible::-webkit-slider-thumb { background: var(--cobalt); }
+input[type="range"]:disabled::-webkit-slider-thumb { background: var(--faint); }
+input[type="range"]::-moz-range-thumb {
+  width: 14px; height: 14px; background: var(--ink); border: none; border-radius: 0; cursor: pointer;
+}
+.rps-readout { font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums;
+  min-width: 88px; text-align: right; }
+.rps-readout small { color: var(--faint); font-size: 10px; }
+
+.statusline { font-family: var(--mono); font-size: 12px; color: var(--muted);
+  margin-bottom: 14px; font-variant-numeric: tabular-nums; }
+.statusline.on { color: var(--cobalt); }
+
+/* status strip under the cards */
+#strip { margin-top: 26px; padding: 10px 0 0; border-top: 1.5px solid var(--line);
+  font-family: var(--mono); font-size: 12px; color: var(--muted); min-height: 30px; }
+#strip.err { color: var(--ink); }
+#strip.err::before { content: "! "; color: var(--cobalt); font-weight: 700; }
+#strip.ok::before { content: "\2713\00a0"; color: var(--cobalt); }
+
+/* ---------- charts ---------- */
+.chartgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 34px 40px; }
+.chart h4 { font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--faint);
+  margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; }
+.chart h4 b { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+canvas { width: 100%; height: 150px; display: block;
+  border: 1.5px solid var(--line); background: #fff; }
+.legend { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.legend span { margin-right: 14px; }
+.legend i { display: inline-block; width: 9px; height: 9px; margin-right: 5px;
+  vertical-align: -1px; }
+
+/* summary table */
+#summary { margin-top: 30px; font-family: var(--mono); font-size: 12px;
+  font-variant-numeric: tabular-nums; width: 100%; border-collapse: collapse; }
+#summary td, #summary th { text-align: left; padding: 7px 18px 7px 0;
+  border-top: 1px solid var(--line); }
+#summary th { font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em;
+  font-size: 10px; color: var(--faint); border-top: none; }
+.health-GREEN { color: var(--cobalt); }
+.health-YELLOW, .health-RED { color: var(--ink); font-weight: 700; }
+
+/* ---------- logs ---------- */
+#log {
+  height: 280px; overflow-y: auto; background: #fff;
+  border: 1.5px solid var(--line); padding: 12px 14px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--muted);
+  white-space: pre-wrap; word-break: break-all;
+}
+#log .warn { color: var(--ink); border-left: 2px solid var(--cobalt); padding-left: 8px;
+  display: block; }
+#log .sys { color: var(--faint); font-style: italic; display: block; }
+
+/* demo note */
+#demonote { display: none; font-family: var(--mono); font-size: 11px;
+  color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em;
+  margin-bottom: 18px; }
+
+@media (max-width: 900px) {
+  .cards { grid-template-columns: 1fr; }
+  .card { border-left: none; padding: 0 0 24px; border-bottom: 1.5px solid var(--line);
+    margin-bottom: 24px; }
+  .card:last-child { border-bottom: none; margin-bottom: 0; }
+  .chartgrid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hbar">
+    <span class="wordmark">searchlab</span>
+    <span class="hmeta" id="hmeta">—</span>
+    <span class="chip" id="chip"><span class="dot"></span><span id="chiplabel">connecting</span></span>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="controls">
+  <h2>Controls</h2>
+  <div id="demonote">Demo mode — controls disabled</div>
+  <div class="cards">
+
+    <div class="card">
+      <h3>Load test</h3>
+      <div class="desc">Send a steady stream of queries. Drag the slider to change the rate while it runs.</div>
+      <div class="frow">
+        <label for="ctl-coll">Collection</label>
+        <select id="ctl-coll"></select>
+      </div>
+      <div class="statusline" id="load-status">Stopped</div>
+      <div class="sliderrow">
+        <input type="range" id="ctl-rps" min="1" max="500" step="1" value="50">
+        <span class="rps-readout"><span id="rps-val">50</span> <small>REQ/S</small></span>
+      </div>
+      <button class="btn primary" id="btn-load">Start load test</button>
+    </div>
+
+    <div class="card">
+      <h3>Add documents</h3>
+      <div class="desc">Generate realistic sample documents and add them to the collection.</div>
+      <div class="frow">
+        <label for="ctl-count">How many</label>
+        <input type="number" id="ctl-count" value="10000" min="1" step="1000">
+        <button class="btn preset" data-count="10000">10k</button>
+        <button class="btn preset" data-count="100000">100k</button>
+      </div>
+      <div class="statusline" id="index-status">Idle</div>
+      <button class="btn primary" id="btn-index">Add documents</button>
+    </div>
+
+    <div class="card">
+      <h3>Maintenance</h3>
+      <div class="desc">Housekeeping actions you'd normally need the command line for.</div>
+      <div class="frow" style="margin-bottom:20px">
+        <button class="btn" id="btn-commit">Commit now</button>
+        <span class="desc" style="margin:0">make recent documents searchable</span>
+      </div>
+      <div class="frow">
+        <button class="btn" id="btn-optimize">Merge segments</button>
+        <span class="desc" style="margin:0">compact the index (can take a while)</span>
+      </div>
+    </div>
+
+  </div>
+  <div id="strip"></div>
+</section>
+
+<section>
+  <h2>Live signals</h2>
+  <div class="chartgrid">
+    <div class="chart">
+      <h4>Load test latency <b id="v-lt">—</b></h4>
+      <canvas id="c-lt"></canvas>
+      <div class="legend" id="lg-lt"></div>
+    </div>
+    <div class="chart">
+      <h4>Query latency p99, per node <b id="v-p99">—</b></h4>
+      <canvas id="c-p99"></canvas>
+      <div class="legend" id="lg-p99"></div>
+    </div>
+    <div class="chart">
+      <h4>JVM heap, per node <b id="v-heap">—</b></h4>
+      <canvas id="c-heap"></canvas>
+      <div class="legend" id="lg-heap"></div>
+    </div>
+    <div class="chart">
+      <h4>Query rate <b id="v-rate">—</b></h4>
+      <canvas id="c-rate"></canvas>
+      <div class="legend" id="lg-rate"></div>
+    </div>
+  </div>
+  <table id="summary"></table>
+</section>
+
+<section>
+  <h2>Cluster activity</h2>
+  <div id="log"></div>
+</section>
+
+</div>
+
+<script>
+"use strict";
+const WINDOW_S = 300, POLL_MS = 2000;
+const INKS = ["#14161a", "#2743c7", "#5b6068", "#9aa0a8"];
+const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [] };
+let lastOk = 0, logCursor = 0, demo = false, dragging = false, rpsDebounce = null;
+
+const $ = id => document.getElementById(id);
+
+function push(arr, t, v) { arr.push([t, v]); const cut = t - WINDOW_S;
+  while (arr.length && arr[0][0] < cut) arr.shift(); }
+
+function fmt(n, d = 0) { return n == null ? "—" : Number(n).toFixed(d); }
+
+function setupCanvas(c) {
+  const dpr = window.devicePixelRatio || 1, r = c.getBoundingClientRect();
+  c.width = r.width * dpr; c.height = r.height * dpr;
+  const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); return [g, r.width, r.height];
+}
+
+function drawChart(canvas, seriesMap, colors, unit) {
+  const [g, W, H] = setupCanvas(canvas), now = Date.now() / 1000;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = "rgba(20,22,26,.06)"; g.lineWidth = 1;
+  for (let x = W; x > 0; x -= W / (WINDOW_S / 30)) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (const f of [.25, .5, .75]) { g.beginPath(); g.moveTo(0, H * f); g.lineTo(W, H * f); g.stroke(); }
+
+  let vmax = 1;
+  for (const s of Object.values(seriesMap)) for (const [, v] of s) vmax = Math.max(vmax, v);
+  vmax *= 1.15;
+
+  const names = Object.keys(seriesMap).sort();
+  names.forEach((name, i) => {
+    const s = seriesMap[name]; if (!s.length) return;
+    g.strokeStyle = colors[i % colors.length];
+    g.lineWidth = 1.5; g.lineJoin = "round"; g.lineCap = "round";
+    g.beginPath();
+    s.forEach(([t, v], j) => {
+      const x = W - (now - t) / WINDOW_S * W, y = H - (v / vmax) * (H - 8) - 4;
+      j ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+    const [t, v] = s[s.length - 1];
+    const x = W - (now - t) / WINDOW_S * W, y = H - (v / vmax) * (H - 8) - 4;
+    g.fillStyle = g.strokeStyle;
+    g.beginPath(); g.arc(x, y, 2.5, 0, 7); g.fill();
+  });
+
+  g.fillStyle = "#9aa0a8";
+  g.font = "10px ui-monospace, monospace";
+  g.fillText(vmax.toFixed(0) + " " + unit, 5, 12);
+  g.fillText("-5 min", 5, H - 6);
+  g.fillText("now", W - 30, H - 6);
+}
+
+function legend(el, names, colors) {
+  el.innerHTML = names.sort().map((n, i) =>
+    `<span><i style="background:${colors[i % colors.length]}"></i>${n}</span>`).join("");
+}
+
+async function post(path, body) {
+  try {
+    const r = await fetch(path, { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const out = await r.json();
+    if (!out.ok) showStrip(out.error || "Something went wrong.", true);
+    return out;
+  } catch (e) {
+    showStrip("Could not reach the control panel server.", true);
+    return { ok: false };
+  }
+}
+
+function showStrip(msg, isErr) {
+  const s = $("strip");
+  s.textContent = msg;
+  s.className = isErr ? "err" : "ok";
+}
+
+function coll() { return $("ctl-coll").value; }
+
+/* ---------- controls wiring ---------- */
+
+$("ctl-rps").addEventListener("pointerdown", () => dragging = true);
+$("ctl-rps").addEventListener("pointerup", () => dragging = false);
+$("ctl-rps").addEventListener("input", () => {
+  $("rps-val").textContent = $("ctl-rps").value;
+  if ($("btn-load").dataset.running === "1") {
+    clearTimeout(rpsDebounce);
+    rpsDebounce = setTimeout(() =>
+      post("/api/load/rps", { rps: Number($("ctl-rps").value) }), 300);
+  }
+});
+
+$("btn-load").addEventListener("click", async () => {
+  if ($("btn-load").dataset.running === "1") {
+    await post("/api/load/stop", {});
+  } else {
+    const out = await post("/api/load/start",
+      { collection: coll(), rps: Number($("ctl-rps").value) });
+    if (out.ok) showStrip("Load test started.", false);
+  }
+  poll();
+});
+
+document.querySelectorAll(".preset").forEach(b =>
+  b.addEventListener("click", () => { $("ctl-count").value = b.dataset.count; }));
+
+$("btn-index").addEventListener("click", async () => {
+  const out = await post("/api/index",
+    { collection: coll(), count: Number($("ctl-count").value) });
+  if (out.ok) showStrip("Adding documents…", false);
+  poll();
+});
+
+$("btn-commit").addEventListener("click", async () => {
+  const out = await post("/api/commit", { collection: coll() });
+  if (out.ok) showStrip("Committed — recent documents are now searchable.", false);
+});
+
+$("btn-optimize").addEventListener("click", async () => {
+  const out = await post("/api/optimize", { collection: coll() });
+  if (out.ok) showStrip("Merging segments — this can take a while…", false);
+  poll();
+});
+
+function renderControls(a) {
+  if (!a || a.demo) {
+    demo = true;
+    $("demonote").style.display = "block";
+    for (const el of document.querySelectorAll("#controls button, #controls select, #controls input"))
+      el.disabled = true;
+    return;
+  }
+  const load = a.load || {}, idx = a.index || {};
+  const lbtn = $("btn-load");
+  lbtn.dataset.running = load.running ? "1" : "0";
+  lbtn.textContent = load.running ? "Stop load test" : "Start load test";
+  if (load.running) {
+    const mins = Math.floor((load.elapsed_s || 0) / 60), secs = Math.floor((load.elapsed_s || 0) % 60);
+    $("load-status").textContent =
+      `Running — ${fmt(load.target_rps)} req/s target — ${mins} min ${secs} s — ${load.collection}`;
+    $("load-status").className = "statusline on";
+    if (!dragging) { $("ctl-rps").value = load.target_rps; $("rps-val").textContent = fmt(load.target_rps); }
+  } else {
+    $("load-status").textContent = "Stopped";
+    $("load-status").className = "statusline";
+  }
+  $("btn-index").disabled = !!idx.running;
+  $("btn-index").textContent = idx.running ? "Adding…" : "Add documents";
+  $("index-status").textContent = idx.running
+    ? `Adding ${Number(idx.count).toLocaleString()} documents to ${idx.collection}…` : "Idle";
+  $("index-status").className = idx.running ? "statusline on" : "statusline";
+  $("btn-optimize").disabled = !!a.optimizing;
+  $("btn-optimize").textContent = a.optimizing ? "Merging…" : "Merge segments";
+  if (a.last_action && a.last_action.ts > (renderControls.lastTs || 0)) {
+    renderControls.lastTs = a.last_action.ts;
+    showStrip(a.last_action.message, !a.last_action.ok);
+  }
+}
+
+/* ---------- render ---------- */
+
+function render(snap) {
+  const t = snap.ts;
+  $("hmeta").textContent =
+    `${snap.spec.engine} ${snap.spec.solr_version} · ${snap.spec.solr_nodes} nodes · heap ${snap.spec.heap}`;
+
+  // collections select (preserve user choice)
+  const colls = Object.keys(snap.cluster.collections || {});
+  const sel = $("ctl-coll"), cur = sel.value;
+  if (colls.join() !== (sel.dataset.opts || "")) {
+    sel.dataset.opts = colls.join();
+    sel.innerHTML = colls.length
+      ? colls.map(c => `<option>${c}</option>`).join("")
+      : `<option value="">no collections yet</option>`;
+    if (colls.includes(cur)) sel.value = cur;
+  }
+
+  renderControls(snap.actions);
+
+  // node series
+  let sumRate = 0, worstP99 = 0, sumHeap = 0, rows = "";
+  for (const [name, n] of Object.entries(snap.nodes)) {
+    if (n.error) {
+      rows += `<tr><td>${name}</td><td colspan="4" style="color:var(--faint)">unreachable</td></tr>`;
+      continue;
+    }
+    const used = n.jvm.heap_used_mb, max = n.jvm.heap_max_mb || 1;
+    sumHeap += used || 0;
+    push(hist.heap[name] ??= [], t, used || 0);
+    const gc = Object.entries(n.jvm.gc)[0];
+    let p99 = null, rate = 0, docs = 0;
+    for (const c of Object.values(n.cores)) {
+      if (c.select_p99_ms != null) p99 = Math.max(p99 ?? 0, c.select_p99_ms);
+      rate += c.select_rate_1m || 0; docs += c.num_docs || 0;
+    }
+    if (p99 != null) { push(hist.p99[name] ??= [], t, p99); worstP99 = Math.max(worstP99, p99); }
+    sumRate += rate;
+    rows += `<tr><td>${name}</td><td>${docs.toLocaleString()} docs</td>
+      <td>heap ${fmt(used)} / ${fmt(max)} MB</td>
+      <td>gc ${gc ? gc[1].count : "—"} × ${gc ? gc[1].time : "—"} ms</td><td></td></tr>`;
+  }
+  for (const [cn, c] of Object.entries(snap.cluster.collections || {})) {
+    rows += `<tr><td>${cn}</td><td>${c.shards} shard(s)</td>
+      <td class="health-${c.health}">${c.health}</td><td></td><td></td></tr>`;
+  }
+  $("summary").innerHTML = rows
+    ? `<tr><th>Name</th><th></th><th></th><th></th><th></th></tr>` + rows : "";
+  push(hist.rate, t, sumRate);
+
+  // load test traces
+  const lt = snap.loadtest;
+  if (lt) {
+    if (lt.recent_p50_ms != null) push(hist.ltp50, t, lt.recent_p50_ms);
+    if (lt.recent_p99_ms != null) push(hist.ltp99, t, lt.recent_p99_ms);
+    $("v-lt").textContent = fmt(lt.recent_p99_ms, 1) + " ms p99 · " +
+      fmt(lt.recent_rps, 1) + " / " + fmt(lt.target_rps, 0) + " req/s" +
+      (lt.errors ? ` · ${lt.errors} errors` : "");
+  } else {
+    $("v-lt").textContent = "idle";
+    if (hist.ltp50.length && t - hist.ltp50[hist.ltp50.length - 1][0] > 30) {
+      hist.ltp50.length = 0; hist.ltp99.length = 0;
+    }
+  }
+  drawChart($("c-lt"), { "1 p50": hist.ltp50, "2 p99": hist.ltp99 }, ["#9aa0a8", "#2743c7"], "ms");
+  legend($("lg-lt"), hist.ltp99.length ? ["p50", "p99"] : [], ["#9aa0a8", "#2743c7"]);
+
+  drawChart($("c-p99"), hist.p99, INKS, "ms");
+  drawChart($("c-heap"), hist.heap, INKS, "MB");
+  drawChart($("c-rate"), { all: hist.rate }, ["#2743c7"], "r/s");
+  legend($("lg-p99"), Object.keys(hist.p99), INKS);
+  legend($("lg-heap"), Object.keys(hist.heap), INKS);
+  $("v-p99").textContent = fmt(worstP99, 1) + " ms worst";
+  $("v-heap").textContent = fmt(sumHeap) + " MB total";
+  $("v-rate").textContent = fmt(sumRate, 1) + " req/s";
+}
+
+/* ---------- polling ---------- */
+
+async function poll() {
+  try {
+    const r = await fetch("/api/snapshot"); if (!r.ok) throw 0;
+    render(await r.json());
+    lastOk = Date.now();
+    $("chip").className = "chip live"; $("chiplabel").textContent = "Live";
+  } catch (e) {
+    if (Date.now() - lastOk > 6000) {
+      $("chip").className = "chip"; $("chiplabel").textContent = "Reconnecting…";
+    }
+  }
+}
+
+async function pollLogs() {
+  try {
+    const r = await fetch("/api/logs?since=" + logCursor); if (!r.ok) throw 0;
+    const out = await r.json();
+    const el = $("log");
+    if (out.error && !el.dataset.errShown) {
+      el.dataset.errShown = "1";
+      el.insertAdjacentHTML("beforeend", `<span class="sys">${out.error}</span>`);
+    }
+    if (out.lines && out.lines.length) {
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+      const html = out.lines.map(([, line]) => {
+        const esc = line.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+        if (/\bWARN\b|\bERROR\b/.test(line)) return `<span class="warn">${esc}</span>`;
+        if (line.startsWith("[log stream")) return `<span class="sys">${esc}</span>`;
+        return esc + "\n";
+      }).join("");
+      el.insertAdjacentHTML("beforeend", html);
+      while (el.childNodes.length > 1000) el.removeChild(el.firstChild);
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    }
+    logCursor = out.latest ?? logCursor;
+  } catch (e) { /* retry next tick */ }
+}
+
+setInterval(poll, POLL_MS); poll();
+setInterval(pollLogs, POLL_MS); pollLogs();
+</script>
+</body>
+</html>

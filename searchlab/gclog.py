@@ -1,7 +1,7 @@
 """Parse JVM unified GC logs (JDK 9+) and tell the pause story.
 
-Pairs with `solrlab up --gc-logs`, which mounts each node's log directory to
-`.solrlab/gc-logs/<node>/`. The numbers that matter for a Solr incident:
+Pairs with `searchlab up --gc-logs`, which mounts each node's log directory to
+`.searchlab/gc-logs/<node>/`. The numbers that matter for a Solr incident:
 pause count and total, the pause tail (max, p99), throughput lost to GC, and
 whether Full GCs happened at all (in a healthy cluster they shouldn't).
 
@@ -94,11 +94,11 @@ def summarize(pauses: list[Pause], label: str = "") -> str:
 
 
 def find_gclogs(root: str | Path) -> dict[str, list[Path]]:
-    """Map node name -> gc log files under .solrlab/gc-logs/<node>/."""
+    """Map node name -> gc log files under .searchlab/gc-logs/<node>/."""
     root = Path(root)
     out: dict[str, list[Path]] = {}
     if not root.exists():
-        sys.exit(f"solrlab: {root} not found — start the cluster with `solrlab up --gc-logs`")
+        sys.exit(f"searchlab: {root} not found — start the cluster with `searchlab up --gc-logs`")
     for node_dir in sorted(root.iterdir()):
         if node_dir.is_dir():
             # Solr writes solr_gc.log*; ES/OS write gc.log* in their logs dir
@@ -106,5 +106,5 @@ def find_gclogs(root: str | Path) -> dict[str, list[Path]]:
             if logs:
                 out[node_dir.name] = logs
     if not out:
-        sys.exit(f"solrlab: no GC logs (solr_gc.log*/gc.log*) under {root} yet")
+        sys.exit(f"searchlab: no GC logs (solr_gc.log*/gc.log*) under {root} yet")
     return out

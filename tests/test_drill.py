@@ -8,8 +8,8 @@ import json
 import pytest
 from aiohttp import web
 
-from solrlab.cluster import ClusterSpec
-from solrlab.drill import load_drill, run_drill, save_drill
+from searchlab.cluster import ClusterSpec
+from searchlab.drill import load_drill, run_drill, save_drill
 
 
 def _write(tmp_path, text):

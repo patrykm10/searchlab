@@ -86,7 +86,7 @@ class SolrEngine(Engine):
         )
         body = r.json()
         if r.status_code != 200 or body.get("failure"):
-            sys.exit(f"solrlab: collection create failed: {json.dumps(body, indent=2)}")
+            sys.exit(f"searchlab: collection create failed: {json.dumps(body, indent=2)}")
 
     def delete_index(self, spec, name):
         httpx.get(f"{self.base_url(spec)}/admin/collections",
@@ -146,7 +146,7 @@ class _EsFamily(Engine):
             timeout=60,
         )
         if r.status_code != 200:
-            sys.exit(f"solrlab: index create failed: {r.text[:400]}")
+            sys.exit(f"searchlab: index create failed: {r.text[:400]}")
 
     def delete_index(self, spec, name):
         httpx.delete(f"{self.base_url(spec)}/{name}", timeout=60)
@@ -246,5 +246,5 @@ _ALIASES = {"es": "elasticsearch", "os": "opensearch"}
 def get_engine(name: str) -> Engine:
     name = _ALIASES.get(name, name)
     if name not in _ENGINES:
-        sys.exit(f"solrlab: unknown engine '{name}' — valid: {', '.join(_ENGINES)}")
+        sys.exit(f"searchlab: unknown engine '{name}' — valid: {', '.join(_ENGINES)}")
     return _ENGINES[name]

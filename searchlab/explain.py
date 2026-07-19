@@ -1,6 +1,6 @@
 """Translate Solr's debug=true output into something a human can learn from.
 
-`solrlab explain --collection c "q=title_t:merge&fq=cat_s:x"` runs the query
+`searchlab explain --collection c "q=title_t:merge&fq=cat_s:x"` runs the query
 with debugging on and renders three stories the raw JSON buries:
 
   1. what your query BECAME after parsing (analysis surprises live here)

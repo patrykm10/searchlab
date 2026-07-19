@@ -1,4 +1,4 @@
-"""solrlab test suite. Run with: pytest -q
+"""searchlab test suite. Run with: pytest -q
 
 Covers everything that doesn't need a Docker daemon: data generation shape and
 determinism, compose rendering, query template substitution, open-loop
@@ -17,10 +17,10 @@ import pytest
 import yaml
 from aiohttp import web
 
-from solrlab.cluster import ClusterSpec, render_compose
-from solrlab.datagen import generate, load_profile
-from solrlab.loadtest import QueryPicker, load_queries, run_load, save_report
-from solrlab.report import compare_text, html_compare, html_report, load_report
+from searchlab.cluster import ClusterSpec, render_compose
+from searchlab.datagen import generate, load_profile
+from searchlab.loadtest import QueryPicker, load_queries, run_load, save_report
+from searchlab.report import compare_text, html_compare, html_report, load_report
 
 ROOT = Path(__file__).parent.parent
 

@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from aiohttp import web
 
-from solrlab.datagen import generate
-from solrlab.recall import (
+from searchlab.datagen import generate
+from searchlab.recall import (
     find_vector_field,
     gen_query_vectors,
     ground_truth,

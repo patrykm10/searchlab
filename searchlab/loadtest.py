@@ -44,6 +44,15 @@ class RequestRecord:
 
 
 @dataclass
+class LoadControl:
+    """Mutable knobs read by run_load each scheduler tick. Assignments from
+    another thread are safe: float/bool stores are atomic under the GIL."""
+
+    rps: float = 0.0
+    stop_requested: bool = False
+
+
+@dataclass
 class LoadResult:
     records: list[RequestRecord] = field(default_factory=list)
     dropped: int = 0  # scheduled but never sent (client saturated)
@@ -171,7 +180,7 @@ def load_queries(path: str | Path | None) -> list[dict]:
     data = yaml.safe_load(Path(path).read_text())
     templates = data.get("queries", data) if isinstance(data, dict) else data
     if not isinstance(templates, list) or not templates:
-        raise SystemExit(f"solrlab: no query templates found in {path}")
+        raise SystemExit(f"searchlab: no query templates found in {path}")
     return templates
 
 
@@ -190,12 +199,17 @@ async def run_load(
     words: list[str] | None = None,
     live_file: str | Path | None = None,
     engine: str = "solr",
+    control: LoadControl | None = None,
 ) -> LoadResult:
     """Fire queries at `rps` for `duration` seconds, ramping linearly over `ramp`.
 
     If `index_rps` > 0, a concurrent stream of single-doc updates (generated
     from `index_profile`) runs on its own fixed schedule — mixed read/write
     load is where merge- and cache-related pathologies actually show up.
+
+    A `control` object makes the run steerable while it executes: its `rps`
+    replaces the static target each scheduler tick, and `stop_requested`
+    ends the run before `duration`.
     """
     from .datagen import _WORDS  # embedded corpus as default term source
 
@@ -269,6 +283,10 @@ async def run_load(
             now = time.perf_counter() - t0
             if now >= duration:
                 break
+            if control is not None and control.stop_requested:
+                break
+            eff_rps = control.rps if control is not None else rps
+            result.target_rps = eff_rps
 
             if live_file and now >= next_live:
                 next_live = now + 1.0
@@ -280,7 +298,7 @@ async def run_load(
             frac = min(now / ramp, 1.0) if ramp > 0 else 1.0
             dt = now - prev
             prev = now
-            q_tokens = min(q_tokens + rps * frac * dt, max(rps * frac, 1.0))
+            q_tokens = min(q_tokens + eff_rps * frac * dt, max(eff_rps * frac, 1.0))
             if index_rps > 0:
                 i_tokens = min(i_tokens + index_rps * frac * dt, max(index_rps * frac, 1.0))
 

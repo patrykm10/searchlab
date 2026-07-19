@@ -7,8 +7,8 @@ import asyncio
 import pytest
 from aiohttp import web
 
-from solrlab.gclog import parse_gclog, summarize
-from solrlab.replay import parse_log, replay
+from searchlab.gclog import parse_gclog, summarize
+from searchlab.replay import parse_log, replay
 
 SOLR_LOG = """\
 2026-07-09 12:00:00.100 INFO  (qtp1-21) [c:products s:shard1 r:core_node3 x:products_shard1_replica_n1] o.a.s.c.S.Request webapp=/solr path=/select params={q=body_t%3Alatency&rows=10} hits=42 status=0 QTime=3

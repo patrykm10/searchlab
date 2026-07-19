@@ -9,10 +9,10 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from solrlab.chaos import load_scenario
-from solrlab.cluster import ClusterSpec
-from solrlab.dashboard import _DemoState, make_handler
-from solrlab.metrics import diff_snapshots
+from searchlab.chaos import load_scenario
+from searchlab.cluster import ClusterSpec
+from searchlab.dashboard import _DemoState, make_handler
+from searchlab.metrics import diff_snapshots
 
 # -------------------------------------------------------------- dashboard ---
 
@@ -36,7 +36,7 @@ def test_dashboard_serves_page_and_api():
     t.start()
     try:
         page = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
-        assert "CLUSTER RECORDER" in page and "/api/snapshot" in page
+        assert "searchlab" in page and "/api/snapshot" in page and "/api/logs" in page
         snap = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/snapshot").read())
         assert "nodes" in snap and "solr1" in snap["nodes"]
         with pytest.raises(urllib.error.HTTPError):

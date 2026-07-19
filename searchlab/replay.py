@@ -110,7 +110,7 @@ def parse_log(path: str | Path, path_filter: str = "/select",
                 entries.append({"ts": float(i), "path": path_filter,
                                 "params": _parse_params(line)})
     if not entries:
-        sys.exit(f"solrlab: no replayable queries found in {path}")
+        sys.exit(f"searchlab: no replayable queries found in {path}")
     entries.sort(key=lambda e: e["ts"])
     t0 = entries[0]["ts"]
     for e in entries:

@@ -1,6 +1,6 @@
 # Full failure drill: 4-minute mixed load, solr2 frozen (SIGSTOP) at t=60 and
 # thawed at t=120, then hard-killed at t=150 and restored at t=200.
-# Run: solrlab drill examples/drill-node-loss.yaml
+# Run: searchlab drill examples/drill-node-loss.yaml
 collection: products
 seed: 42
 load:

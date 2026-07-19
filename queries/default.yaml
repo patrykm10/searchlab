@@ -1,4 +1,4 @@
-# solrlab query templates. Weighted mix; {RAND_WORD} and {RAND_INT:lo:hi}
+# searchlab query templates. Weighted mix; {RAND_WORD} and {RAND_INT:lo:hi}
 # are substituted per request so query caches don't fake your latency numbers.
 queries:
   - name: keyword_search

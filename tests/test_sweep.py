@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from solrlab.loadtest import LoadResult, RequestRecord
-from solrlab.sweep import cell_name, cells, load_sweep, run_sweep, save_sweep
+from searchlab.loadtest import LoadResult, RequestRecord
+from searchlab.sweep import cell_name, cells, load_sweep, run_sweep, save_sweep
 
 SWEEP_YAML = """
 collection: c

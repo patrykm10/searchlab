@@ -2,7 +2,7 @@
 
 `--assert "p99_ms<50"` turns any load, replay, or drill into a regression
 gate: the command exits non-zero when the assertion fails, so a CI job can
-run `solrlab load ... --assert "p99_ms<100" --assert "errors=0"` and fail the
+run `searchlab load ... --assert "p99_ms<100" --assert "errors=0"` and fail the
 build when latency regresses. Assertions evaluate against the same metric
 names the JSON report uses.
 """
@@ -27,11 +27,11 @@ METRIC_KEYS = ("requests", "errors", "dropped", "achieved_rps",
 def parse_assertion(expr: str) -> tuple[str, str, float]:
     m = _ASSERT.match(expr)
     if not m:
-        sys.exit(f"solrlab: bad assertion '{expr}' — expected e.g. \"p99_ms<50\", "
+        sys.exit(f"searchlab: bad assertion '{expr}' — expected e.g. \"p99_ms<50\", "
                  f"\"errors=0\" (metrics: {', '.join(METRIC_KEYS)})")
     key = m.group("key")
     if key not in METRIC_KEYS:
-        sys.exit(f"solrlab: unknown metric '{key}' in assertion — "
+        sys.exit(f"searchlab: unknown metric '{key}' in assertion — "
                  f"valid: {', '.join(METRIC_KEYS)}")
     return key, m.group("op"), float(m.group("val"))
 
@@ -76,7 +76,7 @@ def parse_duration(value: str | float) -> float:
         return float(value)
     m = _DURATION.match(value)
     if not m or not any(m.groupdict().values()):
-        sys.exit(f"solrlab: bad duration '{value}' — try 90, 90s, 2m, 1h30m")
+        sys.exit(f"searchlab: bad duration '{value}' — try 90, 90s, 2m, 1h30m")
     h, mi, s = (float(m.group(g) or 0) for g in ("h", "m", "s"))
     return h * 3600 + mi * 60 + s
 
@@ -94,4 +94,4 @@ def parse_count(value: str | int) -> int:
     try:
         return int(float(v) * mult)
     except ValueError:
-        sys.exit(f"solrlab: bad count '{value}' — try 10000, 10k, 1.5m")
+        sys.exit(f"searchlab: bad count '{value}' — try 10000, 10k, 1.5m")

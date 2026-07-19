@@ -15,7 +15,7 @@ from jinja2 import Environment, PackageLoader
 
 from .engines import get_engine
 
-WORKDIR = Path.cwd() / ".solrlab"
+WORKDIR = Path.cwd() / ".searchlab"
 
 PROMETHEUS_CONFIG = """\
 global:
@@ -40,7 +40,7 @@ class ClusterSpec:
     base_port: int = 8983
     monitoring: bool = False
     gc_logs: bool = False
-    project_name: str = "solrlab"
+    project_name: str = "searchlab"
 
     def base_url(self, node: int = 0) -> str:
         return self.eng().base_url(self, node)
@@ -59,11 +59,11 @@ def _compose_cmd() -> list[str]:
             return ["docker", "compose"]
     if shutil.which("docker-compose"):
         return ["docker-compose"]
-    sys.exit("solrlab: docker (with compose plugin) or docker-compose not found on PATH")
+    sys.exit("searchlab: docker (with compose plugin) or docker-compose not found on PATH")
 
 
 def render_compose(spec: ClusterSpec) -> str:
-    env = Environment(loader=PackageLoader("solrlab", "templates"), keep_trailing_newline=True)
+    env = Environment(loader=PackageLoader("searchlab", "templates"), keep_trailing_newline=True)
     tpl = env.get_template(get_engine(spec.engine).compose_template)
     return tpl.render(**spec.__dict__)
 
@@ -84,7 +84,7 @@ def write_workdir(spec: ClusterSpec) -> Path:
 def load_spec() -> ClusterSpec:
     spec_path = WORKDIR / "spec.json"
     if not spec_path.exists():
-        sys.exit("solrlab: no cluster found in ./.solrlab — run `solrlab up` first")
+        sys.exit("searchlab: no cluster found in ./.searchlab — run `searchlab up` first")
     return ClusterSpec(**json.loads(spec_path.read_text()))
 
 
@@ -99,7 +99,7 @@ def up(spec: ClusterSpec, wait: bool = True, timeout: int = 180) -> None:
 def down(volumes: bool = False) -> None:
     compose_path = WORKDIR / "docker-compose.yml"
     if not compose_path.exists():
-        sys.exit("solrlab: nothing to tear down (no ./.solrlab/docker-compose.yml)")
+        sys.exit("searchlab: nothing to tear down (no ./.searchlab/docker-compose.yml)")
     cmd = _compose_cmd() + ["-f", str(compose_path), "down"]
     if volumes:
         cmd.append("-v")
@@ -124,7 +124,7 @@ def wait_healthy(spec: ClusterSpec, timeout: int = 180) -> None:
             if pending:
                 time.sleep(2)
     if pending:
-        sys.exit(f"solrlab: nodes not healthy after {timeout}s: {sorted(pending)}")
+        sys.exit(f"searchlab: nodes not healthy after {timeout}s: {sorted(pending)}")
 
 
 
@@ -140,3 +140,37 @@ def delete_collection(spec: ClusterSpec, name: str) -> None:
 def cluster_overview(spec: ClusterSpec) -> dict:
     """Engine-normalized: {live_nodes, collections: {name: {shards, health}}}."""
     return spec.eng().cluster_overview(spec)
+
+
+def commit(spec: ClusterSpec, collection: str, timeout: float = 60.0) -> dict:
+    """Hard commit (Solr) / refresh (ES/OS): make recent updates searchable.
+
+    Raises httpx.HTTPError on failure — callers decide how to surface it.
+    """
+    with httpx.Client(timeout=timeout) as client:
+        if spec.engine == "solr":
+            r = client.get(f"{spec.base_url()}/{collection}/update",
+                           params={"commit": "true", "wt": "json"})
+        else:
+            r = client.post(f"{spec.base_url()}/{collection}/_refresh")
+        r.raise_for_status()
+        return r.json()
+
+
+def optimize(spec: ClusterSpec, collection: str, max_segments: int = 1,
+             timeout: float = 600.0) -> dict:
+    """Force-merge the index down to `max_segments` segments.
+
+    Expensive on purpose — it rewrites segment files. Raises httpx.HTTPError
+    on failure.
+    """
+    with httpx.Client(timeout=timeout) as client:
+        if spec.engine == "solr":
+            r = client.get(f"{spec.base_url()}/{collection}/update",
+                           params={"optimize": "true", "maxSegments": max_segments,
+                                   "wt": "json"})
+        else:
+            r = client.post(f"{spec.base_url()}/{collection}/_forcemerge",
+                            params={"max_num_segments": max_segments})
+        r.raise_for_status()
+        return r.json()

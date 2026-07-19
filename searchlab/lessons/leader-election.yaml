@@ -25,7 +25,7 @@ steps:
   - wait: |
       Open ANOTHER terminal and hard-crash a node:
 
-          solrlab chaos kill solr2
+          searchlab chaos kill solr2
 
       I'll watch the cluster state and notice when ZooKeeper does.
     url: "/admin/collections"
@@ -49,7 +49,7 @@ steps:
   - wait: |
       Bring it back and watch recovery:
 
-          solrlab chaos start solr2
+          searchlab chaos start solr2
     url: "/admin/collections"
     params: { action: CLUSTERSTATUS, wt: json }
     until: { path: "cluster.live_nodes", op: len_gte, value: 2 }

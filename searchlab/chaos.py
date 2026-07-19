@@ -22,14 +22,14 @@ def _container(spec: ClusterSpec, node: str) -> str:
         node = f"{spec.eng().node_prefix}{node}"
     valid = spec.eng().node_names(spec)
     if node not in valid:
-        sys.exit(f"solrlab: unknown node '{node}' — valid: {', '.join(valid)}")
+        sys.exit(f"searchlab: unknown node '{node}' — valid: {', '.join(valid)}")
     return f"{spec.project_name}-{node}"
 
 
 def _docker(*args: str) -> None:
     r = subprocess.run(["docker", *args], capture_output=True, text=True)
     if r.returncode != 0:
-        sys.exit(f"solrlab: docker {' '.join(args)} failed: {r.stderr.strip()}")
+        sys.exit(f"searchlab: docker {' '.join(args)} failed: {r.stderr.strip()}")
 
 
 def kill(spec: ClusterSpec, node: str) -> str:
@@ -80,12 +80,12 @@ def load_scenario(path) -> list[dict]:
     data = yaml.safe_load(Path(path).read_text())
     steps = data.get("steps", data) if isinstance(data, dict) else data
     if not isinstance(steps, list) or not steps:
-        sys.exit(f"solrlab: no steps found in scenario {path}")
+        sys.exit(f"searchlab: no steps found in scenario {path}")
     for s in steps:
         if s.get("action") not in _ACTIONS:
-            sys.exit(f"solrlab: unknown action '{s.get('action')}' — valid: {', '.join(_ACTIONS)}")
+            sys.exit(f"searchlab: unknown action '{s.get('action')}' — valid: {', '.join(_ACTIONS)}")
         if "at" not in s or "node" not in s:
-            sys.exit(f"solrlab: scenario steps need 'at' (seconds), 'action', 'node': {s}")
+            sys.exit(f"searchlab: scenario steps need 'at' (seconds), 'action', 'node': {s}")
     return sorted(steps, key=lambda s: float(s["at"]))
 
 

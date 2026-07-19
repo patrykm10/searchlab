@@ -1,5 +1,5 @@
 title: "SolrCloud anatomy: nodes, shards, replicas, ZooKeeper"
-requires: "a running cluster (solrlab up) with at least one collection"
+requires: "a running cluster (searchlab up) with at least one collection"
 intro: |
   Ten minutes on what the pieces actually are — against your real cluster,
   not a diagram.
@@ -11,7 +11,7 @@ steps:
       of it — which replicas exist, where they live, who leads.
 
       Let's look at yours:
-  - run: "solrlab status"
+  - run: "searchlab status"
   - pause: true
   - say: |
       Now the raw truth, straight from the Collections API — this is what

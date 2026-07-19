@@ -43,14 +43,14 @@ def load_sweep(path: str | Path) -> dict:
     cfg = yaml.safe_load(Path(path).read_text())
     for section in ("collection", "matrix", "workload"):
         if section not in cfg:
-            sys.exit(f"solrlab: sweep {path} needs a '{section}' section")
+            sys.exit(f"searchlab: sweep {path} needs a '{section}' section")
     if "load" not in cfg["workload"]:
-        sys.exit("solrlab: sweep workload needs a 'load' section")
+        sys.exit("searchlab: sweep workload needs a 'load' section")
     for key, values in cfg["matrix"].items():
         if key not in _SWEEPABLE:
-            sys.exit(f"solrlab: can't sweep '{key}' — sweepable: {', '.join(_SWEEPABLE)}")
+            sys.exit(f"searchlab: can't sweep '{key}' — sweepable: {', '.join(_SWEEPABLE)}")
         if not isinstance(values, list) or not values:
-            sys.exit(f"solrlab: matrix '{key}' must be a non-empty list")
+            sys.exit(f"searchlab: matrix '{key}' must be a non-empty list")
     return cfg
 
 
@@ -107,7 +107,7 @@ def run_sweep(cfg: dict, ops: dict | None = None, log: Callable = print) -> list
     data_path = None
     if "gen" in workload:
         g = workload["gen"]
-        data_path = Path(".solrlab-sweep-data.jsonl")
+        data_path = Path(".searchlab-sweep-data.jsonl")
         n = datagen.generate_to_file(g["profile"], gates.parse_count(g.get("count", 10_000)),
                                      data_path, seed)
         log(f"sweep: generated {n} docs once, reused for every cell")

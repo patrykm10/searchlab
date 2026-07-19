@@ -1,4 +1,4 @@
-"""Derive an explicit Solr schema from a solrlab data profile.
+"""Derive an explicit Solr schema from a searchlab data profile.
 
 The `_default` configset's dynamic fields (`*_t`, `*_s`, `*_i`, ...) work fine
 for quick labs, but explicit fields let you control docValues and indexing per
@@ -70,7 +70,7 @@ def mappings_from_profile(profile: dict, engine: str = "elasticsearch") -> dict:
         inner = cfg.get("of", {"type": "keyword"}) if ftype == "multivalued" else cfg
         es_type = _ES_TYPE_MAP.get(inner.get("type", "keyword"))
         if es_type is None:
-            sys.exit(f"solrlab: field '{name}' has type '{inner.get('type')}' with no ES mapping")
+            sys.exit(f"searchlab: field '{name}' has type '{inner.get('type')}' with no ES mapping")
         field: dict = {"type": es_type}
         if es_type == "date":
             field["format"] = "strict_date_time_no_millis||strict_date_optional_time"
@@ -86,7 +86,7 @@ def apply_mappings(spec, collection: str, profile: dict, dry_run: bool = False,
         return "would apply:\n" + json.dumps(mappings, indent=2)
     r = httpx.put(f"{spec.base_url()}/{collection}/_mapping", json=mappings, timeout=60)
     if r.status_code != 200:
-        sys.exit(f"solrlab: mapping update failed: {r.text[:400]}")
+        sys.exit(f"searchlab: mapping update failed: {r.text[:400]}")
     return f"applied mappings for {len(mappings['properties'])} field(s): " \
            f"{', '.join(mappings['properties'])}"
 
@@ -132,7 +132,7 @@ def fields_from_profile(profile: dict) -> list[dict]:
         inner = cfg.get("of", {"type": "keyword"}) if multi else cfg
         solr_type = _TYPE_MAP.get(inner.get("type", "keyword"))
         if solr_type is None:
-            sys.exit(f"solrlab: field '{name}' has type '{inner.get('type')}' with no Solr mapping")
+            sys.exit(f"searchlab: field '{name}' has type '{inner.get('type')}' with no Solr mapping")
         field = {
             "name": name,
             "type": solr_type,
@@ -171,7 +171,7 @@ def apply_schema(spec: ClusterSpec, collection: str, profile: dict, dry_run: boo
                 r = client.post(schema_url, params={"wt": "json"},
                                 json={"add-field-type": missing})
                 if r.status_code != 200 or r.json().get("errors"):
-                    sys.exit(f"solrlab: field-type create failed: {r.text[:400]}")
+                    sys.exit(f"searchlab: field-type create failed: {r.text[:400]}")
 
         r = client.get(f"{schema_url}/fields", params={"wt": "json"})
         r.raise_for_status()
@@ -197,7 +197,7 @@ def apply_schema(spec: ClusterSpec, collection: str, profile: dict, dry_run: boo
         r = client.post(schema_url, params={"wt": "json"}, json=commands)
         body = r.json()
         if r.status_code != 200 or body.get("errors"):
-            sys.exit(f"solrlab: schema update failed: {json.dumps(body, indent=2)}")
+            sys.exit(f"searchlab: schema update failed: {json.dumps(body, indent=2)}")
 
     parts = []
     if add:
