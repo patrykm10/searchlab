@@ -227,7 +227,14 @@ def make_handler(spec: ClusterSpec, demo: bool,
             if path == "/api/load/stop":
                 return runner.stop_load()
             if path == "/api/index":
-                return runner.index_docs(coll, int(body.get("count", 0)))
+                return runner.index_docs(coll, int(body.get("count", 0)),
+                                         str(body.get("preset", "standard")))
+            if path == "/api/collection/create":
+                return runner.create_collection(str(body.get("name", "")).strip(),
+                                                int(body.get("shards", 1)),
+                                                int(body.get("replicas", 1)))
+            if path == "/api/collection/delete":
+                return runner.delete_collection(coll)
             if path == "/api/commit":
                 return runner.commit(coll)
             if path == "/api/optimize":

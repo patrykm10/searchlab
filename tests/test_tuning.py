@@ -7,6 +7,7 @@ import asyncio
 import pytest
 from aiohttp import web
 
+from searchlab.actions import ActionRunner
 from searchlab.cluster import ClusterSpec
 from searchlab.configset import INDEX_CONFIG_BLOCK, patch_solrconfig
 from searchlab.tuning import KNOBS, apply_tuning, read_tuning, registry, tuning_state
@@ -136,3 +137,24 @@ def test_patch_solrconfig_without_index_config_section():
     assert "<indexConfig>" in patched and "</indexConfig>" in patched
     assert "searchlab.ramBufferMB" in patched
     assert INDEX_CONFIG_BLOCK.strip().splitlines()[0].strip() in patched
+
+
+async def test_action_runner_marks_config_fetch_failure_transient(aiohttp_server):
+    """A collection whose /config 404s (e.g. right after CREATE, before the
+    core is routable) must surface as a vague, retry-flagged error — never
+    the raw httpx exception text — so the UI keeps polling instead of
+    giving up on it forever."""
+    from aiohttp import web
+
+    async def not_found(request):
+        return web.json_response({"error": "no such collection"}, status=404)
+
+    app = web.Application()
+    app.router.add_get("/solr/ghost/config", not_found)
+    server = await aiohttp_server(app)
+
+    runner = ActionRunner(ClusterSpec(base_port=server.port))
+    out = await asyncio.to_thread(runner.read_tuning, "ghost")
+    assert out["ok"] is False
+    assert out.get("transient") is True
+    assert "404" not in out["error"] and "Client error" not in out["error"]

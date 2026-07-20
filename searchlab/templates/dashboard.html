@@ -49,7 +49,14 @@ h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--muted); margin-bottom: 22px; }
 
 /* ---------- controls ---------- */
-.cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0; }
+input[type="text"] {
+  font-family: var(--mono); font-size: 13px; color: var(--ink);
+  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  padding: 7px 9px; outline: none; width: 150px;
+}
+input[type="text"]:focus { border-color: var(--cobalt); }
+.btn.danger-armed { color: var(--cobalt); border-bottom-color: var(--cobalt); }
 #tuningblock { margin-top: 30px; border-top: 1.5px solid var(--line); padding-top: 24px; }
 #tuningblock h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 4px; }
 #tuningblock > .desc { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
@@ -253,8 +260,37 @@ canvas { width: 100%; height: 150px; display: block;
         <button class="btn preset" data-count="10000">10k</button>
         <button class="btn preset" data-count="100000">100k</button>
       </div>
+      <div class="frow">
+        <label for="ctl-preset">Shape</label>
+        <select id="ctl-preset">
+          <option value="simple">Simple</option>
+          <option value="standard" selected>Standard</option>
+          <option value="heavy-text">Heavy text</option>
+          <option value="high-cardinality">High cardinality</option>
+        </select>
+      </div>
+      <div class="desc" id="preset-desc" style="margin-bottom:14px"></div>
       <div class="statusline" id="index-status">Idle</div>
       <button class="btn primary" id="btn-index">Add documents</button>
+    </div>
+
+    <div class="card">
+      <h3>Collections</h3>
+      <div class="desc">Spin up a new collection, spread across the cluster.</div>
+      <div class="frow">
+        <label for="coll-name">Name</label>
+        <input type="text" id="coll-name" placeholder="my-collection">
+      </div>
+      <div class="frow">
+        <label for="coll-shards">Shards</label>
+        <select id="coll-shards"><option>1</option><option selected>2</option><option>4</option><option>8</option></select>
+        <label for="coll-replicas">Copies</label>
+        <select id="coll-replicas"><option selected>1</option><option>2</option><option>3</option></select>
+      </div>
+      <button class="btn primary" id="btn-createcoll">Create collection</button>
+      <div style="margin-top:16px">
+        <button class="btn" id="btn-delcoll">Delete selected collection…</button>
+      </div>
     </div>
 
     <div class="card">
@@ -463,10 +499,61 @@ $("btn-load").addEventListener("click", async () => {
 document.querySelectorAll(".preset").forEach(b =>
   b.addEventListener("click", () => { $("ctl-count").value = b.dataset.count; }));
 
+const PRESET_DESCS = {
+  "simple": "Small, plain documents — a handful of short fields. Indexes fast, easy on memory.",
+  "standard": "Realistic e-commerce documents: titles, long descriptions, skewed categories, brands, prices, tags.",
+  "heavy-text": "Article-sized documents with 300–800 word bodies — heavy text analysis, a much larger index.",
+  "high-cardinality": "Event-like documents full of unique IDs and thousands of distinct tags — stresses facets, sorting, and memory.",
+};
+function updatePresetDesc() { $("preset-desc").textContent = PRESET_DESCS[$("ctl-preset").value]; }
+$("ctl-preset").addEventListener("change", updatePresetDesc);
+updatePresetDesc();
+
 $("btn-index").addEventListener("click", async () => {
   const out = await post("/api/index",
-    { collection: coll(), count: Number($("ctl-count").value) });
+    { collection: coll(), count: Number($("ctl-count").value),
+      preset: $("ctl-preset").value });
   if (out.ok) showStrip("Adding documents…", false);
+  poll();
+});
+
+/* ---------- collections ---------- */
+
+let pendingSelect = null;
+
+$("btn-createcoll").addEventListener("click", async () => {
+  const name = $("coll-name").value.trim();
+  if (!name) { showStrip("Give the collection a name first.", true); return; }
+  const out = await post("/api/collection/create",
+    { name, shards: Number($("coll-shards").value),
+      replicas: Number($("coll-replicas").value) });
+  if (out.ok) {
+    showStrip("Creating collection “" + name + "”…", false);
+    pendingSelect = name;
+    $("coll-name").value = "";
+  }
+  poll();
+});
+
+$("btn-delcoll").addEventListener("click", async () => {
+  const b = $("btn-delcoll"), name = coll();
+  if (!name) { showStrip("No collection selected.", true); return; }
+  if (b.dataset.armed !== "1") {
+    b.dataset.armed = "1";
+    b.classList.add("danger-armed");
+    b.textContent = "Click again to delete “" + name + "”";
+    setTimeout(() => {
+      b.dataset.armed = "0";
+      b.classList.remove("danger-armed");
+      b.textContent = "Delete selected collection…";
+    }, 4000);
+    return;
+  }
+  b.dataset.armed = "0";
+  b.classList.remove("danger-armed");
+  b.textContent = "Delete selected collection…";
+  const out = await post("/api/collection/delete", { collection: name });
+  if (out.ok) showStrip("Deleting collection “" + name + "”…", false);
   poll();
 });
 
@@ -510,6 +597,9 @@ function renderControls(a) {
   $("index-status").className = idx.running ? "statusline on" : "statusline";
   $("btn-optimize").disabled = !!a.optimizing;
   $("btn-optimize").textContent = a.optimizing ? "Merging…" : "Merge segments";
+  $("btn-createcoll").disabled = !!a.collection_busy;
+  $("btn-createcoll").textContent = a.collection_busy ? "Working…" : "Create collection";
+  $("btn-delcoll").disabled = !!a.collection_busy;
   if (a.last_action && a.last_action.ts > (renderControls.lastTs || 0)) {
     renderControls.lastTs = a.last_action.ts;
     showStrip(a.last_action.message, !a.last_action.ok);
@@ -524,14 +614,16 @@ const tuneDebounce = {};
 
 async function loadTuning(collection) {
   if (!collection || demo) return;
-  knobsFor = collection;
   try {
     const r = await fetch("/api/tuning?collection=" + encodeURIComponent(collection));
     const out = await r.json();
     if (!out.ok) {
       $("knobs").innerHTML = `<span class="desc">${esc(out.error || "Not available.")}</span>`;
+      if (!out.transient) knobsFor = collection;  // permanent (e.g. ES/OS): stop retrying
+      else setTimeout(() => loadTuning(collection), 2000);
       return;
     }
+    knobsFor = collection;
     const note = $("tuning-note");
     note.style.display = out.note ? "block" : "none";
     note.textContent = out.note || "";
@@ -558,7 +650,8 @@ async function loadTuning(collection) {
       });
     }
   } catch (e) {
-    $("knobs").innerHTML = `<span class="desc">Could not load settings.</span>`;
+    $("knobs").innerHTML = `<span class="desc">Could not load settings — retrying…</span>`;
+    setTimeout(() => loadTuning(collection), 2000);
   }
 }
 
@@ -686,6 +779,9 @@ function render(snap) {
       ? colls.map(c => `<option>${c}</option>`).join("")
       : `<option value="">no collections yet</option>`;
     if (colls.includes(cur)) sel.value = cur;
+  }
+  if (pendingSelect && colls.includes(pendingSelect)) {
+    sel.value = pendingSelect; pendingSelect = null;
   }
   if (sel.value && sel.value !== knobsFor) loadTuning(sel.value);
 

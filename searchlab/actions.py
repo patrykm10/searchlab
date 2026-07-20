@@ -9,6 +9,7 @@ job at a time — this is a lab bench, not a scheduler.
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
 from concurrent.futures import Future
@@ -22,6 +23,9 @@ from .loadtest import LoadControl, run_load
 
 MAX_RPS = 2000.0
 MAX_DOCS = 2_000_000
+MAX_SHARDS = 8
+MAX_REPLICAS = 4
+COLLECTION_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 FALLBACK_PROFILE = (
     "fields:\n  id: {type: id}\n"
@@ -30,6 +34,38 @@ FALLBACK_PROFILE = (
     "  category_s: {type: categorical, cardinality: 50, zipf: 1.1}\n"
     "  price_f: {type: float, min: 1, max: 5000}\n"
 )
+
+# Document-shape presets for the Add documents control. "standard" prefers
+# the repo's richer profiles/default.yaml when running from a checkout.
+DOC_PRESETS: dict[str, str | None] = {
+    "simple": (
+        "fields:\n  id: {type: id}\n"
+        "  title_t: {type: text, min_words: 3, max_words: 8}\n"
+        "  body_t: {type: text, min_words: 20, max_words: 60}\n"
+        "  price_f: {type: float, min: 1, max: 500}\n"
+        "  active_b: {type: bool, true_ratio: 0.9}\n"
+    ),
+    "standard": None,  # profiles/default.yaml when present, else FALLBACK_PROFILE
+    "heavy-text": (
+        "fields:\n  id: {type: id}\n"
+        "  title_t: {type: text, min_words: 5, max_words: 15}\n"
+        "  abstract_t: {type: text, min_words: 50, max_words: 150}\n"
+        "  body_t: {type: text, min_words: 300, max_words: 800}\n"
+        "  category_s: {type: categorical, cardinality: 30, zipf: 1.1}\n"
+        "  published_dt: {type: date, days_back: 3650}\n"
+    ),
+    "high-cardinality": (
+        "fields:\n  id: {type: id, uuid: true}\n"
+        "  user_id_s: {type: keyword, length: 12}\n"
+        "  session_id_s: {type: keyword, length: 16}\n"
+        "  event_t: {type: text, min_words: 5, max_words: 15}\n"
+        "  category_s: {type: categorical, cardinality: 2000}\n"
+        "  tags_ss: {type: multivalued, min_values: 2, max_values: 10,\n"
+        "            of: {type: categorical, cardinality: 5000, prefix: tag}}\n"
+        "  ts_dt: {type: date, days_back: 90}\n"
+        "  value_i: {type: int, min: 0, max: 1000000}\n"
+    ),
+}
 
 
 class ActionRunner:
@@ -45,6 +81,7 @@ class ActionRunner:
         self._index_meta: dict = {}
         self._optimizing = False
         self._replica_busy = False
+        self._coll_busy = False
         self.last_action: dict | None = None
 
     # ------------------------------------------------------------- helpers --
@@ -112,19 +149,23 @@ class ActionRunner:
 
     # ------------------------------------------------------------ indexing --
 
-    def index_docs(self, collection: str, count: int) -> dict:
+    def index_docs(self, collection: str, count: int, preset: str = "standard") -> dict:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
         if not 0 < count <= MAX_DOCS:
             return {"ok": False, "error": f"Count must be between 1 and {MAX_DOCS:,}."}
+        if preset not in DOC_PRESETS:
+            return {"ok": False,
+                    "error": f"Document shape must be one of {', '.join(DOC_PRESETS)}."}
         with self._lock:
             if self._running(self._index_future):
                 return {"ok": False, "error": "An indexing job is already running."}
-            profile = Path("profiles/default.yaml")
-            if not profile.exists():  # installed without the repo checkout
-                cl.WORKDIR.mkdir(exist_ok=True)
-                profile = cl.WORKDIR / "default-profile.yaml"
-                profile.write_text(FALLBACK_PROFILE)
+            cl.WORKDIR.mkdir(exist_ok=True)
+            if preset == "standard" and Path("profiles/default.yaml").exists():
+                profile = Path("profiles/default.yaml")
+            else:
+                profile = cl.WORKDIR / f"ui-profile-{preset}.yaml"
+                profile.write_text(DOC_PRESETS[preset] or FALLBACK_PROFILE)
             data = cl.WORKDIR / "ui-data.jsonl"
 
             async def job():
@@ -166,6 +207,60 @@ class ActionRunner:
                 self._done("optimize", False, str(e))
             finally:
                 self._optimizing = False
+
+        threading.Thread(target=job, daemon=True).start()
+        return {"ok": True}
+
+    # --------------------------------------------------------- collections --
+
+    def create_collection(self, name: str, shards: int, replicas: int) -> dict:
+        if not COLLECTION_NAME_RE.match(name or ""):
+            return {"ok": False, "error": "Collection names use letters, digits, "
+                                          "hyphens and underscores (max 64 chars)."}
+        if not 1 <= shards <= MAX_SHARDS:
+            return {"ok": False, "error": f"Shards must be between 1 and {MAX_SHARDS}."}
+        if not 1 <= replicas <= MAX_REPLICAS:
+            return {"ok": False, "error": f"Copies must be between 1 and {MAX_REPLICAS}."}
+        with self._lock:
+            if self._coll_busy:
+                return {"ok": False, "error": "A collection change is already running."}
+            self._coll_busy = True
+
+        def job():
+            try:
+                cl.create_collection(self.spec, name, shards, replicas)
+                self._done("create_collection", True,
+                           f"Collection “{name}” created — {shards} shard(s), "
+                           f"{replicas} cop{'y' if replicas == 1 else 'ies'} each.")
+            except (SystemExit, Exception) as e:  # engines sys.exit on failure
+                self._done("create_collection", False, str(e))
+            finally:
+                self._coll_busy = False
+
+        threading.Thread(target=job, daemon=True).start()
+        return {"ok": True}
+
+    def delete_collection(self, name: str) -> dict:
+        if not name:
+            return {"ok": False, "error": "Pick a collection first."}
+        load = self.state()["load"]
+        if load["running"] and load["collection"] == name:
+            return {"ok": False, "error": "Stop the load test on this collection first."}
+        if self._running(self._index_future) and self._index_meta.get("collection") == name:
+            return {"ok": False, "error": "Wait for the indexing job on this collection to finish."}
+        with self._lock:
+            if self._coll_busy:
+                return {"ok": False, "error": "A collection change is already running."}
+            self._coll_busy = True
+
+        def job():
+            try:
+                cl.delete_collection(self.spec, name)
+                self._done("delete_collection", True, f"Collection “{name}” deleted.")
+            except (SystemExit, Exception) as e:
+                self._done("delete_collection", False, str(e))
+            finally:
+                self._coll_busy = False
 
         threading.Thread(target=job, daemon=True).start()
         return {"ok": True}
@@ -233,8 +328,12 @@ class ActionRunner:
             return {"ok": False, "error": "Tuning is Solr-only for now."}
         try:
             state = tuning.tuning_state(self.spec, collection)
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
+        except Exception:
+            # A collection just created can 404 on /config for a moment while
+            # its core finishes coming up — transient, so stay vague and let
+            # the UI retry rather than surfacing a raw HTTP exception.
+            return {"ok": False, "error": "Settings aren't available yet — retrying…",
+                    "transient": True}
         return {"ok": True, **state}
 
     def tune(self, collection: str, name: str, value: float) -> dict:
@@ -269,5 +368,6 @@ class ActionRunner:
                 "count": self._index_meta.get("count"),
             },
             "optimizing": self._optimizing,
+            "collection_busy": self._coll_busy,
             "last_action": self.last_action,
         }
