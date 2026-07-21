@@ -72,3 +72,21 @@ def classify(line: str) -> dict | None:
         if pattern.search(line):
             return {"tag": tag, "desc": desc}
     return None
+
+
+# Solr's request logger records every incoming call. The only one worth
+# showing in the activity panel is indexing (/update); the rest — /select
+# queries, and the /config, /config/overlay, /admin/* polling that the
+# dashboard itself generates — is chatter the charts already cover. So we
+# drop INFO request-log lines whose path isn't /update. WARN/ERROR lines
+# are never dropped (they don't carry " INFO "), whatever their path.
+_REQUEST_PATH = re.compile(r" INFO .*\bpath=(\S+)", re.I)
+
+
+def is_noise(line: str) -> bool:
+    """True for routine INFO request-log lines the activity panel should skip."""
+    m = _REQUEST_PATH.search(line)
+    if not m:
+        return False
+    path = m.group(1).rstrip(",")
+    return not path.startswith("/update")

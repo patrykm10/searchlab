@@ -16,7 +16,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from .loglex import classify
+from .loglex import classify, is_noise
 
 
 class LogStream:
@@ -48,6 +48,8 @@ class LogStream:
 
     def _append(self, line: str) -> None:
         text = line.rstrip("\n")
+        if is_noise(text):
+            return
         with self._lock:
             self._seq += 1
             self._buf.append((self._seq, text, classify(text)))
@@ -87,10 +89,10 @@ class FakeLogStream(LogStream):
         "solr1  | INFO  o.a.s.u.DirectUpdateHandler2 end_commit_flush",
         "solr2  | INFO  o.a.s.c.SolrCore [products_shard2_replica_n2] Registered new searcher",
         "solr1  | INFO  o.a.s.u.LoggingInfoStream [MS][qtp123-45]: merge segment _4c into _4d",
-        "solr2  | INFO  o.a.s.s.HttpSolrCall [admin] webapp=null path=/admin/metrics status=0 QTime=3",
+        "solr2  | INFO  o.a.s.c.RecoveryStrategy Starting recovery process. recoveringAfterStartup=true",
         "solr1  | WARN  o.a.s.h.a.AdminHandlersProxy Timeout occurred while waiting for a response",
         "zk1    | INFO  Notification: my state:LOOKING; n.leader: 1",
-        "solr2  | INFO  o.a.s.c.S.Request [products_shard1_replica_n1] webapp=/solr path=/select params={q=body_t:merge} hits=42 status=0 QTime=11",
+        "solr2  | INFO  o.a.s.u.p.LogUpdateProcessorFactory [products_shard1_replica_n1] webapp=/solr path=/update params={} status=0 QTime=14",
     ]
 
     def __init__(self, maxlen: int = 2000):
