@@ -125,10 +125,8 @@ input[type="range"]::-moz-range-thumb {
   margin-bottom: 14px; font-variant-numeric: tabular-nums; }
 .statusline.on { color: var(--cobalt); }
 
-/* status strip under the cards; hidden until there's something to say */
-#strip:empty { display: none; }
-#strip { margin-top: 26px; padding: 10px 0 0; border-top: 1.5px solid var(--line);
-  font-family: var(--mono); font-size: 12px; color: var(--muted); }
+/* result of the last action; its section stays hidden until there is one */
+#strip { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 #strip.err { color: var(--ink); }
 #strip.err::before { content: "! "; color: var(--cobalt); font-weight: 700; }
 #strip.ok::before { content: "\2713\00a0"; color: var(--cobalt); }
@@ -376,6 +374,10 @@ section.collapsed h2 { margin-bottom: 0; }
 
   </div>
 
+</section>
+
+<section id="lastaction" style="display:none">
+  <h2>Last action</h2>
   <div id="strip"></div>
 </section>
 
@@ -573,6 +575,8 @@ function showStrip(msg, isErr) {
   const s = $("strip");
   s.textContent = msg;
   s.className = isErr ? "err" : "ok";
+  // the section carries the heading, so reveal it only once there's a result
+  $("lastaction").style.display = msg ? "" : "none";
 }
 
 function coll() { return $("ctl-coll").value; }
