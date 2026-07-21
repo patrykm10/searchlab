@@ -210,12 +210,18 @@ canvas { width: 100%; height: 150px; display: block;
   opacity: 0.45; pointer-events: none; z-index: 49; }
 
 /* ---------- request traffic ---------- */
-#traffic { table-layout: fixed; width: 100%; }
-#traffic td.tq { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 0; }
-#traffic td.num { text-align: right; width: 80px; color: var(--muted); }
-#traffic td.tk { width: 62px; }
-#traffic td.tt { width: 72px; color: var(--faint); }
+/* white panel, matching the activity log above it */
+#traffic-panel { background: #fff; border: 1.5px solid var(--line);
+  padding: 2px 14px 10px; }
+#traffic { width: 100%; margin-top: 0; }
+#traffic th { padding-top: 10px; }
+/* the query is the point of this table — let it wrap rather than truncate */
+#traffic td.tq { white-space: normal; word-break: break-word; padding-right: 24px; }
+#traffic td.num, #traffic th.num { text-align: right; width: 90px;
+  white-space: nowrap; }
+#traffic td.num { color: var(--muted); }
+#traffic td.tk { width: 70px; }
+#traffic td.tt { width: 78px; color: var(--faint); white-space: nowrap; }
 #traffic-count { float: right; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; color: var(--faint); }
 .kind { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
@@ -395,7 +401,9 @@ section.collapsed h2 { margin-bottom: 0; }
   <div class="desc" style="margin:-12px 0 14px">The queries and indexing
     requests actually hitting the cluster right now. Per-shard fan-out is
     hidden — these are the requests as clients sent them.</div>
-  <table id="traffic" class="mtable"></table>
+  <div id="traffic-panel">
+    <table id="traffic" class="mtable"></table>
+  </div>
 </section>
 
 <section id="signals">
