@@ -253,6 +253,12 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return runner.commit(coll)
             if path == "/api/optimize":
                 return runner.optimize(coll)
+            if path == "/api/expunge":
+                return runner.expunge_deletes(coll)
+            if path == "/api/reload":
+                return runner.reload_collection(coll)
+            if path == "/api/purge":
+                return runner.delete_all_docs(coll)
             if path == "/api/tune":
                 return runner.tune(coll, str(body.get("name", "")),
                                    float(body.get("value", 0)))

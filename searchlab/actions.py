@@ -79,7 +79,7 @@ class ActionRunner:
         self._control: LoadControl | None = None
         self._index_future: Future | None = None
         self._index_meta: dict = {}
-        self._optimizing = False
+        self._maint_busy = False
         self._replica_busy = False
         self._coll_busy = False
         self.last_action: dict | None = None
@@ -191,25 +191,60 @@ class ActionRunner:
             return self._done("commit", False, str(e))
         return self._done("commit", True, "Committed — recent documents are now searchable.")
 
-    def optimize(self, collection: str) -> dict:
+    def _maintenance_job(self, collection: str, action: str, message: str,
+                         fn) -> dict:
+        """Run a slow collection-wide operation in the background.
+
+        One at a time: expunging while a merge rewrites the same segments
+        just makes both slower.
+        """
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
         with self._lock:
-            if self._optimizing:
-                return {"ok": False, "error": "A merge is already running."}
-            self._optimizing = True
+            if self._maint_busy:
+                return {"ok": False, "error": "Another maintenance job is running."}
+            self._maint_busy = True
 
         def job():
             try:
-                cl.optimize(self.spec, collection)
-                self._done("optimize", True, "Merge finished — index compacted.")
+                fn()
+                self._done(action, True, message)
             except Exception as e:
-                self._done("optimize", False, str(e))
+                self._done(action, False, str(e))
             finally:
-                self._optimizing = False
+                self._maint_busy = False
 
         threading.Thread(target=job, daemon=True).start()
         return {"ok": True}
+
+    def optimize(self, collection: str) -> dict:
+        return self._maintenance_job(
+            collection, "optimize", "Merge finished — index compacted.",
+            lambda: cl.optimize(self.spec, collection))
+
+    def expunge_deletes(self, collection: str) -> dict:
+        return self._maintenance_job(
+            collection, "expunge",
+            "Expunge finished — space from deleted documents reclaimed.",
+            lambda: cl.expunge_deletes(self.spec, collection))
+
+    def reload_collection(self, collection: str) -> dict:
+        return self._maintenance_job(
+            collection, "reload",
+            "Collection reloaded — config re-read and caches are cold.",
+            lambda: cl.reload_collection(self.spec, collection))
+
+    def delete_all_docs(self, collection: str) -> dict:
+        load = self.state()["load"]
+        if load["running"] and load["collection"] == collection:
+            return {"ok": False, "error": "Stop the load test on this collection first."}
+        if self._running(self._index_future) and \
+                self._index_meta.get("collection") == collection:
+            return {"ok": False, "error": "Wait for the indexing job to finish."}
+        return self._maintenance_job(
+            collection, "purge",
+            f"All documents deleted from “{collection}” — the collection remains.",
+            lambda: cl.delete_all_docs(self.spec, collection))
 
     def index_path(self, collection: str, path: str) -> dict:
         """Index a real file from disk (CSV/TSV/JSON/JSONL) by server path."""
@@ -409,7 +444,7 @@ class ActionRunner:
                 "collection": self._index_meta.get("collection"),
                 "count": self._index_meta.get("count"),
             },
-            "optimizing": self._optimizing,
+            "maintenance": self._maint_busy,
             "collection_busy": self._coll_busy,
             "last_action": self.last_action,
         }

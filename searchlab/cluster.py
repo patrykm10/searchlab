@@ -233,6 +233,51 @@ def commit(spec: ClusterSpec, collection: str, timeout: float = 60.0) -> dict:
         return r.json()
 
 
+def reload_collection(spec: ClusterSpec, collection: str,
+                      timeout: float = 180.0) -> dict:
+    """RELOAD: re-read config and start every core with cold caches.
+
+    The lab's use for this is measurement, not repair — it's the only way to
+    get a genuinely cold cache between two runs of the same load test.
+    """
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(f"{spec.base_url()}/admin/collections",
+                       params={"action": "RELOAD", "name": collection, "wt": "json"})
+        r.raise_for_status()
+        body = r.json()
+        if body.get("failure"):
+            raise RuntimeError(json.dumps(body["failure"]))
+        return body
+
+
+def delete_all_docs(spec: ClusterSpec, collection: str,
+                    timeout: float = 300.0) -> dict:
+    """Empty the collection but keep it: schema, config and tuning survive."""
+    with httpx.Client(timeout=timeout) as client:
+        r = client.post(
+            f"{spec.base_url()}/{collection}/update",
+            params={"commit": "true", "wt": "json"},
+            json={"delete": {"query": "*:*"}},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+def expunge_deletes(spec: ClusterSpec, collection: str,
+                    timeout: float = 600.0) -> dict:
+    """Reclaim space from deleted/updated docs without a full rewrite.
+
+    Cheaper than optimize(): it only merges segments that actually carry
+    deletions, rather than rewriting the whole index into one segment.
+    """
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(f"{spec.base_url()}/{collection}/update",
+                       params={"commit": "true", "expungeDeletes": "true",
+                               "wt": "json"})
+        r.raise_for_status()
+        return r.json()
+
+
 def optimize(spec: ClusterSpec, collection: str, max_segments: int = 1,
              timeout: float = 600.0) -> dict:
     """Force-merge the index down to `max_segments` segments.

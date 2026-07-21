@@ -366,9 +366,25 @@ section.collapsed h2 { margin-bottom: 0; }
         <button class="btn" id="btn-commit">Commit now</button>
         <span class="desc" style="margin:0">make recent documents searchable</span>
       </div>
-      <div class="frow">
+      <div class="frow" style="margin-bottom:20px">
+        <button class="btn" id="btn-expunge">Expunge deleted</button>
+        <span class="desc" style="margin:0">reclaim space from deleted and
+          updated documents, without a full rewrite</span>
+      </div>
+      <div class="frow" style="margin-bottom:20px">
         <button class="btn" id="btn-optimize">Merge segments</button>
-        <span class="desc" style="margin:0">compact the index (can take a while)</span>
+        <span class="desc" style="margin:0">compact the whole index into one
+          segment (can take a while)</span>
+      </div>
+      <div class="frow" style="margin-bottom:20px">
+        <button class="btn" id="btn-reload">Reload collection</button>
+        <span class="desc" style="margin:0">re-read config and start with cold
+          caches — the honest way to compare two runs</span>
+      </div>
+      <div class="frow">
+        <button class="btn" id="btn-purge">Delete all documents…</button>
+        <span class="desc" style="margin:0">empty it but keep the collection,
+          its schema and tuning</span>
       </div>
     </div>
 
@@ -576,7 +592,13 @@ function showStrip(msg, isErr) {
   s.textContent = msg;
   s.className = isErr ? "err" : "ok";
   // the section carries the heading, so reveal it only once there's a result
-  $("lastaction").style.display = msg ? "" : "none";
+  const sec = $("lastaction");
+  sec.style.display = msg ? "" : "none";
+  // a failure must never be swallowed by a collapsed section — expand it
+  if (isErr && sec.classList.contains("collapsed")) {
+    const btn = sec.querySelector(".sec-toggle");
+    if (btn) btn.click();
+  }
 }
 
 function coll() { return $("ctl-coll").value; }
@@ -666,27 +688,44 @@ $("btn-createcoll").addEventListener("click", async () => {
   poll();
 });
 
-$("btn-delcoll").addEventListener("click", async () => {
-  const b = $("btn-delcoll"), name = coll();
-  if (!name) { showStrip("No collection selected.", true); return; }
-  if (b.dataset.armed !== "1") {
-    b.dataset.armed = "1";
-    b.classList.add("danger-armed");
-    b.textContent = "Click again to delete “" + name + "”";
-    setTimeout(() => {
-      b.dataset.armed = "0";
-      b.classList.remove("danger-armed");
-      b.textContent = "Delete selected collection…";
-    }, 4000);
-    return;
-  }
-  b.dataset.armed = "0";
-  b.classList.remove("danger-armed");
-  b.textContent = "Delete selected collection…";
-  const out = await post("/api/collection/delete", { collection: name });
-  if (out.ok) showStrip("Deleting collection “" + name + "”…", false);
-  poll();
-});
+/* Destructive buttons take two clicks: the first arms and relabels, the
+   second acts. Arming lapses after 4s so it can't sit primed unnoticed. */
+function armConfirm(btn, label, armedLabel, onConfirm) {
+  btn.addEventListener("click", async () => {
+    if (!coll()) { showStrip("No collection selected.", true); return; }
+    const disarm = () => {
+      btn.dataset.armed = "0";
+      btn.classList.remove("danger-armed");
+      btn.textContent = label;
+    };
+    if (btn.dataset.armed !== "1") {
+      btn.dataset.armed = "1";
+      btn.classList.add("danger-armed");
+      btn.textContent = armedLabel();
+      setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    await onConfirm();
+  });
+}
+
+armConfirm($("btn-delcoll"), "Delete selected collection…",
+  () => "Click again to delete “" + coll() + "”",
+  async () => {
+    const name = coll();
+    const out = await post("/api/collection/delete", { collection: name });
+    if (out.ok) showStrip("Deleting collection “" + name + "”…", false);
+    poll();
+  });
+
+armConfirm($("btn-purge"), "Delete all documents…",
+  () => "Click again to empty “" + coll() + "”",
+  async () => {
+    const out = await post("/api/purge", { collection: coll() });
+    if (out.ok) showStrip("Deleting all documents…", false);
+    poll();
+  });
 
 $("btn-commit").addEventListener("click", async () => {
   const out = await post("/api/commit", { collection: coll() });
@@ -696,6 +735,18 @@ $("btn-commit").addEventListener("click", async () => {
 $("btn-optimize").addEventListener("click", async () => {
   const out = await post("/api/optimize", { collection: coll() });
   if (out.ok) showStrip("Merging segments — this can take a while…", false);
+  poll();
+});
+
+$("btn-expunge").addEventListener("click", async () => {
+  const out = await post("/api/expunge", { collection: coll() });
+  if (out.ok) showStrip("Expunging deleted documents…", false);
+  poll();
+});
+
+$("btn-reload").addEventListener("click", async () => {
+  const out = await post("/api/reload", { collection: coll() });
+  if (out.ok) showStrip("Reloading collection — caches will start cold…", false);
   poll();
 });
 
@@ -726,8 +777,13 @@ function renderControls(a) {
   $("index-status").textContent = idx.running
     ? `Adding ${Number(idx.count).toLocaleString()} documents to ${idx.collection}…` : "Idle";
   $("index-status").className = idx.running ? "statusline on" : "statusline";
-  $("btn-optimize").disabled = !!a.optimizing;
-  $("btn-optimize").textContent = a.optimizing ? "Merging…" : "Merge segments";
+  // one collection-wide maintenance job at a time, so they gate together
+  const busy = !!a.maintenance;
+  $("btn-optimize").disabled = busy;
+  $("btn-optimize").textContent = busy ? "Working…" : "Merge segments";
+  $("btn-expunge").disabled = busy;
+  $("btn-reload").disabled = busy;
+  $("btn-purge").disabled = busy;
   $("btn-createcoll").disabled = !!a.collection_busy;
   $("btn-createcoll").textContent = a.collection_busy ? "Working…" : "Create collection";
   $("btn-delcoll").disabled = !!a.collection_busy;
@@ -1173,8 +1229,8 @@ async function pollLogs() {
 /* ---------- collapsible sections ---------- */
 
 (function initCollapsers() {
-  const ids = ["controls", "tuningblock", "activity", "traffic-section",
-               "signals", "topo-section", "health-section"];
+  const ids = ["controls", "lastaction", "tuningblock", "activity",
+               "traffic-section", "signals", "topo-section", "health-section"];
   let saved;
   try { saved = new Set(JSON.parse(localStorage.getItem("searchlab.collapsed") || "[]")); }
   catch (e) { saved = new Set(); }

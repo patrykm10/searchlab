@@ -14,7 +14,14 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 
-from searchlab.cluster import ClusterSpec, commit, optimize
+from searchlab.cluster import (
+    ClusterSpec,
+    commit,
+    delete_all_docs,
+    expunge_deletes,
+    optimize,
+    reload_collection,
+)
 from searchlab.dashboard import make_handler
 from searchlab.loadtest import LoadControl, run_load
 from searchlab.logstream import LogStream
@@ -106,6 +113,77 @@ async def test_optimize_sends_max_segments(mock_update):
     assert out["responseHeader"]["status"] == 0
     assert mock_update.seen.get("optimize") == "true"
     assert mock_update.seen.get("maxSegments") == "2"
+
+
+async def test_expunge_asks_for_expunge_not_a_full_optimize(mock_update):
+    """Expunge must not send optimize=true — the whole point is that it only
+    rewrites segments carrying deletions."""
+    spec = ClusterSpec(base_port=mock_update.port)
+    await asyncio.to_thread(expunge_deletes, spec, "products")
+    assert mock_update.seen.get("expungeDeletes") == "true"
+    assert mock_update.seen.get("commit") == "true"
+    assert "optimize" not in mock_update.seen
+
+
+async def test_delete_all_docs_posts_delete_by_query(aiohttp_server):
+    seen = {}
+
+    async def update(request):
+        seen["params"] = dict(request.rel_url.query)
+        seen["body"] = await request.json()
+        return web.json_response({"responseHeader": {"status": 0}})
+
+    app = web.Application()
+    app.router.add_post("/solr/products/update", update)
+    server = await aiohttp_server(app)
+    spec = ClusterSpec(base_port=server.port)
+    await asyncio.to_thread(delete_all_docs, spec, "products")
+    assert seen["body"] == {"delete": {"query": "*:*"}}
+    assert seen["params"].get("commit") == "true"   # visible immediately
+
+
+async def test_reload_raises_on_reported_failure(aiohttp_server):
+    """RELOAD can answer 200 while reporting per-node failures."""
+    async def admin(request):
+        return web.json_response({"failure": {"solr1": "config broken"}})
+
+    app = web.Application()
+    app.router.add_get("/solr/admin/collections", admin)
+    server = await aiohttp_server(app)
+    spec = ClusterSpec(base_port=server.port)
+    with pytest.raises(RuntimeError, match="config broken"):
+        await asyncio.to_thread(reload_collection, spec, "products")
+
+
+def test_maintenance_jobs_are_serialised():
+    """Expunging while a merge rewrites the same segments only slows both."""
+    from searchlab.actions import ActionRunner
+
+    runner = ActionRunner(ClusterSpec())
+    runner._maint_busy = True
+    for call in (runner.optimize, runner.expunge_deletes,
+                 runner.reload_collection, runner.delete_all_docs):
+        out = call("products")
+        assert out["ok"] is False
+        assert "maintenance job is running" in out["error"]
+
+
+def test_purge_refuses_while_load_test_hits_that_collection():
+    from searchlab.actions import ActionRunner
+    from searchlab.loadtest import LoadControl
+
+    runner = ActionRunner(ClusterSpec())
+    runner._control = LoadControl(rps=10)
+    runner._load_meta = {"collection": "products", "started": 0}
+
+    class _Busy:
+        def done(self):
+            return False
+    runner._load_future = _Busy()
+
+    assert "Stop the load test" in runner.delete_all_docs("products")["error"]
+    # a different collection is unaffected
+    assert runner.delete_all_docs("other")["ok"] is True
 
 
 async def test_commit_raises_on_500(mock_update):
