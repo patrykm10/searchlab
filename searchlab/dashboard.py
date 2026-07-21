@@ -203,6 +203,16 @@ def make_handler(spec: ClusterSpec, demo: bool,
                     self._json(200, runner.read_tuning(coll))
                 except (SystemExit, Exception) as e:  # noqa: BLE001
                     self._json(500, {"ok": False, "error": str(e) or type(e).__name__})
+            elif path == "/api/traffic":
+                if logs is None:
+                    return self._json(200, {"latest": 0, "rows": []})
+                qs = parse_qs(urlparse(self.path).query)
+                try:
+                    since = int((qs.get("since") or ["0"])[0])
+                except ValueError:
+                    since = 0
+                latest, rows = logs.traffic_since(since)
+                self._json(200, {"latest": latest, "rows": rows})
             elif path == "/api/logs":
                 if logs is None:
                     return self._json(200, {"latest": 0, "lines": [], "error": None})

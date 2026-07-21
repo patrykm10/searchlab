@@ -188,6 +188,10 @@ canvas { width: 100%; height: 150px; display: block;
   text-transform: uppercase; color: var(--cobalt); border: 1px solid var(--cobalt);
   padding: 0 5px; margin-right: 7px; cursor: help; white-space: nowrap;
   vertical-align: 1px; }
+/* plain level markers, so untagged lines still line up with tagged ones */
+#log .tag.lvl-info { color: var(--faint); border-color: var(--line); cursor: default; }
+#log .tag.lvl-warn, #log .tag.lvl-error { color: #b3362b; border-color: #b3362b;
+  cursor: default; }
 
 /* ---------- chart range + hover ---------- */
 #ranges { float: right; display: inline-flex; gap: 14px; }
@@ -204,6 +208,21 @@ canvas { width: 100%; height: 150px; display: block;
 #tip i { width: 8px; height: 8px; display: inline-block; margin-right: 6px; }
 #xline { position: fixed; display: none; width: 1px; background: var(--cobalt);
   opacity: 0.45; pointer-events: none; z-index: 49; }
+
+/* ---------- request traffic ---------- */
+#traffic { table-layout: fixed; width: 100%; }
+#traffic td.tq { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 0; }
+#traffic td.num { text-align: right; width: 80px; color: var(--muted); }
+#traffic td.tk { width: 62px; }
+#traffic td.tt { width: 72px; color: var(--faint); }
+#traffic-count { float: right; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.08em; color: var(--faint); }
+.kind { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1px solid currentColor; padding: 0 5px; }
+.kind.query { color: var(--cobalt); }
+.kind.index { color: #2f7d51; }
+.tfail { color: #b3362b; font-weight: 700; }
 
 /* ---------- health ---------- */
 .finding { padding: 14px 0 14px 18px; border-top: 1px solid var(--line); }
@@ -354,6 +373,16 @@ section.collapsed h2 { margin-bottom: 0; }
   <div id="log"></div>
 </section>
 
+<section id="traffic-section">
+  <h2>Request traffic
+    <span id="traffic-count"></span>
+  </h2>
+  <div class="desc" style="margin:-12px 0 14px">The queries and indexing
+    requests actually hitting the cluster right now. Per-shard fan-out is
+    hidden — these are the requests as clients sent them.</div>
+  <table id="traffic" class="mtable"></table>
+</section>
+
 <section id="signals">
   <h2>Live signals
     <span id="ranges">
@@ -367,12 +396,14 @@ section.collapsed h2 { margin-bottom: 0; }
   </h2>
   <div class="chartgrid">
     <div class="chart">
-      <h4>Load test latency <b id="v-lt">—</b></h4>
+      <h4 title="Client-observed: measured by the load generator from when each request was scheduled until the response arrived. Includes network and any time queued waiting for the cluster to get to it — what a real user would feel. Only runs during a load test.">
+        Load test latency <b id="v-lt">—</b></h4>
       <canvas id="c-lt"></canvas>
       <div class="legend" id="lg-lt"></div>
     </div>
     <div class="chart">
-      <h4>Query latency p99, per node <b id="v-p99">—</b></h4>
+      <h4 title="Server-reported: how long Solr itself spent processing queries, per node. Excludes network and any queueing before Solr picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
+        Query latency p99, per node <b id="v-p99">—</b></h4>
       <canvas id="c-p99"></canvas>
       <div class="legend" id="lg-p99"></div>
     </div>
@@ -756,6 +787,47 @@ function attachHover(c) {
 }
 document.querySelectorAll("canvas").forEach(attachHover);
 
+/* ---------- request traffic ---------- */
+
+const TRAFFIC_ROWS = 12;
+const trafficRows = [];
+let trafficCursor = 0, trafficTotal = 0;
+
+async function pollTraffic() {
+  try {
+    const r = await fetch("/api/traffic?since=" + trafficCursor); if (!r.ok) throw 0;
+    const out = await r.json();
+    if (out.rows && out.rows.length) {
+      trafficTotal += out.rows.length;
+      trafficRows.push(...out.rows.map(([, e]) => e));
+      while (trafficRows.length > TRAFFIC_ROWS) trafficRows.shift();
+    }
+    trafficCursor = out.latest ?? trafficCursor;
+    renderTraffic();
+  } catch (e) { /* retry next tick */ }
+}
+
+function renderTraffic() {
+  const el = $("traffic");
+  if (!trafficRows.length) {
+    el.innerHTML = `<tr><td class="desc">No requests yet — start a load test or add documents.</td></tr>`;
+    $("traffic-count").textContent = "";
+    return;
+  }
+  $("traffic-count").textContent = trafficTotal.toLocaleString() + " seen";
+  el.innerHTML = `<tr><th>Time</th><th>Kind</th><th>Request</th>
+      <th class="num">Hits</th><th class="num">Took</th></tr>` +
+    trafficRows.slice().reverse().map(e => {
+      const bad = e.status != null && e.status !== 0;
+      return `<tr><td class="tt">${esc(e.time)}</td>
+        <td class="tk"><span class="kind ${esc(e.kind)}">${esc(e.kind)}</span></td>
+        <td class="tq" title="${esc(e.detail)}">${esc(e.detail)}</td>
+        <td class="num${bad ? " tfail" : ""}">${
+          bad ? "status " + e.status : (e.hits == null ? "—" : Number(e.hits).toLocaleString())}</td>
+        <td class="num">${e.qtime == null ? "—" : e.qtime + " ms"}</td></tr>`;
+    }).join("");
+}
+
 /* ---------- topology ---------- */
 
 function coreDocs(coreName) {
@@ -961,8 +1033,12 @@ function renderLog() {
   $("log").innerHTML = slice.map(([, line, event]) => {
     const full = line.replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const short = condense(line).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    // Every line gets a leading chip so none look orphaned: the recognized
+    // event where we have one, otherwise just the log level.
+    const lvl = (line.match(/\b(WARN|ERROR|INFO)\b/) || [, "info"])[1].toLowerCase();
     const chip = event
-      ? `<span class="tag" title="${esc(event.desc)}">${esc(event.tag)}</span>` : "";
+      ? `<span class="tag" title="${esc(event.desc)}">${esc(event.tag)}</span>`
+      : `<span class="tag lvl-${lvl}">${lvl}</span>`;
     let cls = "lline";
     if (/\bWARN\b|\bERROR\b/.test(line)) cls += " warn";
     else if (line.startsWith("[log stream")) cls += " sys";
@@ -1015,8 +1091,8 @@ async function pollLogs() {
 /* ---------- collapsible sections ---------- */
 
 (function initCollapsers() {
-  const ids = ["controls", "tuningblock", "activity", "signals",
-               "topo-section", "health-section"];
+  const ids = ["controls", "tuningblock", "activity", "traffic-section",
+               "signals", "topo-section", "health-section"];
   let saved;
   try { saved = new Set(JSON.parse(localStorage.getItem("searchlab.collapsed") || "[]")); }
   catch (e) { saved = new Set(); }
@@ -1046,6 +1122,7 @@ async function pollLogs() {
 setInterval(poll, POLL_MS); poll();
 setInterval(pollLogs, POLL_MS); pollLogs();
 setInterval(pollTopology, POLL_MS * 2); setTimeout(pollTopology, 500);
+setInterval(pollTraffic, POLL_MS); pollTraffic();
 </script>
 </body>
 </html>
