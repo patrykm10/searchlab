@@ -253,6 +253,10 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return runner.commit(coll)
             if path == "/api/optimize":
                 return runner.optimize(coll)
+            if path == "/api/query":
+                return runner.run_query(coll, body)
+            if path == "/api/fields":
+                return runner.fields(coll)
             if path == "/api/expunge":
                 return runner.expunge_deletes(coll)
             if path == "/api/reload":

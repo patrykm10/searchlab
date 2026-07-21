@@ -278,6 +278,34 @@ class ActionRunner:
         except Exception as e:
             return {"ok": False, "error": f"Could not read {src.name}: {e}"}
 
+    # -------------------------------------------------------------- query --
+
+    def fields(self, collection: str) -> dict:
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "The query builder is Solr-only for now."}
+        from .query import list_fields
+
+        try:
+            return {"ok": True, "fields": list_fields(self.spec, collection)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def run_query(self, collection: str, body: dict) -> dict:
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "The query builder is Solr-only for now."}
+        from .query import run_query
+
+        try:
+            return run_query(self.spec, collection, body)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # --------------------------------------------------------- collections --
 
     def create_collection(self, name: str, shards: int, replicas: int) -> dict:

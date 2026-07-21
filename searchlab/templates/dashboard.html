@@ -211,6 +211,37 @@ canvas { width: 100%; height: 150px; display: block;
 #xline { position: fixed; display: none; width: 1px; background: var(--cobalt);
   opacity: 0.45; pointer-events: none; z-index: 49; }
 
+/* ---------- query builder ---------- */
+.qgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px 26px; margin-bottom: 18px; }
+.qgrid .qfull { grid-column: 1 / -1; }
+.qgrid label { display: block; margin-bottom: 5px; }
+textarea { font-family: var(--mono); font-size: 13px; color: var(--ink);
+  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  padding: 7px 9px; outline: none; width: 100%; resize: vertical; }
+textarea:focus { border-color: var(--cobalt); }
+#q-url { font-family: var(--mono); font-size: 11px; color: var(--faint);
+  word-break: break-all; margin-bottom: 12px; }
+#q-url a { color: var(--faint); }
+#q-url a:hover { color: var(--cobalt); }
+#q-parsed { font-family: var(--mono); font-size: 11px; color: var(--muted);
+  background: #fff; border: 1.5px solid var(--line); padding: 8px 12px;
+  margin-bottom: 12px; word-break: break-all; }
+#q-parsed:empty, #q-url:empty, #q-facets:empty { display: none; }
+.qfacet { display: inline-block; margin: 0 22px 6px 0; font-family: var(--mono);
+  font-size: 11px; }
+.qfacet b { color: var(--cobalt); font-variant-numeric: tabular-nums; }
+#q-results { background: #fff; border: 1.5px solid var(--line); }
+#q-results:empty { display: none; }
+#q-results table { width: 100%; border-collapse: collapse; font-family: var(--mono);
+  font-size: 11px; }
+#q-results td, #q-results th { text-align: left; padding: 6px 14px;
+  border-top: 1px solid var(--line); vertical-align: top;
+  max-width: 340px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+#q-results th { border-top: none; color: var(--faint); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
+
 /* ---------- request traffic ---------- */
 /* white panel, matching the activity log above it */
 #traffic-panel { background: #fff; border: 1.5px solid var(--line);
@@ -390,6 +421,64 @@ section.collapsed h2 { margin-bottom: 0; }
 
   </div>
 
+</section>
+
+<section id="query-section">
+  <h2>Query</h2>
+  <div class="desc">Build and run a single query against the selected
+    collection — the exploring half, next to the load testing.</div>
+
+  <div class="qgrid">
+    <div class="qfull">
+      <label for="q-q">Query</label>
+      <input type="text" id="q-q" value="*:*" style="width:100%">
+    </div>
+    <div>
+      <label for="q-parser">Parser</label>
+      <select id="q-parser">
+        <option value="lucene" title="Solr's default. Full syntax — field:value, AND/OR/NOT, ranges. You write the field names.">lucene — exact syntax</option>
+        <option value="edismax" title="Extended DisMax. Type plain words and search many fields at once via qf, with weights like title_t^3. Tolerant of user-typed input.">edismax — user-friendly</option>
+        <option value="dismax" title="The older DisMax. Like edismax but without the full Lucene syntax support.">dismax — user-friendly (older)</option>
+      </select>
+    </div>
+    <div id="q-qf-wrap" style="display:none">
+      <label for="q-qf">Fields to search (qf)</label>
+      <input type="text" id="q-qf" placeholder="title_t^3 body_t" style="width:100%">
+    </div>
+    <div>
+      <label for="q-rows">Rows</label>
+      <input type="number" id="q-rows" value="10" min="0" max="100">
+    </div>
+    <div>
+      <label for="q-sort">Sort</label>
+      <input type="text" id="q-sort" placeholder="price_f desc" style="width:100%">
+    </div>
+    <div class="qfull">
+      <label for="q-fq">Filters (fq) — one per line</label>
+      <textarea id="q-fq" rows="2" placeholder="price_f:[10 TO 500]"></textarea>
+    </div>
+    <div>
+      <label for="q-facet">Facet on</label>
+      <select id="q-facet"><option value="">none</option></select>
+    </div>
+    <div>
+      <label for="q-explain">Explain</label>
+      <select id="q-explain">
+        <option value="">off</option>
+        <option value="1">show parsed query</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="frow" style="margin-top:4px">
+    <button class="btn primary" id="btn-runquery">Run query</button>
+    <span class="desc" id="q-summary" style="margin:0"></span>
+  </div>
+
+  <div id="q-url"></div>
+  <div id="q-parsed"></div>
+  <div id="q-facets"></div>
+  <div id="q-results"></div>
 </section>
 
 <section id="lastaction" style="display:none">
@@ -605,7 +694,7 @@ function coll() { return $("ctl-coll").value; }
 
 /* ---------- controls wiring ---------- */
 
-$("ctl-coll").addEventListener("change", () => loadTuning(coll()));
+$("ctl-coll").addEventListener("change", () => { loadTuning(coll()); loadFields(coll()); });
 
 $("ctl-rps").addEventListener("pointerdown", () => dragging = true);
 $("ctl-rps").addEventListener("pointerup", () => dragging = false);
@@ -944,6 +1033,90 @@ function renderTraffic() {
     }).join("");
 }
 
+/* ---------- query builder ---------- */
+
+let fieldsFor = null;
+
+async function loadFields(collection) {
+  if (!collection || demo) return;
+  fieldsFor = collection;
+  try {
+    const out = await post("/api/fields", { collection });
+    if (!out.ok) return;
+    // facets only make sense on exact-match fields; analyzed text would
+    // bucket by individual token, which is rarely what anyone wants
+    const facetable = out.fields.filter(f => !f.text);
+    $("q-facet").innerHTML = `<option value="">none</option>` +
+      facetable.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
+    const textFields = out.fields.filter(f => f.text).map(f => f.name);
+    if (textFields.length && !$("q-qf").value)
+      $("q-qf").placeholder = textFields[0] + "^3 " + (textFields[1] || "");
+  } catch (e) { /* leave the pickers as they were */ }
+}
+
+$("q-parser").addEventListener("change", () => {
+  // qf is a dismax/edismax concept; showing it under lucene invites confusion
+  $("q-qf-wrap").style.display = $("q-parser").value === "lucene" ? "none" : "";
+});
+
+$("btn-runquery").addEventListener("click", async () => {
+  const body = {
+    collection: coll(),
+    q: $("q-q").value,
+    parser: $("q-parser").value,
+    qf: $("q-qf").value,
+    rows: Number($("q-rows").value),
+    sort: $("q-sort").value,
+    fq: $("q-fq").value.split("\n"),
+    facet_fields: $("q-facet").value ? [$("q-facet").value] : [],
+    explain: !!$("q-explain").value,
+  };
+  $("q-summary").textContent = "running…";
+  const out = await post("/api/query", body);
+  if (!out.ok) {
+    $("q-summary").textContent = "";
+    $("q-url").innerHTML = out.url
+      ? `<a href="${esc(out.url)}" target="_blank" rel="noopener">${esc(out.url)}</a>` : "";
+    $("q-parsed").textContent = "";
+    $("q-facets").innerHTML = "";
+    $("q-results").innerHTML = "";
+    return;
+  }
+  renderQueryResult(out);
+});
+
+function renderQueryResult(out) {
+  $("q-summary").textContent =
+    `${Number(out.num_found).toLocaleString()} hits · ${out.qtime} ms`;
+  $("q-url").innerHTML =
+    `<a href="${esc(out.url)}" target="_blank" rel="noopener">${esc(out.url)}</a>`;
+  $("q-parsed").textContent = out.parsed ? "parsed as:  " + out.parsed : "";
+
+  const fnames = Object.keys(out.facets || {});
+  $("q-facets").innerHTML = fnames.map(f => {
+    const buckets = out.facets[f];
+    if (!buckets.length) return "";
+    return `<div style="margin-bottom:10px"><div class="desc"
+      style="margin-bottom:6px">${esc(f)}</div>` +
+      buckets.map(b => `<span class="qfacet">${esc(b.value)} <b>${b.count.toLocaleString()}</b></span>`).join("") +
+      `</div>`;
+  }).join("");
+
+  const docs = out.docs || [];
+  if (!docs.length) { $("q-results").innerHTML = ""; return; }
+  // union of keys keeps the table honest when docs differ in shape
+  const cols = [];
+  for (const d of docs) for (const k of Object.keys(d))
+    if (!k.startsWith("_") && !cols.includes(k)) cols.push(k);
+  $("q-results").innerHTML =
+    `<table><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr>` +
+    docs.map(d => `<tr>${cols.map(c => {
+      const v = d[c];
+      const s = v == null ? "" : (Array.isArray(v) ? v.join(", ") : String(v));
+      return `<td title="${esc(s)}">${esc(s)}</td>`;
+    }).join("")}</tr>`).join("") + `</table>`;
+}
+
 /* ---------- topology ---------- */
 
 function coreDocs(coreName) {
@@ -1056,6 +1229,7 @@ function render(snap) {
     sel.value = pendingSelect; pendingSelect = null;
   }
   if (sel.value && sel.value !== knobsFor) loadTuning(sel.value);
+  if (sel.value && sel.value !== fieldsFor) loadFields(sel.value);
 
   renderControls(snap.actions);
   renderHealth(snap.insights || []);
@@ -1229,8 +1403,9 @@ async function pollLogs() {
 /* ---------- collapsible sections ---------- */
 
 (function initCollapsers() {
-  const ids = ["controls", "lastaction", "tuningblock", "activity",
-               "traffic-section", "signals", "topo-section", "health-section"];
+  const ids = ["controls", "query-section", "lastaction", "tuningblock",
+               "activity", "traffic-section", "signals", "topo-section",
+               "health-section"];
   let saved;
   try { saved = new Set(JSON.parse(localStorage.getItem("searchlab.collapsed") || "[]")); }
   catch (e) { saved = new Set(); }
