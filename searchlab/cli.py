@@ -129,12 +129,37 @@ def gen(profile_path, count, out, seed):
 
 @main.command()
 @click.option("--collection", required=True)
-@click.option("--file", "path", required=True, type=click.Path(exists=True), help="JSONL file to index.")
+@click.option("--file", "path", required=True, type=click.Path(exists=True),
+              help="JSONL, CSV, TSV, or JSON file to index.")
 @click.option("--threads", default=4, show_default=True, help="Concurrent index workers.")
 @click.option("--batch", default=500, show_default=True, help="Docs per update request.")
 @click.option("--commit-within", default=10_000, show_default=True, help="commitWithin ms.")
-def index(collection, path, threads, batch, commit_within):
-    """Bulk-index a JSONL file into a collection."""
+@click.option("--dry-run", is_flag=True,
+              help="Show how columns map onto Solr fields, index nothing.")
+def index(collection, path, threads, batch, commit_within, dry_run):
+    """Bulk-index a file into a collection.
+
+    JSONL is indexed as-is. CSV/TSV/JSON columns are typed from a sample
+    and renamed onto Solr's dynamic fields (price -> price_f); use
+    --dry-run to see the mapping first.
+    """
+    if dry_run:
+        from .tabular import describe, read_documents
+
+        plan = describe(Path(path))
+        click.echo(f"format: {plan['format']}  (sampled {plan['sampled']} rows)")
+        width = max((len(c["column"]) for c in plan["columns"]), default=6)
+        for c in plan["columns"]:
+            arrow = "=" if c["field"] == c["column"] else "->"
+            click.echo(f"  {c['column']:<{width}} {arrow} {c['field']:<{width + 3}}"
+                       f"{c['type']:<8} e.g. {c['sample']}")
+        if plan["generated_id"]:
+            click.echo("  (no id column — ids will be generated)")
+        first = next(iter(read_documents(Path(path))), None)
+        if first:
+            click.echo(f"\nfirst document:\n  {json.dumps(first, default=str)[:400]}")
+        return
+
     spec = cl.load_spec()
     stats = asyncio.run(
         indexer.index_file(spec.base_url(), collection, path, threads, batch, commit_within,

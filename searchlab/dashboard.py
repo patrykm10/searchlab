@@ -239,6 +239,10 @@ def make_handler(spec: ClusterSpec, demo: bool,
             if path == "/api/index":
                 return runner.index_docs(coll, int(body.get("count", 0)),
                                          str(body.get("preset", "standard")))
+            if path == "/api/index/file":
+                return runner.index_path(coll, str(body.get("path", "")))
+            if path == "/api/index/preview":
+                return runner.preview_path(str(body.get("path", "")))
             if path == "/api/collection/create":
                 return runner.create_collection(str(body.get("name", "")).strip(),
                                                 int(body.get("shards", 1)),

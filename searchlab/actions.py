@@ -211,6 +211,38 @@ class ActionRunner:
         threading.Thread(target=job, daemon=True).start()
         return {"ok": True}
 
+    def index_path(self, collection: str, path: str) -> dict:
+        """Index a real file from disk (CSV/TSV/JSON/JSONL) by server path."""
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        src = Path(path).expanduser()
+        if not src.is_file():
+            return {"ok": False, "error": f"No file at {src}"}
+        with self._lock:
+            if self._running(self._index_future):
+                return {"ok": False, "error": "An indexing job is already running."}
+            self._index_meta = {"collection": collection, "count": None,
+                                "source": src.name}
+            self._index_future = self._submit(
+                "index",
+                index_file(self.spec.base_url(), collection, src, threads=4,
+                           engine=self.spec.engine),
+                lambda st: f"Indexed {src.name}: {st.summary()}",
+            )
+        return {"ok": True}
+
+    def preview_path(self, path: str) -> dict:
+        """Inferred column mapping for a file, so the UI can show it first."""
+        from .tabular import describe
+
+        src = Path(path).expanduser()
+        if not src.is_file():
+            return {"ok": False, "error": f"No file at {src}"}
+        try:
+            return {"ok": True, **describe(src)}
+        except Exception as e:
+            return {"ok": False, "error": f"Could not read {src.name}: {e}"}
+
     # --------------------------------------------------------- collections --
 
     def create_collection(self, name: str, shards: int, replicas: int) -> dict:

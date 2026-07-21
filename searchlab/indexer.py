@@ -34,18 +34,31 @@ class IndexStats:
 
 
 def _read_batches(path: Path, batch_size: int):
+    """Batch documents from any supported file: JSONL passes straight
+    through, CSV/TSV/JSON go through the tabular reader, which maps
+    columns onto Solr's dynamic fields (see tabular.py)."""
+    from .tabular import read_documents, sniff_format
+
+    if sniff_format(Path(path)) == "jsonl":
+        source = _read_jsonl(path)
+    else:
+        source = read_documents(Path(path))
     batch: list[dict] = []
+    for doc in source:
+        batch.append(doc)
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def _read_jsonl(path: Path):
     with open(path) as f:
         for line in f:
             line = line.strip()
-            if not line:
-                continue
-            batch.append(json.loads(line))
-            if len(batch) >= batch_size:
-                yield batch
-                batch = []
-    if batch:
-        yield batch
+            if line:
+                yield json.loads(line)
 
 
 async def _worker(

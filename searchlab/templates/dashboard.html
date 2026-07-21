@@ -242,10 +242,13 @@ canvas { width: 100%; height: 150px; display: block;
   width: 12px; text-align: center; vertical-align: 1px; }
 .sec-toggle:hover { color: var(--cobalt); }
 .sec-toggle:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
-section.collapsed > *:not(h2) { display: none; }
+/* !important: these must beat the id-based display rules on children like
+   #topo-controls (flex) and #knobs (grid), which otherwise out-specify a
+   collapsed section and stay visible. */
+section.collapsed > *:not(h2) { display: none !important; }
 section.collapsed { padding-bottom: 20px; }
 section.collapsed h2 { margin-bottom: 0; }
-#tuningblock.collapsed > *:not(h3) { display: none; }
+#tuningblock.collapsed > *:not(h3) { display: none !important; }
 #tuningblock.collapsed { padding-bottom: 8px; }
 #tuningblock.collapsed h3 { margin-bottom: 0; }
 
@@ -316,6 +319,18 @@ section.collapsed h2 { margin-bottom: 0; }
       <div class="desc" id="preset-desc" style="margin-bottom:14px"></div>
       <div class="statusline" id="index-status">Idle</div>
       <button class="btn primary" id="btn-index">Add documents</button>
+
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--line)">
+        <div class="desc" style="margin-bottom:10px">Or index a real file —
+          CSV, TSV, or JSON. Columns are typed and mapped automatically.</div>
+        <div class="frow">
+          <input type="text" id="ctl-path" placeholder="/path/to/data.csv"
+                 style="width:100%">
+        </div>
+        <div id="file-preview" class="desc"></div>
+        <button class="btn" id="btn-preview">Check file</button>
+        <button class="btn" id="btn-indexfile">Index file</button>
+      </div>
     </div>
 
     <div class="card">
@@ -588,6 +603,26 @@ $("btn-index").addEventListener("click", async () => {
     { collection: coll(), count: Number($("ctl-count").value),
       preset: $("ctl-preset").value });
   if (out.ok) showStrip("Adding documents…", false);
+  poll();
+});
+
+$("btn-preview").addEventListener("click", async () => {
+  const out = await post("/api/index/preview", { path: $("ctl-path").value.trim() });
+  const el = $("file-preview");
+  if (!out.ok) { el.innerHTML = ""; return; }
+  const rows = out.columns.map(c =>
+    `<div><b>${esc(c.column)}</b> → <span style="color:var(--cobalt)">${esc(c.field)}</span> <span style="color:var(--faint)">${esc(c.type)}</span></div>`).join("");
+  el.innerHTML = `<div style="margin:10px 0; font-family:var(--mono); font-size:11px">
+    <div style="color:var(--faint); margin-bottom:5px">${esc(out.format)} ·
+      ${out.columns.length} columns${out.generated_id ? " · ids will be generated" : ""}</div>
+    ${rows}</div>`;
+  showStrip(`Read ${out.columns.length} columns from the file — ready to index.`, false);
+});
+
+$("btn-indexfile").addEventListener("click", async () => {
+  const out = await post("/api/index/file",
+    { collection: coll(), path: $("ctl-path").value.trim() });
+  if (out.ok) showStrip("Indexing file…", false);
   poll();
 });
 
