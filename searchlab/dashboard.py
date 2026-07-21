@@ -259,6 +259,8 @@ def make_handler(spec: ClusterSpec, demo: bool,
             if path == "/api/replica/add":
                 return runner.add_replica(coll, str(body.get("shard", "")),
                                           str(body.get("type", "NRT")))
+            if path == "/api/shard/split":
+                return runner.split_shard(coll, str(body.get("shard", "")))
             if path == "/api/replica/remove":
                 return runner.remove_replica(coll, str(body.get("shard", "")),
                                              str(body.get("replica", "")))

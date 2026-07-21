@@ -188,6 +188,25 @@ def add_replica(spec: ClusterSpec, collection: str, shard: str,
         return r.json()
 
 
+def split_shard(spec: ClusterSpec, collection: str, shard: str,
+                timeout: float = 900.0) -> dict:
+    """SPLITSHARD: divide a shard's hash range into two sub-shards.
+
+    The parent keeps serving until both children are active, then goes
+    inactive (it is not deleted). Expect it to be slow and to need roughly
+    double the shard's disk while both exist.
+    """
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(f"{spec.base_url()}/admin/collections",
+                       params={"action": "SPLITSHARD", "collection": collection,
+                               "shard": shard, "wt": "json"})
+        r.raise_for_status()
+        body = r.json()
+        if body.get("failure"):
+            raise RuntimeError(json.dumps(body["failure"]))
+        return body
+
+
 def delete_replica(spec: ClusterSpec, collection: str, shard: str, replica: str,
                    timeout: float = 120.0) -> dict:
     """DELETEREPLICA: remove one named replica from a shard."""

@@ -341,6 +341,16 @@ class ActionRunner:
             f"Added a {replica_type} replica to {shard} — it will sync and go active shortly.",
             lambda: cl.add_replica(self.spec, collection, shard, replica_type))
 
+    def split_shard(self, collection: str, shard: str) -> dict:
+        if not collection or not shard:
+            return {"ok": False, "error": "Pick a collection and shard first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Shard splitting is Solr-only for now."}
+        return self._replica_job(
+            "split_shard",
+            f"Split {shard} into two sub-shards — the original is now inactive.",
+            lambda: cl.split_shard(self.spec, collection, shard))
+
     def remove_replica(self, collection: str, shard: str, replica: str) -> dict:
         if not collection or not shard or not replica:
             return {"ok": False, "error": "Pick a replica to remove first."}

@@ -63,6 +63,12 @@ input[type="text"]:focus { border-color: var(--cobalt); }
 .knob .krow { display: flex; align-items: baseline; justify-content: space-between; }
 .knob .krow label { color: var(--ink); font-family: var(--sans); font-size: 13px;
   font-weight: 600; text-transform: none; letter-spacing: -0.01em; }
+.knob .klabel { cursor: help; border-bottom: 1px dotted var(--line); }
+.knob .klabel:hover { border-bottom-color: var(--cobalt); }
+/* ↗ opens Solr's own config endpoint, to confirm the value really changed */
+.kverify { color: var(--faint); font-size: 10px; margin-left: 5px;
+  text-decoration: none; vertical-align: 1px; }
+.kverify:hover { color: var(--cobalt); }
 .knob .kval { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 .knob .kval small { color: var(--faint); font-size: 9.5px; }
 .knob .kdesc { font-size: 12px; color: var(--faint); margin: 1px 0 5px; line-height: 1.45; }
@@ -460,6 +466,13 @@ section.collapsed h2 { margin-bottom: 0; }
     </select>
     <button class="btn" id="btn-addreplica">Add replica</button>
   </div>
+  <div id="topo-controls">
+    <label for="topo-split">Split shard</label>
+    <select id="topo-split"></select>
+    <button class="btn" id="btn-splitshard">Split shard</button>
+    <span class="desc" style="margin:0">divides it into two — slow, and needs
+      roughly double the disk while both exist</span>
+  </div>
 </section>
 
 <section id="health-section">
@@ -744,7 +757,10 @@ async function loadTuning(collection) {
     $("knobs").innerHTML = Object.entries(out.registry).map(([name, k]) => {
       const val = out.values[name] ?? k.default;
       return `<div class="knob">
-        <div class="krow"><label for="knob-${name}">${esc(k.label)}</label>
+        <div class="krow"><span><label for="knob-${name}" class="klabel"
+            title="Solr setting: ${esc(k.solr)}">${esc(k.label)}</label><a
+            class="kverify" href="${esc(k.verify)}" target="_blank" rel="noopener"
+            title="Open Solr and check this setting's live value">&#8599;</a></span>
           <span class="kval"><span id="kval-${name}">${val}</span> <small>${esc(k.unit.toUpperCase())}</small></span></div>
         <div class="kdesc">${esc(k.desc)}</div>
         <input type="range" id="knob-${name}" data-name="${name}"
@@ -896,12 +912,17 @@ async function pollTopology() {
       <th>Docs</th><th></th><th></th></tr>`;
     const shardNames = Object.keys(out.shards).sort();
     for (const sname of shardNames) {
-      const reps = out.shards[sname].replicas;
+      const shard = out.shards[sname];
+      const reps = shard.replicas;
+      // after a split the parent shard stays around as inactive — worth seeing
+      const slabel = shard.state && shard.state !== "active"
+        ? `${esc(sname)} <span style="color:var(--faint)">(${esc(shard.state)})</span>`
+        : esc(sname);
       for (const [rname, rep] of Object.entries(reps).sort()) {
         const docs = coreDocs(rep.core);
         const known = ["active", "recovering", "down", "recovery_failed"];
         const dotCls = known.includes(rep.state) ? rep.state : "unknown";
-        rows += `<tr><td>${esc(sname)}</td>
+        rows += `<tr><td>${slabel}</td>
           <td><span class="repdot ${dotCls}" title="${esc(rep.state)}"></span> ${esc(rname)}</td>
           <td>${esc(rep.node)}</td><td>${esc(rep.type)}</td>
           <td>${docs == null ? "—" : Number(docs).toLocaleString()}</td>
@@ -924,9 +945,26 @@ async function pollTopology() {
       ssel.dataset.opts = shardNames.join();
       ssel.innerHTML = shardNames.map(s => `<option>${esc(s)}</option>`).join("");
     }
+    // only active shards can be split; a split parent is already retired
+    const splittable = shardNames.filter(s => (out.shards[s].state || "active") === "active");
+    const psel = $("topo-split");
+    if (psel.dataset.opts !== splittable.join()) {
+      psel.dataset.opts = splittable.join();
+      psel.innerHTML = splittable.map(s => `<option>${esc(s)}</option>`).join("");
+    }
     $("btn-addreplica").disabled = busy;
+    $("btn-splitshard").disabled = busy || !splittable.length;
+    $("btn-splitshard").textContent = busy ? "Working…" : "Split shard";
   } catch (e) { /* retry next tick */ }
 }
+
+$("btn-splitshard").addEventListener("click", async () => {
+  const shard = $("topo-split").value;
+  const out = await post("/api/shard/split", { collection: coll(), shard });
+  if (out.ok) showStrip("Splitting " + shard + " — this can take a while…", false);
+  poll();
+  setTimeout(pollTopology, 1500);
+});
 
 $("btn-addreplica").addEventListener("click", async () => {
   const out = await post("/api/replica/add",

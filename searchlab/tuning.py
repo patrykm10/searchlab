@@ -81,6 +81,7 @@ KNOBS: dict[str, dict] = {
     # ---- merge/indexing knobs: need the lab configset (user properties) ----
     "ram_buffer_mb": {
         "path": "searchlab.ramBufferMB", "user_prop": True,
+        "solr": "indexConfig.ramBufferSizeMB",
         "config_probe": "indexConfig.ramBufferSizeMB",
         "label": "Indexing memory buffer",
         "desc": "How much indexed data is held in memory before being "
@@ -90,6 +91,7 @@ KNOBS: dict[str, dict] = {
     },
     "segments_per_tier": {
         "path": "searchlab.segmentsPerTier", "user_prop": True,
+        "solr": "indexConfig.mergePolicyFactory segmentsPerTier",
         "config_probe": "indexConfig.mergePolicyFactory",
         "label": "Merge threshold",
         "desc": "How many segments are allowed to accumulate before they "
@@ -99,6 +101,7 @@ KNOBS: dict[str, dict] = {
     },
     "max_merged_mb": {
         "path": "searchlab.maxMergedSegMB", "user_prop": True,
+        "solr": "indexConfig.mergePolicyFactory maxMergedSegmentMB",
         "config_probe": "indexConfig.mergePolicyFactory",
         "label": "Largest merged segment",
         "desc": "The biggest segment the merger will create. Smaller spreads "
@@ -108,6 +111,7 @@ KNOBS: dict[str, dict] = {
     },
     "deletes_pct": {
         "path": "searchlab.deletesPctAllowed", "user_prop": True,
+        "solr": "indexConfig.mergePolicyFactory deletesPctAllowed",
         "config_probe": "indexConfig.mergePolicyFactory",
         "label": "Deleted-document tolerance",
         "desc": "What share of the index may be dead (updated or deleted) "
@@ -122,10 +126,22 @@ _META_KEYS = ("path", "user_prop", "config_probe")
 
 
 def registry(names=None) -> dict:
-    """Knob metadata for the UI (internal wiring keys stripped)."""
-    return {name: {k: v for k, v in spec.items() if k not in _META_KEYS}
-            for name, spec in KNOBS.items()
-            if names is None or name in names}
+    """Knob metadata for the UI, with the real Solr setting each one drives.
+
+    Naming the underlying setting is the point of a learning lab — it's how
+    someone connects "search visibility delay" to the autoSoftCommit they'll
+    meet in solrconfig.xml. For whitelist knobs the Config API path is that
+    name; user-property knobs go through the lab's ${searchlab.*}
+    indirection, so they state the real setting explicitly.
+    """
+    out = {}
+    for name, spec in KNOBS.items():
+        if names is not None and name not in names:
+            continue
+        item = {k: v for k, v in spec.items() if k not in _META_KEYS}
+        item["solr"] = spec.get("solr", spec["path"])
+        out[name] = item
+    return out
 
 
 def _dig(config: dict, dotted: str):
@@ -135,6 +151,29 @@ def _dig(config: dict, dotted: str):
             return None
         cur = cur[part]
     return cur
+
+
+def _verify_urls(spec: ClusterSpec, collection: str) -> dict[str, str]:
+    """Where to see each knob's live value in Solr itself.
+
+    Note these knobs never touch solrconfig.xml on disk — the Config API
+    writes an overlay into ZooKeeper — so the file would show the old value
+    and prove nothing. Instead:
+
+    * whitelist knobs link to the config section (updateHandler, query),
+      which reports the *effective* value Solr is running with;
+    * merge knobs link to the overlay, because /config/indexConfig isn't a
+      fetchable section, and the overlay shows the searchlab.* property that
+      was actually written.
+    """
+    base = f"{spec.base_url()}/{collection}/config"
+    urls = {}
+    for name, knob in KNOBS.items():
+        if knob.get("user_prop"):
+            urls[name] = f"{base}/overlay?wt=json"
+        else:
+            urls[name] = f"{base}/{knob['path'].split('.')[0]}?wt=json"
+    return urls
 
 
 def _knob_available(knob: dict, config: dict) -> bool:
@@ -158,6 +197,7 @@ def tuning_state(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> d
         except httpx.HTTPError:
             userprops = {}
 
+    verify = _verify_urls(spec, collection)
     values: dict[str, float | int | None] = {}
     merge_missing = False
     for name, knob in KNOBS.items():
@@ -175,7 +215,10 @@ def tuning_state(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> d
             values[name] = round(raw / knob["scale"], 3)
         else:
             values[name] = None  # unset/disabled; UI shows the default
-    out = {"values": values, "registry": registry(values.keys())}
+    reg = registry(values.keys())
+    for name, item in reg.items():
+        item["verify"] = verify[name]
+    out = {"values": values, "registry": reg}
     if merge_missing:
         out["note"] = ("Merge and indexing-buffer knobs need a collection created "
                        "by this version of searchlab — recreate the collection to "

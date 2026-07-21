@@ -7,7 +7,13 @@ import asyncio
 import pytest
 from aiohttp import web
 
-from searchlab.cluster import ClusterSpec, add_replica, collection_detail, delete_replica
+from searchlab.cluster import (
+    ClusterSpec,
+    add_replica,
+    collection_detail,
+    delete_replica,
+    split_shard,
+)
 from searchlab.loglex import classify, is_noise, parse_request
 
 
@@ -237,6 +243,27 @@ async def test_add_replica_params_and_type_validation(mock_collections_api):
 
     with pytest.raises(ValueError, match="Replica type"):
         await asyncio.to_thread(add_replica, spec, "products", "shard1", "SPICY")
+
+
+async def test_split_shard_params(mock_collections_api):
+    spec = ClusterSpec(base_port=mock_collections_api.port)
+    await asyncio.to_thread(split_shard, spec, "products", "shard1")
+    assert mock_collections_api.seen["action"] == "SPLITSHARD"
+    assert mock_collections_api.seen["shard"] == "shard1"
+    assert mock_collections_api.seen["collection"] == "products"
+
+
+async def test_split_shard_raises_on_reported_failure(aiohttp_server):
+    """SPLITSHARD can answer 200 while reporting per-node failures."""
+    async def admin(request):
+        return web.json_response({"failure": {"solr1": "not enough disk"}})
+
+    app = web.Application()
+    app.router.add_get("/solr/admin/collections", admin)
+    server = await aiohttp_server(app)
+    spec = ClusterSpec(base_port=server.port)
+    with pytest.raises(RuntimeError, match="disk"):
+        await asyncio.to_thread(split_shard, spec, "products", "shard1")
 
 
 async def test_delete_replica_params(mock_collections_api):

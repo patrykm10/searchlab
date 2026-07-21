@@ -13,14 +13,30 @@ from searchlab.configset import INDEX_CONFIG_BLOCK, patch_solrconfig
 from searchlab.tuning import KNOBS, apply_tuning, read_tuning, registry, tuning_state
 
 
-def test_registry_hides_solr_paths():
+def test_registry_hides_wiring_but_names_the_solr_setting():
     reg = registry()
     assert set(reg) == set(KNOBS)
     for knob in reg.values():
         assert "path" not in knob
         assert "user_prop" not in knob
         assert "config_probe" not in knob
-        assert {"label", "desc", "unit", "min", "max", "default"} <= set(knob)
+        assert {"label", "desc", "unit", "min", "max", "default", "solr"} <= set(knob)
+    # whitelist knobs name their Config API property directly...
+    assert reg["soft_commit_s"]["solr"] == "updateHandler.autoSoftCommit.maxTime"
+    # ...while merge knobs name the real setting, not searchlab's indirection
+    assert "searchlab." not in reg["segments_per_tier"]["solr"]
+    assert "segmentsPerTier" in reg["segments_per_tier"]["solr"]
+
+
+async def test_verify_urls_point_at_something_that_proves_the_value(mock_config_merge):
+    """Each knob links to a Solr endpoint showing its live value. Merge knobs
+    must use the overlay: /config/indexConfig is not a fetchable section."""
+    spec = ClusterSpec(base_port=mock_config_merge.port)
+    reg = (await asyncio.to_thread(tuning_state, spec, "products"))["registry"]
+    assert reg["soft_commit_s"]["verify"].endswith("/products/config/updateHandler?wt=json")
+    assert reg["filter_cache"]["verify"].endswith("/products/config/query?wt=json")
+    assert reg["segments_per_tier"]["verify"].endswith("/products/config/overlay?wt=json")
+    assert "indexConfig" not in reg["segments_per_tier"]["verify"]
 
 
 def _config_payload(with_merge=False):
