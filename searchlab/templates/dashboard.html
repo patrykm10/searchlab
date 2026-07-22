@@ -211,6 +211,19 @@ canvas { width: 100%; height: 150px; display: block;
 #xline { position: fixed; display: none; width: 1px; background: var(--cobalt);
   opacity: 0.45; pointer-events: none; z-index: 49; }
 
+/* existing collections, listed above the create form */
+#coll-list { width: 100%; border-collapse: collapse; font-family: var(--mono);
+  font-size: 11px; margin-bottom: 16px; }
+#coll-list td { padding: 5px 0; border-top: 1px solid var(--line);
+  vertical-align: baseline; }
+#coll-list tr:first-child td { border-top: none; }
+#coll-list .cname { color: var(--ink); }
+#coll-list .cname.sel { color: var(--cobalt); font-weight: 700; }
+#coll-list .cmeta { color: var(--faint); text-align: right; white-space: nowrap; }
+#coll-list button { background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; color: inherit; text-align: left; }
+#coll-list button:hover { color: var(--cobalt); }
+
 /* ---------- query builder ---------- */
 .qform { max-width: 900px; margin-bottom: 22px; }
 .qrow { margin-bottom: 16px; }
@@ -425,7 +438,8 @@ section.collapsed h2 { margin-bottom: 0; }
 
     <div class="card">
       <h3>Collections</h3>
-      <div class="desc">Spin up a new collection, spread across the cluster.</div>
+      <div class="desc">What exists now, and room for one more.</div>
+      <table id="coll-list"></table>
       <div class="frow">
         <label for="coll-name">Name</label>
         <input type="text" id="coll-name" placeholder="my-collection">
@@ -521,6 +535,12 @@ section.collapsed h2 { margin-bottom: 0; }
         Time lost to garbage collection <b id="v-gc">—</b></h4>
       <canvas id="c-gc"></canvas>
       <div class="legend" id="lg-gc"></div>
+    </div>
+    <div class="chart">
+      <h4 title="Lucene segments per shard. Indexing creates new segments and merging collapses them, so this saws up and down — that sawtooth is exactly what the Merge threshold knob controls. A steady climb means merging isn't keeping up; searches get slower the more segments they must visit.">
+        Index segments, per shard <b id="v-seg">—</b></h4>
+      <canvas id="c-seg"></canvas>
+      <div class="legend" id="lg-seg"></div>
     </div>
   </div>
   <table id="summary" class="mtable"></table>
@@ -666,7 +686,7 @@ section.collapsed h2 { margin-bottom: 0; }
 const KEEP_S = 3600, POLL_MS = 2000;
 let windowS = 300;   // selectable: 300 / 900 / 3600
 const INKS = ["#14161a", "#2743c7", "#5b6068", "#9aa0a8"];
-const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [], gc: {} };
+const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [], gc: {}, seg: {} };
 const prevGC = {};      // node -> [ts, cumulative gc ms] for rate deltas
 let lastSnap = null;    // latest snapshot, reused by the topology renderer
 const chartMeta = {};   // canvas id -> data for hover hit-testing
@@ -1002,6 +1022,45 @@ async function loadTuning(collection) {
   } catch (e) {
     $("knobs").innerHTML = `<span class="desc">Could not load settings — retrying…</span>`;
     setTimeout(() => loadTuning(collection), 2000);
+  }
+}
+
+function renderCollections(snap) {
+  const colls = snap.cluster.collections || {};
+  const names = Object.keys(colls).sort();
+  if (!names.length) {
+    $("coll-list").innerHTML =
+      `<tr><td class="cmeta" style="text-align:left">no collections yet</td></tr>`;
+    return;
+  }
+  // doc counts live in the per-node core metrics, keyed by core name
+  const docs = {};
+  for (const n of Object.values(snap.nodes || {})) {
+    if (n.error) continue;
+    for (const [cname, c] of Object.entries(n.cores || {})) {
+      const coll = cname.split(".")[0];
+      docs[coll] = (docs[coll] || 0) + (c.num_docs || 0);
+    }
+  }
+  $("coll-list").innerHTML = names.map(n => {
+    const c = colls[n];
+    const sel = n === coll() ? " sel" : "";
+    const d = docs[n];
+    return `<tr>
+      <td><button class="cname${sel}" data-name="${esc(n)}"
+            title="Select this collection">${esc(n)}</button></td>
+      <td class="cmeta">${c.shards} shard(s) ·
+        ${d == null ? "—" : Number(d).toLocaleString()} docs ·
+        <span class="health-${esc(c.health)}">${esc(c.health)}</span></td>
+    </tr>`;
+  }).join("");
+  // clicking a name selects it everywhere, which is what you want next
+  for (const b of $("coll-list").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      $("ctl-coll").value = b.dataset.name;
+      $("ctl-coll").dispatchEvent(new Event("change"));
+      poll();
+    });
   }
 }
 
@@ -1420,9 +1479,10 @@ function render(snap) {
 
   renderControls(snap.actions);
   renderHealth(snap.insights || []);
+  renderCollections(snap);
 
   // node series
-  let sumRate = 0, worstP99 = 0, sumHeap = 0, worstGC = 0, rows = "";
+  let sumRate = 0, worstP99 = 0, sumHeap = 0, worstGC = 0, sumSeg = 0, rows = "";
   for (const [name, n] of Object.entries(snap.nodes)) {
     if (n.error) {
       rows += `<tr><td>${name}</td><td colspan="4" style="color:var(--faint)">unreachable</td></tr>`;
@@ -1442,6 +1502,14 @@ function render(snap) {
     prevGC[name] = [n.ts, gcTotal];
     const gc = Object.entries(n.jvm.gc)[0];
     let p99 = null, rate = 0, docs = 0;
+    for (const [cname, c] of Object.entries(n.cores)) {
+      if (c.segments != null) {
+        // products.shard1_0.replica_n5 -> shard1_0.n5, unique but readable
+        const label = cname.replace(/^[^.]+\./, "").replace(/replica_/, "");
+        push(hist.seg[label] ??= [], t, c.segments);
+        sumSeg += c.segments;
+      }
+    }
     for (const c of Object.values(n.cores)) {
       if (c.select_p99_ms != null) p99 = Math.max(p99 ?? 0, c.select_p99_ms);
       rate += c.select_rate_1m || 0; docs += c.num_docs || 0;
@@ -1481,13 +1549,16 @@ function render(snap) {
   drawChart($("c-heap"), hist.heap, INKS, "MB");
   drawChart($("c-rate"), { all: hist.rate }, ["#2743c7"], "r/s");
   drawChart($("c-gc"), hist.gc, INKS, "%");
+  drawChart($("c-seg"), hist.seg, INKS, "seg");
   legend($("lg-p99"), Object.keys(hist.p99), INKS);
   legend($("lg-heap"), Object.keys(hist.heap), INKS);
   legend($("lg-gc"), Object.keys(hist.gc), INKS);
+  legend($("lg-seg"), Object.keys(hist.seg), INKS);
   $("v-p99").textContent = fmt(worstP99, 1) + " ms worst";
   $("v-heap").textContent = fmt(sumHeap) + " MB total";
   $("v-rate").textContent = fmt(sumRate, 1) + " req/s";
   $("v-gc").textContent = fmt(worstGC, 1) + " % worst";
+  $("v-seg").textContent = fmt(sumSeg) + " total";
 }
 
 /* ---------- polling ---------- */

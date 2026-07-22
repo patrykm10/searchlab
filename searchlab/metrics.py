@@ -69,6 +69,10 @@ def snapshot_node_solr(base_url: str) -> dict:
             "num_docs": _get(vals, "SEARCHER.searcher.numDocs"),
             "deleted_docs": _get(vals, "SEARCHER.searcher.deletedDocs"),
             "warmup_ms": _get(vals, "SEARCHER.searcher.warmupTime"),
+            # segments rise as documents arrive and fall when merges run —
+            # the sawtooth that the merge-policy knobs actually control
+            "segments": _get(vals, "INDEX.segments"),
+            "size_bytes": _get(vals, "INDEX.sizeInBytes"),
             "caches": caches,
             "update": {
                 "adds_cumulative": _get(vals, "UPDATE.updateHandler.cumulativeAdds", "count"),
