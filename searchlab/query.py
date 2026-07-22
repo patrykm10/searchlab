@@ -82,8 +82,28 @@ def build_params(body: dict) -> dict:
         params["facet.limit"] = int(body.get("facet_limit") or 10)
         params["facet.mincount"] = 1
     if body.get("explain"):
-        params["debugQuery"] = "true"
+        # debug=true (not debugQuery) also returns the timing breakdown, which
+        # is the part that shows *where* the time went rather than just what
+        # the query became.
+        params["debug"] = "true"
+        params["debug.explain.structured"] = "false"
     return params
+
+
+def _timing(debug: dict) -> dict | None:
+    """Per-component timing, sorted so the expensive part is obvious."""
+    timing = debug.get("timing") or {}
+    if not timing:
+        return None
+    phases = []
+    for phase in ("prepare", "process"):
+        block = timing.get(phase) or {}
+        comps = [{"name": n, "time": c.get("time", 0)}
+                 for n, c in block.items() if isinstance(c, dict)]
+        comps.sort(key=lambda c: -c["time"])
+        phases.append({"name": phase, "time": block.get("time", 0),
+                       "components": comps})
+    return {"total": timing.get("time", 0), "phases": phases}
 
 
 def run_query(spec: ClusterSpec, collection: str, body: dict,
@@ -118,8 +138,18 @@ def run_query(spec: ClusterSpec, collection: str, body: dict,
         "qtime": (data.get("responseHeader") or {}).get("QTime"),
         "docs": resp.get("docs", []),
         "facets": facets,
+        "raw": data,          # the untouched response, for the raw panel
     }
     debug = data.get("debug") or {}
     if debug:
         out["parsed"] = debug.get("parsedquery_toString") or debug.get("parsedquery")
+        out["debug"] = {
+            "raw_query": debug.get("rawquerystring"),
+            "parsed": out["parsed"],
+            "filters": debug.get("filter_queries"),
+            "parser": debug.get("QParser"),
+            "timing": _timing(debug),
+            # id -> score explanation tree, as returned with structured=false
+            "explain": debug.get("explain") or {},
+        }
     return out

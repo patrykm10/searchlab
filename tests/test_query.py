@@ -49,6 +49,19 @@ def test_faceting_switches_on_only_when_a_field_is_chosen():
     assert p["facet.mincount"] == 1    # empty buckets are noise
 
 
+def test_multiple_facet_fields_are_all_sent():
+    p = build_params({"facet_fields": ["category_s", "brand_s", "active_b"]})
+    assert p["facet.field"] == ["category_s", "brand_s", "active_b"]
+
+
+def test_explain_asks_for_timing_too_not_just_the_parsed_query():
+    """debugQuery alone omits the timing breakdown, which is the half that
+    shows *where* the time went."""
+    p = build_params({"explain": True})
+    assert p["debug"] == "true"
+    assert "debugQuery" not in p
+
+
 def test_invalid_input_is_rejected_before_hitting_solr():
     with pytest.raises(ValueError, match="Parser"):
         build_params({"parser": "magic"})
@@ -74,8 +87,21 @@ async def mock_solr(aiohttp_server):
             ]},
             "facet_counts": {"facet_fields": {"category_s": ["books", 12, "toys", 3]}},
         }
-        if request.rel_url.query.get("debugQuery") == "true":
-            body["debug"] = {"parsedquery_toString": "+title_t:boot"}
+        if request.rel_url.query.get("debug") == "true":
+            body["debug"] = {
+                "rawquerystring": "boot",
+                "parsedquery_toString": "+title_t:boot",
+                "QParser": "ExtendedDismaxQParser",
+                "filter_queries": ["price_f:[1 TO 5]"],
+                "explain": {"a": "1.2 = weight(title_t:boot)"},
+                "timing": {
+                    "time": 12.0,
+                    "prepare": {"time": 2.0, "query": {"time": 1.5},
+                                "facet": {"time": 0.5}},
+                    "process": {"time": 10.0, "query": {"time": 3.0},
+                                "facet": {"time": 7.0}},
+                },
+            }
         return web.json_response(body)
 
     async def luke(request):
@@ -122,6 +148,28 @@ async def test_explain_surfaces_the_parsed_query(mock_solr):
     shown = await asyncio.to_thread(run_query, spec, "products",
                                     {"q": "boot", "explain": True})
     assert shown["parsed"] == "+title_t:boot"
+
+
+async def test_explain_returns_timing_sorted_by_cost(mock_solr):
+    """The expensive component should lead, so the bottleneck is obvious."""
+    spec = ClusterSpec(base_port=mock_solr.port)
+    out = await asyncio.to_thread(run_query, spec, "products",
+                                  {"q": "boot", "explain": True})
+    timing = out["debug"]["timing"]
+    assert timing["total"] == 12.0
+    process = next(p for p in timing["phases"] if p["name"] == "process")
+    # facet (7ms) cost more than query (3ms), so it must come first
+    assert [c["name"] for c in process["components"]] == ["facet", "query"]
+    assert out["debug"]["explain"] == {"a": "1.2 = weight(title_t:boot)"}
+    assert out["debug"]["filters"] == ["price_f:[1 TO 5]"]
+
+
+async def test_raw_response_is_returned_for_inspection(mock_solr):
+    spec = ClusterSpec(base_port=mock_solr.port)
+    out = await asyncio.to_thread(run_query, spec, "products", {"q": "boot"})
+    # the untouched response, so the UI can show exactly what Solr sent
+    assert out["raw"]["response"]["numFound"] == 42
+    assert out["raw"]["responseHeader"]["QTime"] == 7
 
 
 async def test_solr_errors_come_back_readable_with_the_url(mock_solr):

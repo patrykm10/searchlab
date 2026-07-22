@@ -212,35 +212,74 @@ canvas { width: 100%; height: 150px; display: block;
   opacity: 0.45; pointer-events: none; z-index: 49; }
 
 /* ---------- query builder ---------- */
-.qgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px 26px; margin-bottom: 18px; }
-.qgrid .qfull { grid-column: 1 / -1; }
-.qgrid label { display: block; margin-bottom: 5px; }
+.qform { max-width: 900px; margin-bottom: 22px; }
+.qrow { margin-bottom: 16px; }
+.qrow > label { display: block; margin-bottom: 6px; }
+.qrow input[type="text"], .qrow textarea { width: 100%; }
+.qsplit { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.qsplit3 { display: grid; grid-template-columns: 110px 1fr 1fr; gap: 22px; }
+.qsplit label, .qsplit3 label { display: block; margin-bottom: 6px; }
+.qsplit3 input[type="number"] { width: 100%; }
 textarea { font-family: var(--mono); font-size: 13px; color: var(--ink);
   background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
-  padding: 7px 9px; outline: none; width: 100%; resize: vertical; }
+  padding: 7px 9px; outline: none; resize: vertical; }
 textarea:focus { border-color: var(--cobalt); }
-#q-url { font-family: var(--mono); font-size: 11px; color: var(--faint);
-  word-break: break-all; margin-bottom: 12px; }
-#q-url a { color: var(--faint); }
-#q-url a:hover { color: var(--cobalt); }
-#q-parsed { font-family: var(--mono); font-size: 11px; color: var(--muted);
-  background: #fff; border: 1.5px solid var(--line); padding: 8px 12px;
-  margin-bottom: 12px; word-break: break-all; }
-#q-parsed:empty, #q-url:empty, #q-facets:empty { display: none; }
-.qfacet { display: inline-block; margin: 0 22px 6px 0; font-family: var(--mono);
+
+/* chosen facet fields, removable */
+.fchip { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono);
+  font-size: 11px; border: 1px solid var(--cobalt); color: var(--cobalt);
+  padding: 2px 6px; margin: 0 6px 6px 0; }
+.fchip button { background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 12px; padding: 0; line-height: 1; }
+.fchip button:hover { color: var(--ink); }
+
+/* returned facet counts */
+#q-facets:empty { display: none; }
+#q-facets { margin-bottom: 18px; }
+.fgroup { margin-bottom: 14px; }
+.fgroup .fname { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--faint); margin-bottom: 7px; }
+.fbucket { display: inline-block; margin: 0 20px 6px 0; font-family: var(--mono);
   font-size: 11px; }
-.qfacet b { color: var(--cobalt); font-variant-numeric: tabular-nums; }
-#q-results { background: #fff; border: 1.5px solid var(--line); }
+.fbucket b { color: var(--cobalt); font-variant-numeric: tabular-nums; }
+
+/* results: one record per row, long values clamped, click to see the doc */
 #q-results:empty { display: none; }
-#q-results table { width: 100%; border-collapse: collapse; font-family: var(--mono);
-  font-size: 11px; }
-#q-results td, #q-results th { text-align: left; padding: 6px 14px;
-  border-top: 1px solid var(--line); vertical-align: top;
-  max-width: 340px; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
-#q-results th { border-top: none; color: var(--faint); font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
+#q-results { background: #fff; border: 1.5px solid var(--line); margin-bottom: 18px; }
+.qdoc { border-top: 1px solid var(--line); padding: 10px 14px; }
+.qdoc:first-child { border-top: none; }
+.qdoc summary { cursor: pointer; list-style: none; display: grid;
+  grid-template-columns: 220px 1fr; gap: 16px; align-items: baseline; }
+.qdoc summary::-webkit-details-marker { display: none; }
+.qdoc .qid { font-family: var(--mono); font-size: 11px; color: var(--cobalt);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qdoc .qpreview { font-family: var(--mono); font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qdoc[open] .qpreview { white-space: normal; }
+.qdoc pre { font-family: var(--mono); font-size: 11px; color: var(--muted);
+  white-space: pre-wrap; word-break: break-word; margin-top: 10px;
+  padding-left: 14px; border-left: 2px solid var(--line); }
+
+/* foldable detail panels: url, timing, parsed query, raw response */
+.qpanel { border: 1.5px solid var(--line); background: #fff; margin-bottom: 10px; }
+.qpanel > summary { cursor: pointer; padding: 9px 14px; font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); list-style: none; }
+.qpanel > summary::-webkit-details-marker { display: none; }
+.qpanel > summary::before { content: "▶ "; font-size: 9px; color: var(--faint); }
+.qpanel[open] > summary::before { content: "▼ "; }
+.qpanel > summary:hover { color: var(--cobalt); }
+.qbody { padding: 0 14px 12px; font-family: var(--mono); font-size: 11px;
+  color: var(--muted); }
+.qbody pre { white-space: pre-wrap; word-break: break-word; max-height: 420px;
+  overflow: auto; margin: 0; }
+.qbody a { color: var(--cobalt); word-break: break-all; }
+/* timing bars: relative cost per component at a glance */
+.tbar { display: grid; grid-template-columns: 190px 1fr 60px; gap: 10px;
+  align-items: center; margin-bottom: 4px; }
+.tbar i { display: block; height: 7px; background: var(--cobalt); min-width: 1px; }
+.tbar span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.tphase { margin: 10px 0 6px; color: var(--ink); }
 
 /* ---------- request traffic ---------- */
 /* white panel, matching the activity log above it */
@@ -428,57 +467,73 @@ section.collapsed h2 { margin-bottom: 0; }
   <div class="desc">Build and run a single query against the selected
     collection — the exploring half, next to the load testing.</div>
 
-  <div class="qgrid">
-    <div class="qfull">
+  <div class="qform">
+    <div class="qrow">
       <label for="q-q">Query</label>
-      <input type="text" id="q-q" value="*:*" style="width:100%">
+      <input type="text" id="q-q" value="*:*">
     </div>
-    <div>
-      <label for="q-parser">Parser</label>
-      <select id="q-parser">
-        <option value="lucene" title="Solr's default. Full syntax — field:value, AND/OR/NOT, ranges. You write the field names.">lucene — exact syntax</option>
-        <option value="edismax" title="Extended DisMax. Type plain words and search many fields at once via qf, with weights like title_t^3. Tolerant of user-typed input.">edismax — user-friendly</option>
-        <option value="dismax" title="The older DisMax. Like edismax but without the full Lucene syntax support.">dismax — user-friendly (older)</option>
-      </select>
+
+    <div class="qrow qsplit">
+      <div>
+        <label for="q-parser">Parser</label>
+        <select id="q-parser">
+          <option value="lucene" title="Solr's default. Full syntax — field:value, AND/OR/NOT, ranges. You write the field names.">lucene — exact syntax</option>
+          <option value="edismax" title="Extended DisMax. Type plain words and search many fields at once via qf, with weights like title_t^3. Tolerant of user-typed input.">edismax — user-friendly</option>
+          <option value="dismax" title="The older DisMax. Like edismax but without the full Lucene syntax support.">dismax — user-friendly (older)</option>
+        </select>
+      </div>
+      <div id="q-qf-wrap" style="display:none">
+        <label for="q-qf">Fields to search (qf)</label>
+        <input type="text" id="q-qf" placeholder="title_t^3 body_t">
+      </div>
     </div>
-    <div id="q-qf-wrap" style="display:none">
-      <label for="q-qf">Fields to search (qf)</label>
-      <input type="text" id="q-qf" placeholder="title_t^3 body_t" style="width:100%">
-    </div>
-    <div>
-      <label for="q-rows">Rows</label>
-      <input type="number" id="q-rows" value="10" min="0" max="100">
-    </div>
-    <div>
-      <label for="q-sort">Sort</label>
-      <input type="text" id="q-sort" placeholder="price_f desc" style="width:100%">
-    </div>
-    <div class="qfull">
+
+    <div class="qrow">
       <label for="q-fq">Filters (fq) — one per line</label>
       <textarea id="q-fq" rows="2" placeholder="price_f:[10 TO 500]"></textarea>
     </div>
-    <div>
-      <label for="q-facet">Facet on</label>
-      <select id="q-facet"><option value="">none</option></select>
+
+    <div class="qrow qsplit3">
+      <div>
+        <label for="q-rows">Rows</label>
+        <input type="number" id="q-rows" value="10" min="0" max="100">
+      </div>
+      <div>
+        <label for="q-sort">Sort</label>
+        <input type="text" id="q-sort" placeholder="price_f desc">
+      </div>
+      <div>
+        <label for="q-fl">Fields to return (fl)</label>
+        <input type="text" id="q-fl" placeholder="id,title_t,price_f">
+      </div>
     </div>
-    <div>
-      <label for="q-explain">Explain</label>
-      <select id="q-explain">
-        <option value="">off</option>
-        <option value="1">show parsed query</option>
-      </select>
+
+    <div class="qrow">
+      <label for="q-facet">Facets</label>
+      <div class="frow" style="margin-bottom:8px">
+        <select id="q-facet"><option value="">choose a field…</option></select>
+        <button class="btn preset" id="btn-addfacet">Add facet</button>
+        <label for="q-facet-limit" style="margin-left:10px">Limit</label>
+        <input type="number" id="q-facet-limit" value="10" min="1" max="200"
+               style="width:80px">
+      </div>
+      <div id="q-facet-chips"></div>
+    </div>
+
+    <div class="frow" style="margin-top:18px">
+      <button class="btn primary" id="btn-runquery">Run query</button>
+      <label style="text-transform:none; letter-spacing:0; font-family:var(--sans);
+                    font-size:13px; color:var(--ink); cursor:pointer">
+        <input type="checkbox" id="q-explain" style="vertical-align:-1px">
+        explain — parsed query, timing and scoring
+      </label>
+      <span class="desc" id="q-summary" style="margin:0 0 0 auto"></span>
     </div>
   </div>
 
-  <div class="frow" style="margin-top:4px">
-    <button class="btn primary" id="btn-runquery">Run query</button>
-    <span class="desc" id="q-summary" style="margin:0"></span>
-  </div>
-
-  <div id="q-url"></div>
-  <div id="q-parsed"></div>
   <div id="q-facets"></div>
   <div id="q-results"></div>
+  <div id="q-panels"></div>
 </section>
 
 <section id="lastaction" style="display:none">
@@ -1046,7 +1101,7 @@ async function loadFields(collection) {
     // facets only make sense on exact-match fields; analyzed text would
     // bucket by individual token, which is rarely what anyone wants
     const facetable = out.fields.filter(f => !f.text);
-    $("q-facet").innerHTML = `<option value="">none</option>` +
+    $("q-facet").innerHTML = `<option value="">choose a field…</option>` +
       facetable.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
     const textFields = out.fields.filter(f => f.text).map(f => f.name);
     if (textFields.length && !$("q-qf").value)
@@ -1059,6 +1114,27 @@ $("q-parser").addEventListener("change", () => {
   $("q-qf-wrap").style.display = $("q-parser").value === "lucene" ? "none" : "";
 });
 
+/* chosen facet fields, as removable chips */
+const facetFields = [];
+
+function renderFacetChips() {
+  $("q-facet-chips").innerHTML = facetFields.map((f, i) =>
+    `<span class="fchip">${esc(f)}<button data-i="${i}" title="Remove">&times;</button></span>`
+  ).join("");
+  for (const b of $("q-facet-chips").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      facetFields.splice(Number(b.dataset.i), 1);
+      renderFacetChips();
+    });
+  }
+}
+
+$("btn-addfacet").addEventListener("click", () => {
+  const f = $("q-facet").value;
+  if (f && !facetFields.includes(f)) { facetFields.push(f); renderFacetChips(); }
+  $("q-facet").value = "";
+});
+
 $("btn-runquery").addEventListener("click", async () => {
   const body = {
     collection: coll(),
@@ -1067,54 +1143,100 @@ $("btn-runquery").addEventListener("click", async () => {
     qf: $("q-qf").value,
     rows: Number($("q-rows").value),
     sort: $("q-sort").value,
+    fl: $("q-fl").value,
     fq: $("q-fq").value.split("\n"),
-    facet_fields: $("q-facet").value ? [$("q-facet").value] : [],
-    explain: !!$("q-explain").value,
+    facet_fields: facetFields,
+    facet_limit: Number($("q-facet-limit").value),
+    explain: $("q-explain").checked,
   };
   $("q-summary").textContent = "running…";
   const out = await post("/api/query", body);
   if (!out.ok) {
     $("q-summary").textContent = "";
-    $("q-url").innerHTML = out.url
-      ? `<a href="${esc(out.url)}" target="_blank" rel="noopener">${esc(out.url)}</a>` : "";
-    $("q-parsed").textContent = "";
     $("q-facets").innerHTML = "";
     $("q-results").innerHTML = "";
+    // keep the URL visible on failure — it's how you debug the query
+    $("q-panels").innerHTML = out.url ? panel("Request URL", true,
+      `<a href="${esc(out.url)}" target="_blank" rel="noopener">${esc(out.url)}</a>`) : "";
     return;
   }
   renderQueryResult(out);
 });
 
+function panel(title, open, html) {
+  return `<details class="qpanel"${open ? " open" : ""}>
+    <summary>${esc(title)}</summary><div class="qbody">${html}</div></details>`;
+}
+
 function renderQueryResult(out) {
   $("q-summary").textContent =
     `${Number(out.num_found).toLocaleString()} hits · ${out.qtime} ms`;
-  $("q-url").innerHTML =
-    `<a href="${esc(out.url)}" target="_blank" rel="noopener">${esc(out.url)}</a>`;
-  $("q-parsed").textContent = out.parsed ? "parsed as:  " + out.parsed : "";
 
-  const fnames = Object.keys(out.facets || {});
-  $("q-facets").innerHTML = fnames.map(f => {
-    const buckets = out.facets[f];
+  // facet counts
+  $("q-facets").innerHTML = Object.entries(out.facets || {}).map(([f, buckets]) => {
     if (!buckets.length) return "";
-    return `<div style="margin-bottom:10px"><div class="desc"
-      style="margin-bottom:6px">${esc(f)}</div>` +
-      buckets.map(b => `<span class="qfacet">${esc(b.value)} <b>${b.count.toLocaleString()}</b></span>`).join("") +
-      `</div>`;
+    return `<div class="fgroup"><div class="fname">${esc(f)}</div>` +
+      buckets.map(b =>
+        `<span class="fbucket">${esc(b.value)} <b>${b.count.toLocaleString()}</b></span>`
+      ).join("") + `</div>`;
   }).join("");
 
+  // one expandable record per document, rather than a table too wide to read
   const docs = out.docs || [];
-  if (!docs.length) { $("q-results").innerHTML = ""; return; }
-  // union of keys keeps the table honest when docs differ in shape
-  const cols = [];
-  for (const d of docs) for (const k of Object.keys(d))
-    if (!k.startsWith("_") && !cols.includes(k)) cols.push(k);
-  $("q-results").innerHTML =
-    `<table><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr>` +
-    docs.map(d => `<tr>${cols.map(c => {
-      const v = d[c];
-      const s = v == null ? "" : (Array.isArray(v) ? v.join(", ") : String(v));
-      return `<td title="${esc(s)}">${esc(s)}</td>`;
-    }).join("")}</tr>`).join("") + `</table>`;
+  $("q-results").innerHTML = docs.map(d => {
+    const id = d.id != null ? String(d.id) : "(no id)";
+    const preview = Object.entries(d)
+      .filter(([k]) => k !== "id" && !k.startsWith("_"))
+      .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("|") : v}`)
+      .join("   ");
+    return `<details class="qdoc"><summary>
+      <span class="qid">${esc(id)}</span>
+      <span class="qpreview">${esc(preview)}</span>
+    </summary><pre>${esc(JSON.stringify(d, null, 2))}</pre></details>`;
+  }).join("");
+
+  // foldable detail panels
+  let panels = panel("Request URL", false,
+    `<a href="${esc(out.url)}" target="_blank" rel="noopener">${esc(out.url)}</a>`);
+
+  const dbg = out.debug;
+  if (dbg) {
+    if (dbg.parsed) {
+      let h = `<div><b>you wrote</b>&nbsp; ${esc(dbg.raw_query || "")}</div>
+               <div style="margin-top:6px"><b>solr ran</b>&nbsp; ${esc(dbg.parsed)}</div>`;
+      if (dbg.parser) h += `<div style="margin-top:6px">parser: ${esc(dbg.parser)}</div>`;
+      if (dbg.filters && dbg.filters.length)
+        h += `<div style="margin-top:6px">filters: ${esc(dbg.filters.join(", "))}
+              <span style="color:var(--faint)">— cached separately, no effect on score</span></div>`;
+      panels += panel("Parsed query", true, h);
+    }
+    if (dbg.timing) panels += panel("Where the time went", false, renderTiming(dbg.timing));
+    const ex = Object.entries(dbg.explain || {});
+    if (ex.length) {
+      panels += panel(`Why these scored (${ex.length})`, false,
+        ex.map(([id, tree]) =>
+          `<div style="margin-bottom:10px"><div style="color:var(--cobalt)">${esc(id)}</div>
+           <pre>${esc(String(tree))}</pre></div>`).join(""));
+    }
+  }
+  panels += panel("Raw response", false,
+    `<pre>${esc(JSON.stringify(out.raw, null, 2))}</pre>`);
+  $("q-panels").innerHTML = panels;
+}
+
+function renderTiming(t) {
+  const total = t.total || 0;
+  let h = `<div>total ${fmt(total, 1)} ms</div>`;
+  for (const ph of t.phases || []) {
+    const shown = (ph.components || []).filter(c => c.time > 0);
+    if (!shown.length) continue;
+    h += `<div class="tphase">${esc(ph.name)} — ${fmt(ph.time, 1)} ms</div>`;
+    const max = Math.max(...shown.map(c => c.time), 1);
+    h += shown.map(c => `<div class="tbar"><span>${esc(c.name)}</span>
+      <i style="width:${Math.max(1, c.time / max * 100).toFixed(1)}%"></i>
+      <span>${fmt(c.time, 1)} ms</span></div>`).join("");
+  }
+  return h;
 }
 
 /* ---------- topology ---------- */
