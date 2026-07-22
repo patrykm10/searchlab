@@ -231,7 +231,8 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return {"ok": False, "error": "Controls are disabled in demo mode."}
             coll = str(body.get("collection", "")).strip()
             if path == "/api/load/start":
-                return runner.start_load(coll, float(body.get("rps", 0)))
+                return runner.start_load(coll, float(body.get("rps", 0)),
+                                         body.get("query"))
             if path == "/api/load/rps":
                 return runner.set_rps(float(body.get("rps", 0)))
             if path == "/api/load/stop":

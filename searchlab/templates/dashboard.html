@@ -239,8 +239,10 @@ textarea:focus { border-color: var(--cobalt); }
 .fgroup { margin-bottom: 14px; }
 .fgroup .fname { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--faint); margin-bottom: 7px; }
-.fbucket { display: inline-block; margin: 0 20px 6px 0; font-family: var(--mono);
-  font-size: 11px; }
+.fbucket { display: inline-block; margin: 0 16px 6px 0; font-family: var(--mono);
+  font-size: 11px; background: none; border: none; padding: 2px 0; cursor: pointer;
+  color: var(--ink); border-bottom: 1px solid transparent; }
+.fbucket:hover { color: var(--cobalt); border-bottom-color: var(--cobalt); }
 .fbucket b { color: var(--cobalt); font-variant-numeric: tabular-nums; }
 
 /* results: one record per row, long values clamped, click to see the doc */
@@ -303,16 +305,27 @@ textarea:focus { border-color: var(--cobalt); }
 .tfail { color: #b3362b; font-weight: 700; }
 
 /* ---------- health ---------- */
-.finding { padding: 14px 0 14px 18px; border-top: 1px solid var(--line); }
+/* white panel, so findings read as clearly as the activity and traffic logs */
+#health { background: #fff; border: 1.5px solid var(--line); }
+.finding { padding: 13px 16px 14px; border-top: 1px solid var(--line);
+  border-left: 3px solid transparent; }
 .finding:first-child { border-top: none; }
-.finding h5 { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 3px; }
-.finding p { font-size: 13px; color: var(--muted); max-width: 72ch; }
-.finding.crit { border-left: 3px solid var(--cobalt); }
-.finding.crit h5::before { content: "Critical — "; color: var(--cobalt); }
-.finding.warn { border-left: 3px solid var(--faint); }
-.finding.info { border-left: 3px solid var(--line); }
-.finding.ok { border-left: 3px solid var(--line); color: var(--muted); }
-.finding.ok h5 { font-weight: 600; color: var(--muted); }
+.finding h5 { font-size: 14px; font-weight: 700; letter-spacing: -0.01em;
+  margin-bottom: 4px; color: var(--ink); }
+.finding p { font-size: 13px; color: var(--muted); max-width: 78ch;
+  line-height: 1.5; }
+/* same traffic-light convention as the replica dots */
+.finding.crit { border-left-color: #b3362b; }
+.finding.warn { border-left-color: #c9971c; }
+.finding.info { border-left-color: var(--cobalt); }
+.finding.ok { border-left-color: #2f7d51; }
+.sev { display: inline-block; font-family: var(--mono); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid currentColor;
+  padding: 0 5px; margin-right: 8px; vertical-align: 2px; }
+.finding.crit .sev { color: #b3362b; }
+.finding.warn .sev { color: #c9971c; }
+.finding.info .sev { color: var(--cobalt); }
+.finding.ok .sev { color: #2f7d51; }
 
 /* ---------- collapsible sections ---------- */
 .sec-toggle { background: none; border: none; cursor: pointer; color: var(--muted);
@@ -461,7 +474,105 @@ section.collapsed h2 { margin-bottom: 0; }
   </div>
 
 </section>
-
+<section id="lastaction" style="display:none">
+  <h2>Last action</h2>
+  <div id="strip"></div>
+</section>
+<section id="health-section">
+  <h2>Health</h2>
+  <div id="health"></div>
+</section>
+<section id="signals">
+  <h2>Live signals
+    <span id="ranges">
+      <button class="rangebtn active" data-w="300"
+        title="Close-up: watch individual commits, merges, and load-test changes as they happen.">5m</button>
+      <button class="rangebtn" data-w="900"
+        title="Medium view: judge a whole load test or the effect of a tuning change.">15m</button>
+      <button class="rangebtn" data-w="3600"
+        title="Long view: spot slow trends — memory creeping up, latency drifting.">1h</button>
+    </span>
+  </h2>
+  <div class="chartgrid">
+    <div class="chart">
+      <h4 title="Client-observed: measured by the load generator from when each request was scheduled until the response arrived. Includes network and any time queued waiting for the cluster to get to it — what a real user would feel. Only runs during a load test.">
+        Load test latency <b id="v-lt">—</b></h4>
+      <canvas id="c-lt"></canvas>
+      <div class="legend" id="lg-lt"></div>
+    </div>
+    <div class="chart">
+      <h4 title="Server-reported: how long Solr itself spent processing queries, per node. Excludes network and any queueing before Solr picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
+        Query latency p99, per node <b id="v-p99">—</b></h4>
+      <canvas id="c-p99"></canvas>
+      <div class="legend" id="lg-p99"></div>
+    </div>
+    <div class="chart">
+      <h4>JVM heap, per node <b id="v-heap">—</b></h4>
+      <canvas id="c-heap"></canvas>
+      <div class="legend" id="lg-heap"></div>
+    </div>
+    <div class="chart">
+      <h4>Query rate <b id="v-rate">—</b></h4>
+      <canvas id="c-rate"></canvas>
+      <div class="legend" id="lg-rate"></div>
+    </div>
+    <div class="chart">
+      <h4 title="Share of each node's time spent on garbage collection instead of serving requests. Healthy is near 0; sustained 10%+ means the heap is too small for the workload.">
+        Time lost to garbage collection <b id="v-gc">—</b></h4>
+      <canvas id="c-gc"></canvas>
+      <div class="legend" id="lg-gc"></div>
+    </div>
+  </div>
+  <table id="summary" class="mtable"></table>
+</section>
+<section id="topo-section" style="display:none">
+  <h2>Topology</h2>
+  <table id="topo" class="mtable"></table>
+  <div id="topo-controls">
+    <label for="topo-shard">Add a replica to</label>
+    <select id="topo-shard"></select>
+    <select id="topo-type">
+      <option value="NRT" title="Full copy that indexes in real time and can become leader. The default.">NRT — real-time copy</option>
+      <option value="TLOG" title="Follows the leader's transaction log instead of indexing itself; cheaper to run, can still take over as leader.">TLOG — log follower</option>
+      <option value="PULL" title="Read-only copy that periodically pulls the finished index; cheapest, adds query capacity, can never become leader.">PULL — read-only copy</option>
+    </select>
+    <button class="btn" id="btn-addreplica">Add replica</button>
+  </div>
+  <div id="topo-controls">
+    <label for="topo-split">Split shard</label>
+    <select id="topo-split"></select>
+    <button class="btn" id="btn-splitshard">Split shard</button>
+    <span class="desc" style="margin:0">divides it into two — slow, and needs
+      roughly double the disk while both exist</span>
+  </div>
+</section>
+<section id="activity">
+  <h2>Cluster activity
+    <span id="log-nav">
+      <button class="rangebtn" id="log-older" title="Earlier events">&#9650;</button>
+      <button class="rangebtn" id="log-newer" title="Later events" disabled>&#9660;</button>
+      <button id="log-pos" title="Jump back to the newest events" style="display:none"></button>
+    </span>
+  </h2>
+  <div id="log"></div>
+</section>
+<section id="traffic-section">
+  <h2>Request traffic
+    <span id="traffic-count"></span>
+  </h2>
+  <div class="desc" style="margin:-12px 0 14px">The queries and indexing
+    requests actually hitting the cluster right now. Per-shard fan-out is
+    hidden — these are the requests as clients sent them.</div>
+  <div id="traffic-panel">
+    <table id="traffic" class="mtable"></table>
+  </div>
+</section>
+<section id="tuningblock">
+  <h2>Tuning</h2>
+  <div class="desc">Adjust how the engine behaves. Changes go live within seconds — no restart.</div>
+  <div id="tuning-note" class="desc" style="display:none"></div>
+  <div id="knobs"><span class="desc">Loading current settings…</span></div>
+</section>
 <section id="query-section">
   <h2>Query</h2>
   <div class="desc">Build and run a single query against the selected
@@ -529,117 +640,22 @@ section.collapsed h2 { margin-bottom: 0; }
       </label>
       <span class="desc" id="q-summary" style="margin:0 0 0 auto"></span>
     </div>
+
+    <div class="frow" style="margin-top:6px; padding-top:14px;
+                             border-top:1px solid var(--line)">
+      <button class="btn" id="btn-queryload">Run this as a load test</button>
+      <label for="q-load-rps">at</label>
+      <input type="number" id="q-load-rps" value="50" min="1" max="2000"
+             style="width:80px">
+      <span class="desc" style="margin:0">req/s — fires this exact query
+        instead of the built-in mix</span>
+    </div>
+    <div class="desc" id="q-load-note" style="margin-top:6px"></div>
   </div>
 
   <div id="q-facets"></div>
   <div id="q-results"></div>
   <div id="q-panels"></div>
-</section>
-
-<section id="lastaction" style="display:none">
-  <h2>Last action</h2>
-  <div id="strip"></div>
-</section>
-
-<section id="tuningblock">
-  <h2>Tuning</h2>
-  <div class="desc">Adjust how the engine behaves. Changes go live within seconds — no restart.</div>
-  <div id="tuning-note" class="desc" style="display:none"></div>
-  <div id="knobs"><span class="desc">Loading current settings…</span></div>
-</section>
-
-<section id="activity">
-  <h2>Cluster activity
-    <span id="log-nav">
-      <button class="rangebtn" id="log-older" title="Earlier events">&#9650;</button>
-      <button class="rangebtn" id="log-newer" title="Later events" disabled>&#9660;</button>
-      <button id="log-pos" title="Jump back to the newest events" style="display:none"></button>
-    </span>
-  </h2>
-  <div id="log"></div>
-</section>
-
-<section id="traffic-section">
-  <h2>Request traffic
-    <span id="traffic-count"></span>
-  </h2>
-  <div class="desc" style="margin:-12px 0 14px">The queries and indexing
-    requests actually hitting the cluster right now. Per-shard fan-out is
-    hidden — these are the requests as clients sent them.</div>
-  <div id="traffic-panel">
-    <table id="traffic" class="mtable"></table>
-  </div>
-</section>
-
-<section id="signals">
-  <h2>Live signals
-    <span id="ranges">
-      <button class="rangebtn active" data-w="300"
-        title="Close-up: watch individual commits, merges, and load-test changes as they happen.">5m</button>
-      <button class="rangebtn" data-w="900"
-        title="Medium view: judge a whole load test or the effect of a tuning change.">15m</button>
-      <button class="rangebtn" data-w="3600"
-        title="Long view: spot slow trends — memory creeping up, latency drifting.">1h</button>
-    </span>
-  </h2>
-  <div class="chartgrid">
-    <div class="chart">
-      <h4 title="Client-observed: measured by the load generator from when each request was scheduled until the response arrived. Includes network and any time queued waiting for the cluster to get to it — what a real user would feel. Only runs during a load test.">
-        Load test latency <b id="v-lt">—</b></h4>
-      <canvas id="c-lt"></canvas>
-      <div class="legend" id="lg-lt"></div>
-    </div>
-    <div class="chart">
-      <h4 title="Server-reported: how long Solr itself spent processing queries, per node. Excludes network and any queueing before Solr picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
-        Query latency p99, per node <b id="v-p99">—</b></h4>
-      <canvas id="c-p99"></canvas>
-      <div class="legend" id="lg-p99"></div>
-    </div>
-    <div class="chart">
-      <h4>JVM heap, per node <b id="v-heap">—</b></h4>
-      <canvas id="c-heap"></canvas>
-      <div class="legend" id="lg-heap"></div>
-    </div>
-    <div class="chart">
-      <h4>Query rate <b id="v-rate">—</b></h4>
-      <canvas id="c-rate"></canvas>
-      <div class="legend" id="lg-rate"></div>
-    </div>
-    <div class="chart">
-      <h4 title="Share of each node's time spent on garbage collection instead of serving requests. Healthy is near 0; sustained 10%+ means the heap is too small for the workload.">
-        Time lost to garbage collection <b id="v-gc">—</b></h4>
-      <canvas id="c-gc"></canvas>
-      <div class="legend" id="lg-gc"></div>
-    </div>
-  </div>
-  <table id="summary" class="mtable"></table>
-</section>
-
-<section id="topo-section" style="display:none">
-  <h2>Topology</h2>
-  <table id="topo" class="mtable"></table>
-  <div id="topo-controls">
-    <label for="topo-shard">Add a replica to</label>
-    <select id="topo-shard"></select>
-    <select id="topo-type">
-      <option value="NRT" title="Full copy that indexes in real time and can become leader. The default.">NRT — real-time copy</option>
-      <option value="TLOG" title="Follows the leader's transaction log instead of indexing itself; cheaper to run, can still take over as leader.">TLOG — log follower</option>
-      <option value="PULL" title="Read-only copy that periodically pulls the finished index; cheapest, adds query capacity, can never become leader.">PULL — read-only copy</option>
-    </select>
-    <button class="btn" id="btn-addreplica">Add replica</button>
-  </div>
-  <div id="topo-controls">
-    <label for="topo-split">Split shard</label>
-    <select id="topo-split"></select>
-    <button class="btn" id="btn-splitshard">Split shard</button>
-    <span class="desc" style="margin:0">divides it into two — slow, and needs
-      roughly double the disk while both exist</span>
-  </div>
-</section>
-
-<section id="health-section">
-  <h2>Health</h2>
-  <div id="health"></div>
 </section>
 
 
@@ -992,13 +1008,15 @@ async function loadTuning(collection) {
 function renderHealth(findings) {
   const el = $("health");
   if (!findings.length) {
-    el.innerHTML = `<div class="finding ok"><h5>All systems normal</h5>
+    el.innerHTML = `<div class="finding ok"><h5><span class="sev">ok</span>All systems normal</h5>
       <p>Nothing needs your attention — memory, latency, and indexing all look healthy.</p></div>`;
     return;
   }
+  const label = { crit: "critical", warn: "warning", info: "note" };
   el.innerHTML = findings.map(f =>
-    `<div class="finding ${esc(f.severity)}"><h5>${esc(f.title)}</h5>
-     <p>${esc(f.detail)}</p></div>`).join("");
+    `<div class="finding ${esc(f.severity)}">
+       <h5><span class="sev">${esc(label[f.severity] || f.severity)}</span>${esc(f.title)}</h5>
+       <p>${esc(f.detail)}</p></div>`).join("");
 }
 
 /* ---------- chart range + hover ---------- */
@@ -1163,6 +1181,41 @@ $("btn-runquery").addEventListener("click", async () => {
   renderQueryResult(out);
 });
 
+function queryBody() {
+  return {
+    collection: coll(),
+    q: $("q-q").value,
+    parser: $("q-parser").value,
+    qf: $("q-qf").value,
+    rows: Number($("q-rows").value),
+    sort: $("q-sort").value,
+    fl: $("q-fl").value,
+    fq: $("q-fq").value.split("\n"),
+    facet_fields: facetFields,
+    facet_limit: Number($("q-facet-limit").value),
+  };
+}
+
+$("btn-queryload").addEventListener("click", async () => {
+  const body = queryBody();
+  const out = await post("/api/load/start",
+    { collection: coll(), rps: Number($("q-load-rps").value), query: body });
+  if (!out.ok) return;
+  // An identical query every time is served from queryResultCache after the
+  // first hit, so the numbers look far better than reality. The load
+  // generator substitutes {RAND_WORD} / {RAND_INT:a:b} per request — say so.
+  const text = [body.q, ...(body.fq || [])].join(" ");
+  $("q-load-note").innerHTML = /\{RAND_/.test(text)
+    ? `Running. Placeholders will be randomised per request, so the result
+       cache can't flatter the numbers.`
+    : `Running — but every request is <b>identical</b>, so after the first one
+       Solr serves it from the result cache and the latency will look better
+       than it really is. Put <code>{RAND_WORD}</code> or
+       <code>{RAND_INT:1:500}</code> in the query or a filter to make each
+       request distinct.`;
+  poll();
+});
+
 function panel(title, open, html) {
   return `<details class="qpanel"${open ? " open" : ""}>
     <summary>${esc(title)}</summary><div class="qbody">${html}</div></details>`;
@@ -1172,14 +1225,26 @@ function renderQueryResult(out) {
   $("q-summary").textContent =
     `${Number(out.num_found).toLocaleString()} hits · ${out.qtime} ms`;
 
-  // facet counts
+  // facet counts — clicking one adds it as a filter and re-runs, which is
+  // both the natural way to explore and how faceting is meant to be used
   $("q-facets").innerHTML = Object.entries(out.facets || {}).map(([f, buckets]) => {
     if (!buckets.length) return "";
     return `<div class="fgroup"><div class="fname">${esc(f)}</div>` +
       buckets.map(b =>
-        `<span class="fbucket">${esc(b.value)} <b>${b.count.toLocaleString()}</b></span>`
+        `<button class="fbucket" data-field="${esc(f)}" data-value="${esc(b.value)}"
+          title="Filter by ${esc(f)}:${esc(b.value)}">${esc(b.value)}
+          <b>${b.count.toLocaleString()}</b></button>`
       ).join("") + `</div>`;
   }).join("");
+  for (const b of $("q-facets").querySelectorAll(".fbucket")) {
+    b.addEventListener("click", () => {
+      const clause = `${b.dataset.field}:"${b.dataset.value}"`;
+      const cur = $("q-fq").value.split("\n").map(s => s.trim()).filter(Boolean);
+      if (!cur.includes(clause)) cur.push(clause);
+      $("q-fq").value = cur.join("\n");
+      $("btn-runquery").click();
+    });
+  }
 
   // one expandable record per document, rather than a table too wide to read
   const docs = out.docs || [];
@@ -1525,9 +1590,9 @@ async function pollLogs() {
 /* ---------- collapsible sections ---------- */
 
 (function initCollapsers() {
-  const ids = ["controls", "query-section", "lastaction", "tuningblock",
-               "activity", "traffic-section", "signals", "topo-section",
-               "health-section"];
+  const ids = ["controls", "lastaction", "health-section", "signals",
+               "topo-section", "activity", "traffic-section", "tuningblock",
+               "query-section"];
   let saved;
   try { saved = new Set(JSON.parse(localStorage.getItem("searchlab.collapsed") || "[]")); }
   catch (e) { saved = new Set(); }

@@ -110,21 +110,37 @@ class ActionRunner:
 
     # ----------------------------------------------------------- load test --
 
-    def start_load(self, collection: str, rps: float) -> dict:
+    def start_load(self, collection: str, rps: float,
+                   query: dict | None = None) -> dict:
+        """Start a load test, either from the shipped templates or from a
+        query built in the UI (`query` being its Solr params)."""
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
         if not 0 < rps <= MAX_RPS:
             return {"ok": False, "error": f"Rate must be between 1 and {MAX_RPS:.0f}."}
+        templates = None
+        if query:
+            from .query import build_params
+
+            try:
+                params = build_params(query)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+            params.pop("wt", None)          # the engine sets its own
+            templates = [{"name": "custom", "weight": 1, "params": params}]
         with self._lock:
             if self._running(self._load_future):
                 return {"ok": False, "error": "A load test is already running."}
             self._control = LoadControl(rps=rps)
-            self._load_meta = {"collection": collection, "started": time.time()}
+            self._load_meta = {"collection": collection, "started": time.time(),
+                               "custom": bool(query)}
             queries = Path("queries/default.yaml")
             self._load_future = self._submit(
                 "load",
                 run_load(self.spec.base_url(), collection, rps, duration=86400.0,
-                         queries_path=queries if queries.exists() else None,
+                         queries_path=None if templates else
+                         (queries if queries.exists() else None),
+                         templates=templates,
                          live_file=cl.WORKDIR / "live-load.json",
                          engine=self.spec.engine, control=self._control),
                 lambda res: f"Load test finished: {len(res.records)} requests sent.",

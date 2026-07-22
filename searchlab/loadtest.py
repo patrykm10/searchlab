@@ -200,6 +200,7 @@ async def run_load(
     live_file: str | Path | None = None,
     engine: str = "solr",
     control: LoadControl | None = None,
+    templates: list[dict] | None = None,
 ) -> LoadResult:
     """Fire queries at `rps` for `duration` seconds, ramping linearly over `ramp`.
 
@@ -215,7 +216,10 @@ async def run_load(
 
     eng = get_engine(engine)
     rng = random.Random(seed)
-    templates = load_queries(queries_path) if queries_path else eng.default_queries()
+    # explicit templates win: they're how a query built in the UI becomes
+    # the workload, without having to round-trip through a YAML file
+    if templates is None:
+        templates = load_queries(queries_path) if queries_path else eng.default_queries()
     picker = QueryPicker(templates, rng, words or list(_WORDS))
 
     index_gens = None

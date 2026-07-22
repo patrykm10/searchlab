@@ -164,6 +164,37 @@ async def test_explain_returns_timing_sorted_by_cost(mock_solr):
     assert out["debug"]["filters"] == ["price_f:[1 TO 5]"]
 
 
+def test_built_query_becomes_a_load_test_template():
+    """A query built in the UI should drive the load generator directly,
+    without round-tripping through a YAML file."""
+    from searchlab.actions import ActionRunner
+
+    runner = ActionRunner(ClusterSpec())
+    captured = {}
+
+    def fake_submit(action, coro, on_success):
+        captured["coro"] = coro
+        coro.close()          # don't actually run it
+        return None
+    runner._submit = fake_submit
+
+    out = runner.start_load("products", 25, {
+        "q": "body_t:{RAND_WORD}", "parser": "edismax", "qf": "title_t^3",
+        "fq": ["price_f:[1 TO 5]"],
+    })
+    assert out["ok"] is True
+    assert runner._load_meta["custom"] is True
+
+
+def test_invalid_built_query_is_rejected_before_starting_load():
+    from searchlab.actions import ActionRunner
+
+    runner = ActionRunner(ClusterSpec())
+    out = runner.start_load("products", 25, {"parser": "nonsense"})
+    assert out["ok"] is False
+    assert "Parser" in out["error"]
+
+
 async def test_raw_response_is_returned_for_inspection(mock_solr):
     spec = ClusterSpec(base_port=mock_solr.port)
     out = await asyncio.to_thread(run_query, spec, "products", {"q": "boot"})
