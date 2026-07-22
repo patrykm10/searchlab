@@ -434,6 +434,16 @@ section.collapsed h2 { margin-bottom: 0; }
           <button class="btn" id="btn-indexfile">Index file</button>
         </div>
       </div>
+
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--line)">
+        <div class="desc" style="margin-bottom:10px">Or make what's already
+          indexed searchable by meaning — embeds a text field into vectors.</div>
+        <div class="frow">
+          <label for="ctl-embed-field">Embed field</label>
+          <select id="ctl-embed-field"><option value="">choose a text field…</option></select>
+        </div>
+        <button class="btn" id="btn-embed">Embed documents</button>
+      </div>
     </div>
 
     <div class="card">
@@ -611,11 +621,25 @@ section.collapsed h2 { margin-bottom: 0; }
           <option value="lucene" title="Solr's default. Full syntax — field:value, AND/OR/NOT, ranges. You write the field names.">lucene — exact syntax</option>
           <option value="edismax" title="Extended DisMax. Type plain words and search many fields at once via qf, with weights like title_t^3. Tolerant of user-typed input.">edismax — user-friendly</option>
           <option value="dismax" title="The older DisMax. Like edismax but without the full Lucene syntax support.">dismax — user-friendly (older)</option>
+          <option value="semantic" title="Embed the query text with the loaded model and find the nearest vectors — matches by meaning, so it can find documents that share no words with the query.">semantic — by meaning (kNN)</option>
         </select>
       </div>
       <div id="q-qf-wrap" style="display:none">
         <label for="q-qf">Fields to search (qf)</label>
         <input type="text" id="q-qf" placeholder="title_t^3 body_t">
+      </div>
+      <div id="q-vec-wrap" style="display:none">
+        <label for="q-vecfield">Vector field</label>
+        <input type="text" id="q-vecfield" value="vec">
+      </div>
+    </div>
+
+    <div class="qrow" id="q-model-row" style="display:none">
+      <div class="frow" style="margin:0">
+        <label for="q-model">Embedding model</label>
+        <select id="q-model"></select>
+        <button class="btn preset" id="btn-loadmodel">Load model</button>
+        <span class="desc" id="q-model-status" style="margin:0"></span>
       </div>
     </div>
 
@@ -1183,12 +1207,72 @@ async function loadFields(collection) {
     const textFields = out.fields.filter(f => f.text).map(f => f.name);
     if (textFields.length && !$("q-qf").value)
       $("q-qf").placeholder = textFields[0] + "^3 " + (textFields[1] || "");
+    // only analyzed text is worth embedding; ids and numbers aren't
+    const cur = $("ctl-embed-field").value;
+    $("ctl-embed-field").innerHTML = `<option value="">choose a text field…</option>` +
+      textFields.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    if (textFields.includes(cur)) $("ctl-embed-field").value = cur;
   } catch (e) { /* leave the pickers as they were */ }
 }
 
 $("q-parser").addEventListener("change", () => {
+  const p = $("q-parser").value, semantic = p === "semantic";
   // qf is a dismax/edismax concept; showing it under lucene invites confusion
-  $("q-qf-wrap").style.display = $("q-parser").value === "lucene" ? "none" : "";
+  $("q-qf-wrap").style.display = (p === "lucene" || semantic) ? "none" : "";
+  $("q-vec-wrap").style.display = semantic ? "" : "none";
+  $("q-model-row").style.display = semantic ? "" : "none";
+  if (semantic) refreshModel();
+});
+
+/* ---------- embedding model ---------- */
+
+let modelState = null;
+
+async function refreshModel() {
+  const out = await post("/api/model", {});
+  if (!out.ok) return;
+  modelState = out;
+  const sel = $("q-model");
+  if (!sel.dataset.filled) {
+    sel.dataset.filled = "1";
+    sel.innerHTML = Object.entries(out.models).map(([k, m]) =>
+      `<option value="${esc(k)}">${esc(k)} — ${m.dims}d</option>`).join("");
+    sel.value = out.current;
+  }
+  const el = $("q-model-status");
+  if (!out.available) {
+    el.textContent = "not installed — pip install 'searchlab[embed]'";
+  } else if (out.loading) {
+    el.textContent = "loading… (first use downloads the model)";
+  } else if (out.error) {
+    el.textContent = out.error;
+  } else if (out.loaded.includes(sel.value)) {
+    el.textContent = `ready — ${out.models[sel.value].dims} dimensions`;
+  } else {
+    el.textContent = "not loaded yet";
+  }
+  $("btn-loadmodel").disabled = !out.available || out.loading;
+}
+
+$("btn-loadmodel").addEventListener("click", async () => {
+  const out = await post("/api/model/load", { name: $("q-model").value });
+  if (out.ok) {
+    $("q-model-status").textContent = "loading… (first use downloads the model)";
+    // loading is slow the first time; poll until it settles
+    const t = setInterval(async () => {
+      await refreshModel();
+      if (modelState && !modelState.loading) { clearInterval(t); poll(); }
+    }, 1500);
+  }
+});
+
+$("btn-embed").addEventListener("click", async () => {
+  const out = await post("/api/embed",
+    { collection: coll(), text_field: $("ctl-embed-field").value,
+      vector_field: "vec" });
+  if (out.ok) showStrip("Embedding documents — this reads them back, "
+                        + "vectorises them and writes them again…", false);
+  poll();
 });
 
 /* chosen facet fields, as removable chips */
@@ -1216,7 +1300,9 @@ $("btn-runquery").addEventListener("click", async () => {
   const body = {
     collection: coll(),
     q: $("q-q").value,
-    parser: $("q-parser").value,
+    parser: $("q-parser").value === "semantic" ? "lucene" : $("q-parser").value,
+    semantic: $("q-parser").value === "semantic",
+    vector_field: $("q-vecfield").value,
     qf: $("q-qf").value,
     rows: Number($("q-rows").value),
     sort: $("q-sort").value,
@@ -1244,7 +1330,9 @@ function queryBody() {
   return {
     collection: coll(),
     q: $("q-q").value,
-    parser: $("q-parser").value,
+    parser: $("q-parser").value === "semantic" ? "lucene" : $("q-parser").value,
+    semantic: $("q-parser").value === "semantic",
+    vector_field: $("q-vecfield").value,
     qf: $("q-qf").value,
     rows: Number($("q-rows").value),
     sort: $("q-sort").value,

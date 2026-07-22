@@ -82,6 +82,9 @@ class ActionRunner:
         self._maint_busy = False
         self._replica_busy = False
         self._coll_busy = False
+        self._model_loading = False
+        self._model_name = "minilm"
+        self._model_error: str | None = None
         self.last_action: dict | None = None
 
     # ------------------------------------------------------------- helpers --
@@ -223,8 +226,11 @@ class ActionRunner:
 
         def job():
             try:
-                fn()
-                self._done(action, True, message)
+                # a job may return its own message when the useful detail
+                # (a count, say) is only known once it has run
+                result = fn()
+                self._done(action, True,
+                           result if isinstance(result, str) else message)
             except Exception as e:
                 self._done(action, False, str(e))
             finally:
@@ -294,6 +300,81 @@ class ActionRunner:
         except Exception as e:
             return {"ok": False, "error": f"Could not read {src.name}: {e}"}
 
+    # --------------------------------------------------------- embeddings --
+
+    def model_state(self) -> dict:
+        from . import embeddings as emb
+
+        return {
+            "available": emb.available(),
+            "loading": self._model_loading,
+            "loaded": emb.loaded_names(),
+            "current": self._model_name,
+            "dims": emb.MODELS.get(self._model_name, (None, None))[1],
+            "models": {k: {"id": v[0], "dims": v[1]} for k, v in emb.MODELS.items()},
+            "error": self._model_error,
+        }
+
+    def load_model(self, name: str) -> dict:
+        """Load an embedding model. First use downloads weights, so this
+        runs in the background and the UI polls model_state()."""
+        from . import embeddings as emb
+
+        if not emb.available():
+            return {"ok": False, "error": emb.INSTALL_HINT}
+        if name not in emb.MODELS:
+            return {"ok": False, "error": f"Unknown model {name!r}."}
+        with self._lock:
+            if self._model_loading:
+                return {"ok": False, "error": "A model is already loading."}
+            self._model_loading = True
+            self._model_error = None
+
+        def job():
+            try:
+                emb.get(name)
+                self._model_name = name
+                self._done("model", True,
+                           f"Embedding model “{name}” ready — "
+                           f"{emb.MODELS[name][1]} dimensions.")
+            except Exception as e:
+                self._model_error = str(e)
+                self._done("model", False, str(e))
+            finally:
+                self._model_loading = False
+
+        threading.Thread(target=job, daemon=True).start()
+        return {"ok": True}
+
+    def embed_collection(self, collection: str, text_field: str,
+                         vector_field: str = "vec") -> dict:
+        """Re-index every document with an embedding of one text field.
+
+        Solr can't compute vectors itself, so this reads the documents back
+        out, embeds them here, and writes them again — which is exactly what
+        a real re-embedding migration looks like.
+        """
+        from . import embeddings as emb
+
+        if not collection or not text_field:
+            return {"ok": False, "error": "Pick a collection and a text field."}
+        if not emb.available():
+            return {"ok": False, "error": emb.INSTALL_HINT}
+        if self._model_name not in emb.loaded_names():
+            return {"ok": False, "error": "Load an embedding model first."}
+
+        model = emb.get(self._model_name)
+
+        def job():
+            from .vectorize import embed_existing_docs
+
+            n = embed_existing_docs(self.spec, collection, model,
+                                    text_field, vector_field)
+            return f"Embedded {n:,} documents into “{vector_field}”."
+
+        return self._maintenance_job(collection, "embed",
+                                     "Embedding finished.", job)
+
     # -------------------------------------------------------------- query --
 
     def fields(self, collection: str) -> dict:
@@ -315,8 +396,17 @@ class ActionRunner:
             return {"ok": False, "error": "The query builder is Solr-only for now."}
         from .query import run_query
 
+        embedder = None
+        if body.get("semantic"):
+            from . import embeddings as emb
+
+            if not emb.available():
+                return {"ok": False, "error": emb.INSTALL_HINT}
+            if self._model_name not in emb.loaded_names():
+                return {"ok": False, "error": "Load an embedding model first."}
+            embedder = emb.get(self._model_name)
         try:
-            return run_query(self.spec, collection, body)
+            return run_query(self.spec, collection, body, embedder=embedder)
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         except Exception as e:

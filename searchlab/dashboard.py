@@ -258,6 +258,14 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return runner.run_query(coll, body)
             if path == "/api/fields":
                 return runner.fields(coll)
+            if path == "/api/model/load":
+                return runner.load_model(str(body.get("name", "minilm")))
+            if path == "/api/model":
+                return {"ok": True, **runner.model_state()}
+            if path == "/api/embed":
+                return runner.embed_collection(
+                    coll, str(body.get("text_field", "")),
+                    str(body.get("vector_field") or "vec"))
             if path == "/api/expunge":
                 return runner.expunge_deletes(coll)
             if path == "/api/reload":

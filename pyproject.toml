@@ -18,6 +18,8 @@ dependencies = [
 
 [project.optional-dependencies]
 recall = ["numpy>=1.24"]
+# fastembed runs ONNX rather than torch: same models, ~158 MB not ~2.5 GB
+embed = ["fastembed>=0.4"]
 
 [project.scripts]
 searchlab = "searchlab.cli:main"

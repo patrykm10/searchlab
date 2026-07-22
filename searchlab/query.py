@@ -47,10 +47,28 @@ def list_fields(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> li
     return out
 
 
-def build_params(body: dict) -> dict:
-    """Turn the builder's form into Solr params, dropping anything blank."""
+def build_params(body: dict, embedder=None) -> dict:
+    """Turn the builder's form into Solr params, dropping anything blank.
+
+    With `semantic` set, the query text is embedded and becomes a kNN
+    search instead of a keyword one — the same box, a different question:
+    "documents that mean this" rather than "documents containing this".
+    """
     q = (body.get("q") or "").strip() or "*:*"
     parser = body.get("parser") or "lucene"
+
+    if body.get("semantic"):
+        if embedder is None:
+            raise ValueError("Load an embedding model first.")
+        if q == "*:*":
+            raise ValueError("Semantic search needs something to search for.")
+        from .embeddings import knn_query
+
+        vector = embedder.embed_one(q)
+        top_k = int(body.get("top_k") or body.get("rows") or 10)
+        q = knn_query(body.get("vector_field") or "vec", vector, top_k)
+        parser = "lucene"          # {!knn} is local-params, not a defType
+
     if parser not in PARSERS:
         raise ValueError(f"Parser must be one of {', '.join(PARSERS)}.")
     try:
@@ -107,9 +125,9 @@ def _timing(debug: dict) -> dict | None:
 
 
 def run_query(spec: ClusterSpec, collection: str, body: dict,
-              timeout: float = 60.0) -> dict:
+              timeout: float = 60.0, embedder=None) -> dict:
     """Execute the built query and normalize the parts worth showing."""
-    params = build_params(body)
+    params = build_params(body, embedder)
     url = f"{spec.base_url()}/{collection}/select"
     with httpx.Client(timeout=timeout) as client:
         r = client.get(url, params=params)
