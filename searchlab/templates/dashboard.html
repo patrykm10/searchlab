@@ -500,15 +500,6 @@ section.collapsed h2 { margin-bottom: 0; }
         </div>
       </div>
 
-      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--line)">
-        <div class="desc" style="margin-bottom:10px">Or make what's already
-          indexed searchable by meaning — embeds a text field into vectors.</div>
-        <div class="frow">
-          <label for="ctl-embed-field">Embed field</label>
-          <select id="ctl-embed-field"><option value="">choose a text field…</option></select>
-        </div>
-        <button class="btn" id="btn-embed">Embed documents</button>
-      </div>
     </div>
 
     <div class="card">
@@ -671,6 +662,38 @@ section.collapsed h2 { margin-bottom: 0; }
   <div id="tuning-note" class="desc" style="display:none"></div>
   <div id="knobs"><span class="desc">Loading current settings…</span></div>
 </section>
+<section id="vector-section">
+  <h2>Vector Search</h2>
+  <div class="desc">Load a real embedding model, then make an already-indexed
+    text field searchable by meaning — this is what powers "semantic" mode
+    in Query below.</div>
+
+  <div class="qgrid" style="margin-bottom:0">
+    <div>
+      <label for="ctl-model">Embedding model</label>
+      <select id="ctl-model"></select>
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <button class="btn primary" id="btn-loadmodel">Load model</button>
+    </div>
+  </div>
+  <div class="desc" id="ctl-model-status" style="margin:8px 0 20px"></div>
+
+  <div class="qrow qsplit" style="align-items:end">
+    <div>
+      <label for="ctl-embed-field">Embed field</label>
+      <select id="ctl-embed-field"><option value="">choose a text field…</option></select>
+    </div>
+    <div>
+      <button class="btn" id="btn-embed">Embed documents</button>
+    </div>
+  </div>
+  <div class="desc" style="margin-top:8px">Reads every document back,
+    embeds the chosen field with the loaded model, and writes the vector
+    back in — the same shape as a real re-embedding migration.</div>
+</section>
+
 <section id="query-section">
   <h2>Query</h2>
   <div class="desc">Build and run a single query against the selected
@@ -704,10 +727,10 @@ section.collapsed h2 { margin-bottom: 0; }
 
     <div class="qrow" id="q-model-row" style="display:none">
       <div class="frow" style="margin:0">
-        <label for="q-model">Embedding model</label>
-        <select id="q-model"></select>
-        <button class="btn preset" id="btn-loadmodel">Load model</button>
+        <label>Embedding model</label>
         <span class="desc" id="q-model-status" style="margin:0"></span>
+        <span class="desc" style="margin:0">— load a model in the
+          <b>Vector Search</b> section above</span>
       </div>
     </div>
 
@@ -1390,40 +1413,56 @@ $("q-parser").addEventListener("change", () => {
   if (semantic) refreshModel();
 });
 
-/* ---------- embedding model ---------- */
+/* ---------- embedding model ----------
+   One control, in Controls -> Add documents, since that's where you need a
+   model before embedding. The Query section mirrors the same status text so
+   semantic search can tell you whether it's usable without duplicating the
+   loader. */
 
 let modelState = null;
+
+function modelStatusText(out) {
+  const chosen = $("ctl-model").value || out.current;
+  if (!out.available) return "not installed — pip install 'searchlab[embed]'";
+  if (out.loading) return "loading… first use downloads the model (~90 MB)";
+  if (out.error) return out.error;
+  if (out.loaded.includes(chosen))
+    return `ready — ${out.models[chosen].dims} dimensions`;
+  return "not loaded — pick one and press Load";
+}
 
 async function refreshModel() {
   const out = await post("/api/model", {});
   if (!out.ok) return;
   modelState = out;
-  const sel = $("q-model");
+  const sel = $("ctl-model");
   if (!sel.dataset.filled) {
     sel.dataset.filled = "1";
     sel.innerHTML = Object.entries(out.models).map(([k, m]) =>
       `<option value="${esc(k)}">${esc(k)} — ${m.dims}d</option>`).join("");
     sel.value = out.current;
   }
-  const el = $("q-model-status");
-  if (!out.available) {
-    el.textContent = "not installed — pip install 'searchlab[embed]'";
-  } else if (out.loading) {
-    el.textContent = "loading… (first use downloads the model)";
-  } else if (out.error) {
-    el.textContent = out.error;
-  } else if (out.loaded.includes(sel.value)) {
-    el.textContent = `ready — ${out.models[sel.value].dims} dimensions`;
-  } else {
-    el.textContent = "not loaded yet";
-  }
+  const text = modelStatusText(out);
+  $("ctl-model-status").textContent = text;
+  $("q-model-status").textContent = text;      // mirrored in the Query section
   $("btn-loadmodel").disabled = !out.available || out.loading;
+  $("btn-embed").disabled = !out.available || out.loading
+                            || !out.loaded.includes(sel.value);
 }
 
+$("ctl-model").addEventListener("change", () => {
+  if (modelState) {
+    const text = modelStatusText(modelState);
+    $("ctl-model-status").textContent = text;
+    $("q-model-status").textContent = text;
+    $("btn-embed").disabled = !modelState.loaded.includes($("ctl-model").value);
+  }
+});
+
 $("btn-loadmodel").addEventListener("click", async () => {
-  const out = await post("/api/model/load", { name: $("q-model").value });
+  const out = await post("/api/model/load", { name: $("ctl-model").value });
   if (out.ok) {
-    $("q-model-status").textContent = "loading… (first use downloads the model)";
+    $("ctl-model-status").textContent = "loading… first use downloads the model (~90 MB)";
     // loading is slow the first time; poll until it settles
     const t = setInterval(async () => {
       await refreshModel();
@@ -2060,7 +2099,7 @@ async function pollLogs() {
 (function initCollapsers() {
   const ids = ["controls", "lastaction", "health-section", "signals",
                "topo-section", "activity", "traffic-section", "tuningblock",
-               "query-section"];
+               "vector-section", "query-section"];
   let saved;
   try { saved = new Set(JSON.parse(localStorage.getItem("searchlab.collapsed") || "[]")); }
   catch (e) { saved = new Set(); }
@@ -2087,6 +2126,9 @@ async function pollLogs() {
   }
 })();
 
+// the model picker sits in Controls, so populate it up front rather than
+// waiting for someone to switch the query parser to semantic
+refreshModel();
 setInterval(poll, POLL_MS); poll();
 setInterval(pollLogs, POLL_MS); pollLogs();
 setInterval(pollTopology, POLL_MS * 2); setTimeout(pollTopology, 500);
