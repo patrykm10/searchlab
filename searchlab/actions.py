@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections import deque
 import threading
 import time
 from concurrent.futures import Future
@@ -86,12 +87,16 @@ class ActionRunner:
         self._model_name = "minilm"
         self._model_error: str | None = None
         self.last_action: dict | None = None
+        # a rolling history, so a burst of actions doesn't erase the one you
+        # were actually reading — newest first
+        self.action_log: deque[dict] = deque(maxlen=100)
 
     # ------------------------------------------------------------- helpers --
 
     def _done(self, action: str, ok: bool, message: str) -> dict:
         self.last_action = {"action": action, "ok": ok, "message": message,
                             "ts": time.time()}
+        self.action_log.appendleft(self.last_action)
         return {"ok": ok, **({} if ok else {"error": message})}
 
     def _submit(self, action: str, coro, on_success) -> None:
@@ -479,6 +484,31 @@ class ActionRunner:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "busy": self._replica_busy, **detail}
 
+    def segments(self, collection: str, core: str) -> dict:
+        """Lucene segment detail for one replica."""
+        if not collection or not core:
+            return {"ok": False, "error": "Pick a replica first."}
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Segment detail is Solr-only for now."}
+        from .segments import replica_segments
+
+        try:
+            detail = cl.collection_detail(self.spec, collection)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        # a core only answers on the node hosting it, so find which one
+        node_index = 0
+        for shard in detail["shards"].values():
+            for rep in shard["replicas"].values():
+                if rep.get("core") == core:
+                    name = rep.get("node") or ""
+                    digits = "".join(ch for ch in name if ch.isdigit())
+                    node_index = max(0, int(digits) - 1) if digits else 0
+        try:
+            return {"ok": True, **replica_segments(self.spec, core, node_index)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def _replica_job(self, action: str, message: str, fn) -> dict:
         with self._lock:
             if self._replica_busy:
@@ -581,4 +611,5 @@ class ActionRunner:
             "maintenance": self._maint_busy,
             "collection_busy": self._coll_busy,
             "last_action": self.last_action,
+            "action_log": list(self.action_log)[:40],
         }

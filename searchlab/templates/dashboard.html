@@ -125,8 +125,20 @@ input[type="range"]::-moz-range-thumb {
   margin-bottom: 14px; font-variant-numeric: tabular-nums; }
 .statusline.on { color: var(--cobalt); }
 
-/* result of the last action; its section stays hidden until there is one */
-#strip { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+/* action history; the section stays hidden until something has happened */
+#strip { font-family: var(--mono); font-size: 12px; color: var(--muted);
+  background: #fff; border: 1.5px solid var(--line);
+  max-height: 190px; overflow-y: auto; }
+#strip:empty { display: none; }
+.act { display: grid; grid-template-columns: 64px 1fr; gap: 12px;
+  padding: 7px 14px; border-top: 1px solid var(--line); }
+.act:first-child { border-top: none; }
+.act .when { color: var(--faint); font-variant-numeric: tabular-nums; }
+.act .what::before { content: "\2713\00a0\00a0"; color: #2f7d51; }
+.act.err .what::before { content: "!\00a0\00a0"; color: #b3362b; }
+.act.err .what { color: var(--ink); }
+#action-count { float: right; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.08em; color: var(--faint); }
 #strip.err { color: var(--ink); }
 #strip.err::before { content: "! "; color: var(--cobalt); font-weight: 700; }
 #strip.ok::before { content: "\2713\00a0"; color: var(--cobalt); }
@@ -137,6 +149,11 @@ input[type="range"]::-moz-range-thumb {
   text-transform: uppercase; letter-spacing: 0.1em; color: var(--faint);
   margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; }
 .chart h4 b { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* which vantage point a latency chart measures from — the distinction that
+   makes the gap between the two charts readable */
+.vantage { font-family: var(--sans); font-size: 10px; letter-spacing: 0;
+  text-transform: none; color: var(--cobalt); margin-left: 6px; }
+#queueing { margin: -8px 0 20px; max-width: 90ch; }
 canvas { width: 100%; height: 150px; display: block;
   border: 1.5px solid var(--line); background: #fff; }
 .legend { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
@@ -159,6 +176,37 @@ canvas { width: 100%; height: 150px; display: block;
 .xbtn:disabled { color: var(--line); cursor: default; }
 #topo-controls { margin-top: 16px; display: flex; align-items: baseline; gap: 12px;
   flex-wrap: wrap; }
+/* per-replica segment detail, expanded under its topology row */
+.segbtn { background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--ink); border-bottom: 1px dotted var(--line); }
+.segbtn:hover { color: var(--cobalt); border-bottom-color: var(--cobalt); }
+.segwrap { background: #fff; border: 1.5px solid var(--line); padding: 12px 14px;
+  margin: 4px 0 10px; }
+.segsum { font-family: var(--mono); font-size: 11px; color: var(--muted);
+  margin-bottom: 10px; }
+.segdel { color: #c9971c; }
+.lustats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 20px; margin-bottom: 14px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--line); }
+.lustat { font-family: var(--mono); font-size: 11px; cursor: help; }
+.lustat span { display: block; color: var(--faint); font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
+.lustat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.segfold > summary { cursor: pointer; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  list-style: none; padding: 2px 0; }
+.segfold > summary::-webkit-details-marker { display: none; }
+.segfold > summary::before { content: "\25B6\00a0"; font-size: 8px; color: var(--faint); }
+.segfold[open] > summary::before { content: "\25BC\00a0"; }
+.segfold > summary:hover { color: var(--cobalt); }
+.segtable { width: 100%; border-collapse: collapse; font-family: var(--mono);
+  font-size: 11px; }
+.segtable th, .segtable td { text-align: left; padding: 5px 14px 5px 0;
+  border-top: 1px solid var(--line); white-space: nowrap; }
+.segtable th { border-top: none; color: var(--faint); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
+.segtable .num { text-align: right; font-variant-numeric: tabular-nums; }
+.segtable .segage { color: var(--faint); }
 .state-active { color: var(--cobalt); }
 .state-recovering, .state-down { color: var(--ink); font-weight: 700; }
 .health-GREEN { color: #2f7d51; }
@@ -214,12 +262,15 @@ canvas { width: 100%; height: 150px; display: block;
 /* existing collections, listed above the create form */
 #coll-list { width: 100%; border-collapse: collapse; font-family: var(--mono);
   font-size: 11px; margin-bottom: 16px; }
-#coll-list td { padding: 5px 0; border-top: 1px solid var(--line);
+#coll-list td { padding: 6px 0; border-top: 1px solid var(--line);
   vertical-align: baseline; }
 #coll-list tr:first-child td { border-top: none; }
 #coll-list .cname { color: var(--ink); }
 #coll-list .cname.sel { color: var(--cobalt); font-weight: 700; }
-#coll-list .cmeta { color: var(--faint); text-align: right; white-space: nowrap; }
+/* the meta line wraps under the name rather than fighting it for width */
+#coll-list .cmeta { color: var(--faint); padding-left: 0; font-size: 10.5px;
+  padding-top: 0; padding-bottom: 8px; border-top: none; }
+#coll-list .cmeta span { white-space: nowrap; }
 #coll-list button { background: none; border: none; padding: 0; cursor: pointer;
   font: inherit; color: inherit; text-align: left; }
 #coll-list button:hover { color: var(--cobalt); }
@@ -332,6 +383,20 @@ textarea:focus { border-color: var(--cobalt); }
 .finding.warn { border-left-color: #c9971c; }
 .finding.info { border-left-color: var(--cobalt); }
 .finding.ok { border-left-color: #2f7d51; }
+/* resolved findings stay readable but visibly past-tense */
+.finding.done { opacity: 0.62; }
+.finding.done h5 { font-weight: 600; }
+.fwhen { font-family: var(--mono); font-size: 9.5px; color: var(--faint);
+  margin-left: 8px; letter-spacing: 0.04em; font-weight: 400; }
+.fmore { border-top: 1px solid var(--line); }
+.fmore > summary { cursor: pointer; padding: 9px 16px; font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); list-style: none; }
+.fmore > summary::-webkit-details-marker { display: none; }
+.fmore > summary::before { content: "\25B6\00a0"; font-size: 8px; color: var(--faint); }
+.fmore[open] > summary::before { content: "\25BC\00a0"; }
+.fmore > summary:hover { color: var(--cobalt); }
+.fmore .finding { border-top: 1px solid var(--line); }
 .sev { display: inline-block; font-family: var(--mono); font-size: 9px;
   letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid currentColor;
   padding: 0 5px; margin-right: 8px; vertical-align: 2px; }
@@ -499,7 +564,7 @@ section.collapsed h2 { margin-bottom: 0; }
 
 </section>
 <section id="lastaction" style="display:none">
-  <h2>Last action</h2>
+  <h2>Actions <span id="action-count"></span></h2>
   <div id="strip"></div>
 </section>
 <section id="health-section">
@@ -517,16 +582,19 @@ section.collapsed h2 { margin-bottom: 0; }
         title="Long view: spot slow trends — memory creeping up, latency drifting.">1h</button>
     </span>
   </h2>
+  <div id="queueing" class="desc" style="display:none"></div>
   <div class="chartgrid">
     <div class="chart">
-      <h4 title="Client-observed: measured by the load generator from when each request was scheduled until the response arrived. Includes network and any time queued waiting for the cluster to get to it — what a real user would feel. Only runs during a load test.">
-        Load test latency <b id="v-lt">—</b></h4>
+      <h4 title="Measured by the load generator from when each request was scheduled until the response arrived. Includes network and any time queued waiting for the cluster to get to it — what a real user would feel. Only runs during a load test.">
+        Load test latency <span class="vantage">as the client sees it</span>
+        <b id="v-lt">—</b></h4>
       <canvas id="c-lt"></canvas>
       <div class="legend" id="lg-lt"></div>
     </div>
     <div class="chart">
-      <h4 title="Server-reported: how long Solr itself spent processing queries, per node. Excludes network and any queueing before Solr picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
-        Query latency p99, per node <b id="v-p99">—</b></h4>
+      <h4 title="How long Solr itself spent processing queries, per node. Excludes network and any queueing before Solr picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
+        Query latency p99, per node <span class="vantage">as the server sees it</span>
+        <b id="v-p99">—</b></h4>
       <canvas id="c-p99"></canvas>
       <div class="legend" id="lg-p99"></div>
     </div>
@@ -791,18 +859,59 @@ async function post(path, body) {
   }
 }
 
+/* Action history. Client-side entries are the optimistic "started…" notes;
+   the server's action_log carries the authoritative outcomes. Both land
+   here, newest first, so a burst of activity doesn't erase what you were
+   reading. */
+const actions = [];
+
 function showStrip(msg, isErr) {
-  const s = $("strip");
-  s.textContent = msg;
-  s.className = isErr ? "err" : "ok";
-  // the section carries the heading, so reveal it only once there's a result
-  const sec = $("lastaction");
-  sec.style.display = msg ? "" : "none";
+  if (!msg) return;
+  const last = actions[0];
+  if (last && last.message === msg) return;      // don't repeat on re-poll
+  actions.unshift({ message: msg, ok: !isErr, ts: Date.now() / 1000 });
+  if (actions.length > 60) actions.length = 60;
+  renderActions();
   // a failure must never be swallowed by a collapsed section — expand it
+  const sec = $("lastaction");
   if (isErr && sec.classList.contains("collapsed")) {
     const btn = sec.querySelector(".sec-toggle");
     if (btn) btn.click();
   }
+}
+
+function renderActions() {
+  const sec = $("lastaction");
+  sec.style.display = actions.length ? "" : "none";
+  $("action-count").textContent = actions.length > 1
+    ? actions.length + " recent" : "";
+  $("strip").innerHTML = actions.map(a => {
+    const t = new Date(a.ts * 1000).toLocaleTimeString();
+    return `<div class="act${a.ok ? "" : " err"}">
+      <span class="when">${esc(t)}</span>
+      <span class="what">${esc(a.message)}</span></div>`;
+  }).join("");
+}
+
+/* Fold in outcomes the server reports, which may arrive while the page
+   wasn't the one that triggered them. */
+function mergeServerActions(log) {
+  if (!log || !log.length) return;
+  const seen = new Set(actions.map(a => a.ts.toFixed(3) + a.message));
+  let added = false;
+  for (const entry of log) {
+    if (seen.has(entry.ts.toFixed(3) + entry.message)) continue;
+    // the optimistic client note for the same event has a different ts, so
+    // skip anything whose text we already showed in the last few seconds
+    if (actions.some(a => a.message === entry.message
+                          && Math.abs(a.ts - entry.ts) < 120)) continue;
+    actions.push({ message: entry.message, ok: entry.ok, ts: entry.ts });
+    added = true;
+  }
+  if (!added) return;
+  actions.sort((a, b) => b.ts - a.ts);
+  if (actions.length > 60) actions.length = 60;
+  renderActions();
 }
 
 function coll() { return $("ctl-coll").value; }
@@ -991,10 +1100,7 @@ function renderControls(a) {
   $("btn-createcoll").disabled = !!a.collection_busy;
   $("btn-createcoll").textContent = a.collection_busy ? "Working…" : "Create collection";
   $("btn-delcoll").disabled = !!a.collection_busy;
-  if (a.last_action && a.last_action.ts > (renderControls.lastTs || 0)) {
-    renderControls.lastTs = a.last_action.ts;
-    showStrip(a.last_action.message, !a.last_action.ok);
-  }
+  mergeServerActions(a.action_log);
 }
 
 function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
@@ -1072,9 +1178,9 @@ function renderCollections(snap) {
     const d = docs[n];
     return `<tr>
       <td><button class="cname${sel}" data-name="${esc(n)}"
-            title="Select this collection">${esc(n)}</button></td>
-      <td class="cmeta">${c.shards} shard(s) ·
-        ${d == null ? "—" : Number(d).toLocaleString()} docs ·
+            title="Select this collection">${esc(n)}</button></td></tr>
+      <tr><td class="cmeta"><span>${c.shards} shard(s)</span> &middot;
+        <span>${d == null ? "—" : Number(d).toLocaleString()} docs</span> &middot;
         <span class="health-${esc(c.health)}">${esc(c.health)}</span></td>
     </tr>`;
   }).join("");
@@ -1088,18 +1194,78 @@ function renderCollections(snap) {
   }
 }
 
+/* Findings vanish the moment the condition clears, which meant a transient
+   spike could appear and disappear between glances. Keep a history: what's
+   happening now stays at the top, what has resolved is folded away but
+   still readable. Keyed by title so a persisting condition updates in
+   place rather than piling up duplicates. */
+const healthSeen = new Map();
+const HEALTH_SHOWN = 4;
+
 function renderHealth(findings) {
+  const now = Date.now() / 1000;
+  for (const f of findings) {
+    const prev = healthSeen.get(f.title);
+    healthSeen.set(f.title, {
+      ...f, first: prev ? prev.first : now, last: now, active: true,
+    });
+  }
+  const active = new Set(findings.map(f => f.title));
+  for (const [title, f] of healthSeen) {
+    if (!active.has(title)) f.active = false;
+  }
+  // keep the log bounded, dropping the oldest resolved entries first
+  if (healthSeen.size > 60) {
+    const resolved = [...healthSeen.entries()]
+      .filter(([, f]) => !f.active).sort((a, b) => a[1].last - b[1].last);
+    for (const [title] of resolved.slice(0, healthSeen.size - 60))
+      healthSeen.delete(title);
+  }
+  renderHealthPanel();
+}
+
+function healthRow(f, resolved) {
+  const label = { crit: "critical", warn: "warning", info: "note", ok: "ok" };
+  const when = new Date(f.last * 1000).toLocaleTimeString();
+  const seen = resolved
+    ? `<span class="fwhen">cleared, last seen ${esc(when)}</span>`
+    : (f.first && f.last - f.first > 60
+        ? `<span class="fwhen">ongoing since ${esc(new Date(f.first * 1000).toLocaleTimeString())}</span>`
+        : "");
+  return `<div class="finding ${esc(f.severity)}${resolved ? " done" : ""}">
+    <h5><span class="sev">${esc(label[f.severity] || f.severity)}</span>${esc(f.title)}${seen}</h5>
+    <p>${esc(f.detail)}</p></div>`;
+}
+
+function renderHealthPanel() {
   const el = $("health");
-  if (!findings.length) {
+  const all = [...healthSeen.values()];
+  const order = { crit: 0, warn: 1, info: 2, ok: 3 };
+  const current = all.filter(f => f.active)
+    .sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
+  const past = all.filter(f => !f.active).sort((a, b) => b.last - a.last);
+
+  if (!current.length && !past.length) {
     el.innerHTML = `<div class="finding ok"><h5><span class="sev">ok</span>All systems normal</h5>
       <p>Nothing needs your attention — memory, latency, and indexing all look healthy.</p></div>`;
     return;
   }
-  const label = { crit: "critical", warn: "warning", info: "note" };
-  el.innerHTML = findings.map(f =>
-    `<div class="finding ${esc(f.severity)}">
-       <h5><span class="sev">${esc(label[f.severity] || f.severity)}</span>${esc(f.title)}</h5>
-       <p>${esc(f.detail)}</p></div>`).join("");
+
+  let html = current.length
+    ? current.slice(0, HEALTH_SHOWN).map(f => healthRow(f, false)).join("")
+    : `<div class="finding ok"><h5><span class="sev">ok</span>All systems normal</h5>
+       <p>Nothing needs your attention right now.</p></div>`;
+
+  const extra = current.slice(HEALTH_SHOWN);
+  if (extra.length) {
+    html += `<details class="fmore"><summary>${extra.length} more current</summary>
+      ${extra.map(f => healthRow(f, false)).join("")}</details>`;
+  }
+  if (past.length) {
+    html += `<details class="fmore"><summary>${past.length} resolved earlier</summary>
+      ${past.map(f => healthRow(f, true)).join("")}</details>`;
+  }
+  el.innerHTML = html;
 }
 
 /* ---------- chart range + hover ---------- */
@@ -1451,7 +1617,106 @@ function renderTiming(t) {
   return h;
 }
 
+/* ---------- per-replica Lucene segments ---------- */
+
+let openCore = null;
+let segOpen = false;      // whether the per-segment table is unfolded
+
+async function showSegments(core) {
+  if (!core) return;
+  if (openCore === core) {                 // clicking again closes it
+    openCore = null;
+    $("segrow").style.display = "none";
+    return;
+  }
+  openCore = core;
+  $("segrow").style.display = "";
+  $("segcell").innerHTML = `<div class="desc" style="padding:10px 0">reading segments…</div>`;
+  const out = await post("/api/segments", { collection: coll(), core });
+  if (!out.ok) {
+    $("segcell").innerHTML = `<div class="desc" style="padding:10px 0">${esc(out.error || "unavailable")}</div>`;
+    return;
+  }
+  const s = out.summary;
+  const sources = Object.entries(s.by_source)
+    .map(([k, v]) => `${v}&nbsp;${esc(k)}`).join(" &middot; ");
+  // deeper per-core numbers, from the metrics snapshot we already poll
+  const lu = coreLucene(core);
+  const stats = [];
+  if (lu) {
+    if (lu.max_doc != null)
+      stats.push(["maxDoc", Number(lu.max_doc).toLocaleString(),
+        "Every document slot including deleted ones — the difference from live docs is dead weight still in the index."]);
+    if (lu.searchers_opened != null)
+      stats.push(["searchers opened", Number(lu.searchers_opened).toLocaleString(),
+        "A new searcher is opened per commit. A fast-rising count means frequent commits, each discarding warm caches."]);
+    if (lu.searcher_warmup_ms != null)
+      stats.push(["last warmup", lu.searcher_warmup_ms + " ms",
+        "Time spent pre-populating caches for the newest searcher. Rises with autowarm settings; paid on every commit."]);
+    if (lu.full_sorts != null)
+      stats.push(["full sorts", Number(lu.full_sorts).toLocaleString(),
+        "Sorts that had to rank the entire result set rather than stopping early — the cost of sorting deep results."]);
+    if (lu.skip_sorts != null)
+      stats.push(["skipped sorts", Number(lu.skip_sorts).toLocaleString(),
+        "Sorts Lucene could short-circuit. A healthy ratio against full sorts means sorting is cheap here."]);
+    if (lu.index_version != null)
+      stats.push(["index version", String(lu.index_version),
+        "Increments on every commit that changes the index."]);
+  }
+  $("segcell").innerHTML = `
+    <div class="segwrap">
+      <div class="segsum">
+        <b>${esc(core)}</b> &middot; ${s.count} segments &middot; ${esc(s.size)}
+        &middot; ${Number(s.docs).toLocaleString()} live docs
+        ${s.deleted ? `&middot; <span class="segdel">${Number(s.deleted).toLocaleString()}
+          deleted (${s.deleted_pct}%)</span>` : ""}
+        &middot; ${sources} &middot; Lucene ${esc(s.lucene || "?")}
+      </div>
+      ${stats.length ? `<div class="lustats">${stats.map(([k, v, tip]) =>
+        `<div class="lustat" title="${esc(tip)}"><span>${esc(k)}</span>
+          <b>${esc(v)}</b></div>`).join("")}</div>` : ""}
+      <details class="segfold"${segOpen ? " open" : ""}>
+        <summary>${s.count} segments in detail</summary>
+        <table class="segtable">
+          <tr><th>Segment</th><th class="num">Live docs</th><th class="num">Deleted</th>
+              <th class="num">Size</th><th>Source</th><th>Written</th></tr>
+          ${out.segments.map(g => `<tr>
+            <td>${esc(g.name)}</td>
+            <td class="num">${Number(g.docs).toLocaleString()}</td>
+            <td class="num${g.deleted ? " segdel" : ""}">${
+              g.deleted ? Number(g.deleted).toLocaleString() + ` (${g.deleted_pct}%)` : "—"}</td>
+            <td class="num">${esc(g.size)}</td>
+            <td>${esc(g.source)}</td>
+            <td class="segage">${g.age ? esc(String(g.age).replace("T", " ").slice(0, 19)) : "—"}</td>
+          </tr>`).join("")}
+        </table>
+        <div class="desc" style="margin:8px 0 0">A segment written by
+          <b>flush</b> came straight from indexing; one written by <b>merge</b>
+          was assembled from smaller ones. Many small flush segments that never
+          become merges mean merging is falling behind. Deleted documents keep
+          costing disk and search time until a merge rewrites the segment
+          holding them.</div>
+      </details>
+    </div>`;
+  // remember the fold so the topology poll doesn't spring it back open
+  const fold = $("segcell").querySelector(".segfold");
+  if (fold) fold.addEventListener("toggle", () => { segOpen = fold.open; });
+}
+
 /* ---------- topology ---------- */
+
+function coreLucene(coreName) {
+  // metrics registries use dots where CLUSTERSTATUS uses underscores
+  if (!lastSnap || !coreName) return null;
+  const want = coreName.replace(/\./g, "_");
+  for (const n of Object.values(lastSnap.nodes || {})) {
+    if (n.error) continue;
+    for (const [cname, c] of Object.entries(n.cores || {})) {
+      if (cname.replace(/\./g, "_") === want) return c.lucene || null;
+    }
+  }
+  return null;
+}
 
 function coreDocs(coreName) {
   // metrics registries name cores with dots (products.shard1.replica_n2),
@@ -1490,7 +1755,9 @@ async function pollTopology() {
         const known = ["active", "recovering", "down", "recovery_failed"];
         const dotCls = known.includes(rep.state) ? rep.state : "unknown";
         rows += `<tr><td>${slabel}</td>
-          <td><span class="repdot ${dotCls}" title="${esc(rep.state)}"></span> ${esc(rname)}</td>
+          <td><span class="repdot ${dotCls}" title="${esc(rep.state)}"></span>
+            <button class="segbtn" data-core="${esc(rep.core || "")}"
+              title="Lucene segment detail for this replica">${esc(rname)}</button></td>
           <td>${esc(rep.node)}</td><td>${esc(rep.type)}</td>
           <td>${docs == null ? "—" : Number(docs).toLocaleString()}</td>
           <td>${rep.leader ? '<span class="leadchip">LEADER</span>' : ""}</td>
@@ -1498,7 +1765,16 @@ async function pollTopology() {
             data-shard="${esc(sname)}" data-replica="${esc(rname)}">&times;</button></td></tr>`;
       }
     }
+    // preserve an expanded segment panel across the topology poll, which
+    // would otherwise rebuild the table and close it every few seconds
+    const keep = openCore ? $("segcell").innerHTML : "";
+    rows += `<tr id="segrow" style="display:${openCore ? "" : "none"}">
+               <td colspan="7" id="segcell"></td></tr>`;
     $("topo").innerHTML = rows;
+    if (keep) $("segcell").innerHTML = keep;
+    for (const b of $("topo").querySelectorAll(".segbtn")) {
+      b.addEventListener("click", () => showSegments(b.dataset.core));
+    }
     for (const b of $("topo").querySelectorAll(".xbtn")) {
       b.addEventListener("click", async () => {
         const out = await post("/api/replica/remove",
@@ -1623,7 +1899,17 @@ function render(snap) {
     if (lt.recent_p99_ms != null) push(hist.ltp99, t, lt.recent_p99_ms);
     $("v-lt").textContent = fmt(lt.recent_p99_ms, 1) + " ms p99 · " +
       fmt(lt.recent_rps, 1) + " / " + fmt(lt.target_rps, 0) + " req/s" +
-      (lt.errors ? ` · ${lt.errors} errors` : "");
+      (lt.errors ? ` · ${lt.errors} errors` : "") +
+      (lt.dropped ? ` · ${lt.dropped} dropped` : "");
+    // Dropped means the generator refused to send a request it had already
+    // scheduled, because too many were still awaiting a response. It is the
+    // saturation signal a closed-loop tool would hide by simply slowing down.
+    $("c-lt").title = lt.dropped
+      ? `${lt.dropped} requests were never sent: too many were already `
+        + `in flight waiting for the cluster. This is what running past `
+        + `capacity looks like — a closed-loop tool would have quietly `
+        + `slowed down instead and reported healthy latency.`
+      : "";
   } else {
     $("v-lt").textContent = "idle";
     if (hist.ltp50.length && t - hist.ltp50[hist.ltp50.length - 1][0] > 30) {
@@ -1647,6 +1933,29 @@ function render(snap) {
   $("v-rate").textContent = fmt(sumRate, 1) + " req/s";
   $("v-gc").textContent = fmt(worstGC, 1) + " % worst";
   $("v-seg").textContent = fmt(sumSeg) + " total";
+
+  // The two latency charts answer different questions, and the gap between
+  // them is the interesting number: time a request spent waiting to be
+  // picked up rather than being worked on.
+  const qel = $("queueing");
+  if (lt && lt.recent_p99_ms != null && worstP99 > 0) {
+    const waiting = lt.recent_p99_ms - worstP99;
+    if (waiting > Math.max(worstP99, 20)) {
+      qel.style.display = "";
+      qel.innerHTML = `<b>Queueing:</b> the slowest 1% of requests waited about
+        <b>${fmt(waiting)} ms</b> before Solr even started on them
+        (${fmt(lt.recent_p99_ms)} ms felt by the client vs ${fmt(worstP99)} ms
+        of actual work). The cluster isn't answering slowly — it can't get to
+        requests fast enough at this rate.`;
+    } else {
+      qel.style.display = "";
+      qel.innerHTML = `<b>No meaningful queueing:</b> the client sees
+        ${fmt(lt.recent_p99_ms)} ms and Solr reports ${fmt(worstP99)} ms of
+        work, so requests are being picked up as fast as they arrive.`;
+    }
+  } else {
+    qel.style.display = "none";
+  }
 }
 
 /* ---------- polling ---------- */

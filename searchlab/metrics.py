@@ -73,6 +73,22 @@ def snapshot_node_solr(base_url: str) -> dict:
             # the sawtooth that the merge-policy knobs actually control
             "segments": _get(vals, "INDEX.segments"),
             "size_bytes": _get(vals, "INDEX.sizeInBytes"),
+            "lucene": {
+                # maxDoc counts deleted docs too, so maxDoc-numDocs is the
+                # dead weight still being carried in the index
+                "max_doc": _get(vals, "SEARCHER.searcher.maxDoc"),
+                "index_version": _get(vals, "SEARCHER.searcher.indexVersion"),
+                # a new searcher per commit; errors/maxReached mean commits
+                # are arriving faster than searchers can be opened
+                "searchers_opened": _get(vals, "SEARCHER.new", "count")
+                                    or _get(vals, "SEARCHER.new"),
+                "searcher_warmup_ms": _get(vals, "SEARCHER.searcher.warmupTime"),
+                "searcher_opened_at": _get(vals, "SEARCHER.searcher.openedAt"),
+                # sorts that had to rank the full result set vs ones that
+                # could stop early — the cost of sorting deep result sets
+                "full_sorts": _get(vals, "SEARCHER.searcher.fullSortCount"),
+                "skip_sorts": _get(vals, "SEARCHER.searcher.skipSortCount"),
+            },
             "caches": caches,
             "update": {
                 "adds_cumulative": _get(vals, "UPDATE.updateHandler.cumulativeAdds", "count"),
