@@ -29,6 +29,7 @@ import httpx
 from . import metrics as m
 from .actions import ActionRunner
 from .cluster import WORKDIR, ClusterSpec, cluster_overview
+from .causal import CausalTimeline
 from .insights import InsightsEngine
 from .logstream import FakeLogStream, LogStream
 
@@ -159,6 +160,7 @@ def make_handler(spec: ClusterSpec, demo: bool,
     page = _load_page()
     lock = threading.Lock()
     insights = InsightsEngine()
+    causal = CausalTimeline()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # quiet
@@ -183,6 +185,11 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 with lock:
                     snap = demo_state.snapshot() if demo_state else _live_snapshot(spec)
                     snap["insights"] = insights.analyze(snap)
+                    # derive cause-and-effect events, then hand back the
+                    # linked chains rather than four unrelated signals
+                    causal.observe_snapshot(snap.get("nodes"), snap.get("loadtest"))
+                    snap["causal"] = {"chains": causal.chains(),
+                                      "recent": causal.recent(25)}
                 snap["actions"] = runner.state() if runner else {"demo": True}
                 self._json(200, snap)
             elif path == "/api/topology":
@@ -301,6 +308,9 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return self._json(500, {"ok": False, "error": str(e) or type(e).__name__})
             self._json(200 if out.get("ok") else 409, out)
 
+    # exposed so the log stream can push into the same timeline the
+    # snapshot poll writes to — both feeds must share one instance
+    Handler.causal = causal
     return Handler
 
 
@@ -308,8 +318,10 @@ def serve(spec: ClusterSpec, port: int = 8990, demo: bool = False) -> None:
     runner = None if demo else ActionRunner(spec)
     logs = FakeLogStream() if demo else LogStream(WORKDIR / "docker-compose.yml")
     logs.start()
-    server = ThreadingHTTPServer(("127.0.0.1", port),
-                                 make_handler(spec, demo, runner, logs))
+    handler = make_handler(spec, demo, runner, logs)
+    # the log stream feeds the same timeline the snapshot poll writes to
+    logs.causal = handler.causal
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     mode = "demo signals, controls disabled" if demo else f"live cluster ({spec.solr_nodes} node(s))"
     print(f"searchlab control panel on http://localhost:{port}  [{mode}]  Ctrl-C to stop")
     try:

@@ -26,6 +26,8 @@ from .loglex import classify, is_noise, parse_request
 # and would otherwise show up as its own contextless fragment. Lines
 # without the header are continuations of whichever record came before.
 _RECORD_START = re.compile(r"\|\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\w+)")
+# compose prefixes each line with the container it came from
+_RECORD_NODE = re.compile(r"^\s*\S*?(solr\d+|zk\d+)\s*\|")
 
 
 class LogStream:
@@ -37,6 +39,10 @@ class LogStream:
     pairs — noise in the activity feed, but the whole point of the traffic
     panel, so they're routed rather than dropped.
     """
+
+    # optional CausalTimeline; log lines are the only place Solr reports ZK
+    # session loss and replica state changes, so the chain needs this feed
+    causal = None
 
     def __init__(self, compose_file: Path, maxlen: int = 2000,
                  traffic_maxlen: int = 500):
@@ -94,6 +100,15 @@ class LogStream:
             return
         if is_noise(text):
             return
+        if self.causal is not None:
+            from .causal import classify_log_event
+
+            found = classify_log_event(text)
+            if found:
+                kind, title, detail = found
+                node = _RECORD_NODE.search(text)
+                self.causal.add(kind, title, detail,
+                                node=node.group(1) if node else None)
         with self._lock:
             self._seq += 1
             self._buf.append((self._seq, text, classify(text)))

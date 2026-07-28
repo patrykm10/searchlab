@@ -25,12 +25,65 @@ def _get(d: dict, *path: str, default: Any = None) -> Any:
     return d
 
 
+def _count(val: Any) -> Any:
+    """Solr reports counters either bare or as a meter dict; want the number."""
+    if isinstance(val, dict):
+        return val.get("count")
+    return val
+
+
+def _thread_pool(jetty: dict) -> dict:
+    """Jetty's request thread pool — the mechanism behind most query drops.
+
+    Solr serves requests from a fixed Jetty pool. When every thread is busy,
+    further requests queue, and once the queue backs up they are rejected.
+    That path produces dropped queries with no long GC pause to blame, which
+    otherwise looks like an unexplained gap.
+
+    The metric keys embed a per-process pool id
+    (QueuedThreadPool.qtp2131597042.size), so match by suffix.
+    """
+    out: dict[str, Any] = {}
+    wanted = {
+        "size": "size",                        # threads currently in the pool
+        "utilization": "utilization",          # fraction of them busy
+        "utilization-max": "utilization_max",  # against the configured max
+        "jobs": "queued",                      # requests waiting for a thread
+        "jobs-queue-utilization": "queue_utilization",
+    }
+    for key, val in jetty.items():
+        if "QueuedThreadPool" not in key:
+            continue
+        suffix = key.rsplit(".", 1)[-1]
+        if suffix in wanted:
+            out[wanted[suffix]] = val
+    return out
+
+
+def _breakers(node: dict) -> dict:
+    """Circuit-breaker trips, when breakers are configured.
+
+    Solr can reject requests with a 503 when memory or CPU crosses a
+    threshold. Breakers are *not* enabled in the default config, so absence
+    here means "not configured", not "nothing tripped" — the dashboard has
+    to say which.
+    """
+    out: dict[str, Any] = {}
+    for key, val in node.items():
+        low = key.lower()
+        if "circuit" in low or "breaker" in low:
+            if isinstance(val, dict):
+                val = val.get("count", val)
+            out[key] = val
+    return out
+
+
 def snapshot_node_solr(base_url: str) -> dict:
     """Fetch and distill metrics from one Solr node."""
     with httpx.Client(timeout=15) as client:
         r = client.get(
             f"{base_url}/admin/metrics",
-            params={"wt": "json", "group": "jvm,core"},
+            params={"wt": "json", "group": "jvm,core,jetty,node"},
         )
         r.raise_for_status()
         metrics = r.json().get("metrics", {})
@@ -50,6 +103,19 @@ def snapshot_node_solr(base_url: str) -> dict:
         if key.startswith("gc.") and key.endswith((".count", ".time")):
             collector, stat = key[3:].rsplit(".", 1)
             out["jvm"]["gc"].setdefault(collector, {})[stat] = val
+
+    # Solr-layer capacity, as opposed to JVM-layer symptoms: a saturated
+    # thread pool or a tripped breaker explains a dropped query directly.
+    out["threads"] = _thread_pool(metrics.get("solr.jetty", {}))
+    breakers = _breakers(metrics.get("solr.node", {}))
+    out["breakers"] = {"configured": bool(breakers), "trips": breakers}
+    # ZooKeeper client activity. Session *loss* shows up in the node's logs
+    # rather than here (see loglex), but a stalled watch count alongside a
+    # long GC pause is corroborating evidence for the same story.
+    zk = metrics.get("solr.node", {}).get("CONTAINER.zkClient")
+    if isinstance(zk, dict):
+        out["zk"] = {"watches_fired": zk.get("watchesFired"),
+                     "reads": zk.get("reads"), "writes": zk.get("writes")}
 
     out["cores"] = {}
     for group, vals in metrics.items():
@@ -99,6 +165,17 @@ def snapshot_node_solr(base_url: str) -> dict:
             },
             "select_p99_ms": _get(vals, "QUERY./select.requestTimes", "p99_ms"),
             "select_rate_1m": _get(vals, "QUERY./select.requestTimes", "1minRate"),
+            # per-handler outcomes: which requests Solr itself rejected or
+            # timed out, as opposed to ones the client never managed to send
+            # Solr reports these as meters ({count, 1minRate, ...}); the
+            # cumulative count is what matters, so flatten to a number
+            "handler": {
+                "requests": _count(_get(vals, "QUERY./select.requests")),
+                "errors": _count(_get(vals, "QUERY./select.errors")),
+                "timeouts": _count(_get(vals, "QUERY./select.timeouts")),
+                "server_errors": _count(_get(vals, "QUERY./select.serverErrors")),
+                "client_errors": _count(_get(vals, "QUERY./select.clientErrors")),
+            },
         }
     return out
 

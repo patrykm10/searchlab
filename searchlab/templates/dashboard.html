@@ -368,6 +368,35 @@ textarea:focus { border-color: var(--cobalt); }
 .kind.index { color: #2f7d51; }
 .tfail { color: #b3362b; font-weight: 700; }
 
+/* ---------- incident timeline ---------- */
+#causal { background: #fff; border: 1.5px solid var(--line); }
+#causal:empty { display: none; }
+#causal-count { float: right; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.08em; color: var(--faint); }
+.chain { border-top: 1px solid var(--line); padding: 12px 16px 14px; }
+.chain:first-child { border-top: none; }
+.chain-head { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
+/* each step sits on a vertical spine, so the sequence reads as one story */
+.step { display: grid; grid-template-columns: 62px 14px 1fr; gap: 10px;
+  align-items: start; position: relative; padding-bottom: 11px; }
+.step:last-child { padding-bottom: 0; }
+.step .t { font-family: var(--mono); font-size: 10px; color: var(--faint);
+  padding-top: 2px; font-variant-numeric: tabular-nums; }
+.step .spine { position: relative; height: 100%; }
+.step .spine::before { content: ""; position: absolute; left: 5px; top: 5px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--cobalt); }
+.step:not(:last-child) .spine::after { content: ""; position: absolute;
+  left: 7px; top: 12px; bottom: -6px; width: 1px; background: var(--line); }
+.step.crit .spine::before { background: #b3362b; }
+.step.warn .spine::before { background: #c9971c; }
+.step.info .spine::before { background: var(--cobalt); }
+.step .what { font-size: 12.5px; color: var(--ink); font-weight: 600; }
+.step .why { font-size: 11.5px; color: var(--muted); line-height: 1.45;
+  margin-top: 2px; max-width: 78ch; }
+.step .node { font-family: var(--mono); font-size: 9.5px; color: var(--faint);
+  margin-left: 6px; font-weight: 400; }
+
 /* ---------- health ---------- */
 /* white panel, so findings read as clearly as the activity and traffic logs */
 #health { background: #fff; border: 1.5px solid var(--line); }
@@ -562,6 +591,14 @@ section.collapsed h2 { margin-bottom: 0; }
   <h2>Health</h2>
   <div id="health"></div>
 </section>
+<section id="causal-section">
+  <h2>Incident Timeline <span id="causal-count"></span></h2>
+  <div class="desc">What connects a JVM pause to a failed query. Each chain
+    reads cause first, effect last — the middle steps are the part that's
+    normally invisible.</div>
+  <div id="causal"></div>
+</section>
+
 <section id="signals">
   <h2>Live signals
     <span id="ranges">
@@ -1176,6 +1213,44 @@ async function loadTuning(collection) {
     $("knobs").innerHTML = `<span class="desc">Could not load settings — retrying…</span>`;
     setTimeout(() => loadTuning(collection), 2000);
   }
+}
+
+/* Chains of linked events: cause first, effect last. A lone event isn't a
+   story, so the backend only returns runs of two or more. */
+function renderCausal(c) {
+  const el = $("causal");
+  const chains = (c && c.chains) || [];
+  const recent = (c && c.recent) || [];
+  if (!chains.length) {
+    // nothing linked yet — say what that means rather than showing blank
+    el.innerHTML = `<div class="chain"><div class="chain-head">no incidents</div>
+      <div class="step"><div class="t"></div><div class="spine"></div>
+      <div><div class="why">No cause-and-effect sequences recorded. These
+      appear when something actually goes wrong — a long GC pause, a lost
+      ZooKeeper session, a replica dropping out, request threads saturating,
+      or queries starting to fail. ${recent.length
+        ? recent.length + " unlinked event(s) seen so far."
+        : "Run a load test heavy enough to hurt and they will show up here."}
+      </div></div></div></div>`;
+    $("causal-count").textContent = "";
+    return;
+  }
+  $("causal-count").textContent = chains.length + " chain(s)";
+  el.innerHTML = chains.map(chain => {
+    const started = new Date(chain[0].ts * 1000).toLocaleTimeString();
+    const span = chain[chain.length - 1].ts - chain[0].ts;
+    return `<div class="chain">
+      <div class="chain-head">${esc(started)} &middot; ${chain.length} steps
+        &middot; ${span < 1 ? "under a second" : fmt(span, 1) + "s"}</div>
+      ${chain.map(ev => `<div class="step ${esc(ev.severity)}">
+        <div class="t">${esc(new Date(ev.ts * 1000).toLocaleTimeString())}</div>
+        <div class="spine"></div>
+        <div><div class="what">${esc(ev.title)}${ev.node
+          ? `<span class="node">${esc(ev.node)}</span>` : ""}</div>
+          <div class="why">${esc(ev.detail)}</div></div>
+      </div>`).join("")}
+    </div>`;
+  }).join("");
 }
 
 function renderCollections(snap) {
@@ -1882,6 +1957,7 @@ function render(snap) {
 
   renderControls(snap.actions);
   renderHealth(snap.insights || []);
+  renderCausal(snap.causal);
   renderCollections(snap);
 
   // node series
@@ -2097,7 +2173,7 @@ async function pollLogs() {
 /* ---------- collapsible sections ---------- */
 
 (function initCollapsers() {
-  const ids = ["controls", "lastaction", "health-section", "signals",
+  const ids = ["controls", "lastaction", "health-section", "causal-section", "signals",
                "topo-section", "activity", "traffic-section", "tuningblock",
                "vector-section", "query-section"];
   let saved;
