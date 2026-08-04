@@ -92,6 +92,9 @@ class CausalTimeline:
         self._seq = 0
         self._prev_gc: dict[str, tuple[float, float]] = {}
         self._prev_handler: dict[str, tuple[float, int]] = {}
+        self._prev_rejected: dict[str, int] = {}
+        self._prev_breakers: dict[str, int] = {}
+        self._rejected_now = 0
         self._open: dict[str, bool] = {}     # kind -> currently firing
 
     # ------------------------------------------------------------ record --
@@ -142,6 +145,7 @@ class CausalTimeline:
         """
         latest = None
         server_errors = 0
+        self._rejected_now = 0
         for name, n in (nodes or {}).items():
             if n.get("error"):
                 continue
@@ -149,10 +153,16 @@ class CausalTimeline:
             latest = ts if latest is None else max(latest, ts)
             self._check_gc(name, n, ts)
             self._check_threads(name, n, ts)
-            # did Solr actually reject anything, or were queries just slow?
+            self._check_rejections(name, n, ts)
+            self._check_breakers(name, n, ts)
+            # Solr: did the handler actually reject anything, or were the
+            # queries merely slow?
             for core in (n.get("cores") or {}).values():
                 h = core.get("handler") or {}
                 server_errors += (h.get("errors") or 0) + (h.get("timeouts") or 0)
+        # ES/OS: only rejections seen *this* interval count as the engine
+        # refusing work; a lifetime total would blame old incidents for new drops
+        server_errors += self._rejected_now
         if loadtest:
             # stamp with the same clock the node events used, so a failure
             # links to the pause that caused it rather than falling outside
@@ -207,6 +217,45 @@ class CausalTimeline:
                      f"pause to blame.",
                      node=node, ts=ts, queued=queued)
 
+    def _check_rejections(self, node: str, n: dict, ts: float) -> None:
+        """Requests the engine actively refused.
+
+        ES/OS report this per thread pool, which settles the question the
+        Solr side can only infer: a rising count is proof the engine turned
+        work away, rather than merely answering slowly.
+        """
+        total = (n.get("threads") or {}).get("rejected")
+        if total is None:
+            return
+        prev = self._prev_rejected.get(node)
+        self._prev_rejected[node] = total
+        if prev is None or total <= prev:
+            return
+        self._rejected_now += total - prev
+        self.add("threads_saturated",
+                 f"{node} rejected {total - prev} request(s)",
+                 "The search thread pool refused work outright: every thread "
+                 "was busy and the queue was full. These are server-side "
+                 "rejections, not client-side timeouts — the engine said no.",
+                 node=node, ts=ts, rejected=total - prev)
+
+    def _check_breakers(self, node: str, n: dict, ts: float) -> None:
+        """Circuit breakers tripping — a request refused to protect the heap."""
+        trips = (n.get("breakers") or {}).get("trips") or {}
+        for name, count in trips.items():
+            key = f"breaker:{node}:{name}"
+            prev = self._prev_breakers.get(key)
+            self._prev_breakers[key] = count
+            if prev is None or count <= prev:
+                continue
+            self.add("threads_saturated",
+                     f"{node} tripped the {name} circuit breaker",
+                     f"The {name} breaker rejected a request to keep the node "
+                     f"from running out of heap. This is a deliberate refusal "
+                     f"under memory pressure, and it returns an error to the "
+                     f"client rather than risking the node.",
+                     node=node, ts=ts, breaker=name)
+
     def _check_queries(self, lt: dict, ts: float | None = None,
                        server_errors: int = 0) -> None:
         """The client-side effect: requests failing or never sent.
@@ -225,16 +274,17 @@ class CausalTimeline:
         if not (now and not was):
             return
         if dropped and not server_errors:
-            detail = ("Solr rejected none of these — its own error and timeout "
-                      "counters are zero. The load generator refused to send "
-                      "requests it had scheduled because too many were still "
-                      "awaiting a reply, which means responses were too slow, "
-                      "not that the cluster turned work away.")
+            detail = ("The engine rejected none of these — its own error, "
+                      "timeout and rejection counters did not move. The load "
+                      "generator refused to send requests it had scheduled "
+                      "because too many were still awaiting a reply, which "
+                      "means responses were too slow, not that the cluster "
+                      "turned work away.")
         else:
-            detail = ("Solr itself reported errors or timeouts, so requests "
-                      "were actively rejected rather than merely delayed — "
-                      "look at thread pool saturation and circuit breakers "
-                      "above.")
+            detail = ("The engine itself reported errors, timeouts or "
+                      "rejections, so requests were actively refused rather "
+                      "than merely delayed — see the thread pool and circuit "
+                      "breaker events above.")
         self.add("queries_failing",
                  f"{failing} request(s) failed or were dropped",
                  detail, ts=ts, errors=errors, dropped=dropped)

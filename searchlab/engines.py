@@ -184,9 +184,32 @@ class _EsFamily(Engine):
 
     def snapshot_node(self, base_url) -> dict:
         with httpx.Client(timeout=15) as client:
-            stats = client.get(f"{base_url}/_nodes/_local/stats/jvm,indices").json()
+            stats = client.get(
+                f"{base_url}/_nodes/_local/stats/jvm,indices,thread_pool,breaker"
+            ).json()
         node = next(iter(stats["nodes"].values()))
         jvm, idx = node["jvm"], node["indices"]
+
+        # The search thread pool is where query rejection actually happens,
+        # and unlike Solr's Jetty pool this reports `rejected` directly — so
+        # "did the engine turn work away?" has a real answer rather than an
+        # inference. Utilization is derived to match the Solr-side shape.
+        search_pool = (node.get("thread_pool") or {}).get("search") or {}
+        threads = search_pool.get("threads") or 0
+        active = search_pool.get("active") or 0
+        pool = {
+            "size": threads,
+            "active": active,
+            "queued": search_pool.get("queue") or 0,
+            "rejected": search_pool.get("rejected") or 0,
+            "utilization": round(active / threads, 4) if threads else None,
+        }
+
+        # OpenSearch/Elasticsearch ship circuit breakers enabled by default,
+        # so a trip count here is meaningful (on Solr they are usually not
+        # configured at all).
+        breakers = {name: b.get("tripped", 0)
+                    for name, b in (node.get("breakers") or {}).items()}
         gc = {name: {"count": c.get("collection_count", 0),
                      "time": c.get("collection_time_in_millis", 0)}
               for name, c in jvm.get("gc", {}).get("collectors", {}).items()}
@@ -204,6 +227,8 @@ class _EsFamily(Engine):
                 "heap_max_mb": round(jvm["mem"]["heap_max_in_bytes"] / 2**20, 1),
                 "gc": gc,
             },
+            "threads": pool,
+            "breakers": {"configured": bool(breakers), "trips": breakers},
             "cores": {
                 "indices (node total)": {
                     "num_docs": idx.get("docs", {}).get("count", 0),

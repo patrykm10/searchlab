@@ -149,7 +149,7 @@ def test_drops_alongside_solr_errors_are_named_as_rejection():
     t.observe_snapshot({"solr1": _node_with_handler(12, 4)},
                        loadtest={"errors": 5, "dropped": 900, "ts": 1000.0})
     detail = t.recent()[-1]["detail"]
-    assert "actively rejected" in detail
+    assert "actively refused" in detail
 
 
 def test_unreachable_node_is_skipped_not_crashed_on():
