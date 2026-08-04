@@ -20,12 +20,14 @@ def test_registry_hides_wiring_but_names_the_solr_setting():
         assert "path" not in knob
         assert "user_prop" not in knob
         assert "config_probe" not in knob
-        assert {"label", "desc", "unit", "min", "max", "default", "solr"} <= set(knob)
+        # "setting" is engine-neutral: a Config API path on Solr, an index
+        # setting on ES/OS, so one UI can label both
+        assert {"label", "desc", "unit", "min", "max", "default", "setting"} <= set(knob)
     # whitelist knobs name their Config API property directly...
-    assert reg["soft_commit_s"]["solr"] == "updateHandler.autoSoftCommit.maxTime"
+    assert reg["soft_commit_s"]["setting"] == "updateHandler.autoSoftCommit.maxTime"
     # ...while merge knobs name the real setting, not searchlab's indirection
-    assert "searchlab." not in reg["segments_per_tier"]["solr"]
-    assert "segmentsPerTier" in reg["segments_per_tier"]["solr"]
+    assert "searchlab." not in reg["segments_per_tier"]["setting"]
+    assert "segmentsPerTier" in reg["segments_per_tier"]["setting"]
 
 
 async def test_verify_urls_point_at_something_that_proves_the_value(mock_config_merge):

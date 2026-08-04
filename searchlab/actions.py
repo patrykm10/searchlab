@@ -128,14 +128,22 @@ class ActionRunner:
             return {"ok": False, "error": f"Rate must be between 1 and {MAX_RPS:.0f}."}
         templates = None
         if query:
-            from .query import build_params
-
+            # Solr templates carry query params; ES/OS carry a DSL body, so
+            # the built query has to be shaped for whichever engine is running
             try:
-                params = build_params(query)
+                if self.spec.engine == "solr":
+                    from .query import build_params
+
+                    params = build_params(query)
+                    params.pop("wt", None)      # the engine sets its own
+                    tmpl = {"params": params}
+                else:
+                    from .query_os import build_body
+
+                    tmpl = {"body": build_body(query)}
             except ValueError as e:
                 return {"ok": False, "error": str(e)}
-            params.pop("wt", None)          # the engine sets its own
-            templates = [{"name": "custom", "weight": 1, "params": params}]
+            templates = [{"name": "custom", "weight": 1, **tmpl}]
         with self._lock:
             if self._running(self._load_future):
                 return {"ok": False, "error": "A load test is already running."}
@@ -382,24 +390,27 @@ class ActionRunner:
 
     # -------------------------------------------------------------- query --
 
+    def _query_module(self):
+        """Solr speaks query params; ES/OS speak the query DSL."""
+        if self.spec.engine == "solr":
+            from . import query as mod
+        else:
+            from . import query_os as mod
+        return mod
+
     def fields(self, collection: str) -> dict:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
-        if self.spec.engine != "solr":
-            return {"ok": False, "error": "The query builder is Solr-only for now."}
-        from .query import list_fields
-
         try:
-            return {"ok": True, "fields": list_fields(self.spec, collection)}
+            return {"ok": True,
+                    "fields": self._query_module().list_fields(self.spec, collection)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
     def run_query(self, collection: str, body: dict) -> dict:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
-        if self.spec.engine != "solr":
-            return {"ok": False, "error": "The query builder is Solr-only for now."}
-        from .query import run_query
+        run_query = self._query_module().run_query
 
         embedder = None
         if body.get("semantic"):
@@ -562,17 +573,23 @@ class ActionRunner:
 
     # -------------------------------------------------------------- tuning --
 
+    def _tuning_module(self):
+        """Solr tunes through the Config API; ES/OS through index settings."""
+        if self.spec.engine == "solr":
+            return tuning
+        from . import tuning_os
+
+        return tuning_os
+
     def read_tuning(self, collection: str) -> dict:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
-        if self.spec.engine != "solr":
-            return {"ok": False, "error": "Tuning is Solr-only for now."}
         try:
-            state = tuning.tuning_state(self.spec, collection)
+            state = self._tuning_module().tuning_state(self.spec, collection)
         except Exception:
-            # A collection just created can 404 on /config for a moment while
-            # its core finishes coming up — transient, so stay vague and let
-            # the UI retry rather than surfacing a raw HTTP exception.
+            # A collection just created can 404 for a moment while it finishes
+            # coming up — transient, so stay vague and let the UI retry rather
+            # than surfacing a raw HTTP exception.
             return {"ok": False, "error": "Settings aren't available yet — retrying…",
                     "transient": True}
         return {"ok": True, **state}
@@ -580,13 +597,12 @@ class ActionRunner:
     def tune(self, collection: str, name: str, value: float) -> dict:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
-        if self.spec.engine != "solr":
-            return {"ok": False, "error": "Tuning is Solr-only for now."}
+        mod = self._tuning_module()
         try:
-            tuning.apply_tuning(self.spec, collection, name, value)
+            mod.apply_tuning(self.spec, collection, name, value)
         except Exception as e:
             return self._done("tune", False, str(e))
-        knob = tuning.KNOBS[name]
+        knob = mod.KNOBS[name]
         return self._done(
             "tune", True,
             f"{knob['label']} set to {value:g} {knob['unit']} — live within a few seconds.")

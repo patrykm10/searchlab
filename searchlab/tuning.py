@@ -139,7 +139,9 @@ def registry(names=None) -> dict:
         if names is not None and name not in names:
             continue
         item = {k: v for k, v in spec.items() if k not in _META_KEYS}
-        item["solr"] = spec.get("solr", spec["path"])
+        # "setting" is the engine-neutral field the UI shows; ES/OS fill it
+        # with an index setting rather than a Config API path
+        item["setting"] = spec.get("solr", spec["path"])
         out[name] = item
     return out
 

@@ -1188,9 +1188,9 @@ async function loadTuning(collection) {
       const val = out.values[name] ?? k.default;
       return `<div class="knob">
         <div class="krow"><span><label for="knob-${name}" class="klabel"
-            title="Solr setting: ${esc(k.solr)}">${esc(k.label)}</label><a
+            title="Setting: ${esc(k.setting || k.solr)}">${esc(k.label)}</label><a
             class="kverify" href="${esc(k.verify)}" target="_blank" rel="noopener"
-            title="Open Solr and check this setting's live value">&#8599;</a></span>
+            title="Open the engine and check this setting's live value">&#8599;</a></span>
           <span class="kval"><span id="kval-${name}">${val}</span> <small>${esc(k.unit.toUpperCase())}</small></span></div>
         <div class="kdesc">${esc(k.desc)}</div>
         <input type="range" id="knob-${name}" data-name="${name}"

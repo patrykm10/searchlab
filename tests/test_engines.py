@@ -135,7 +135,7 @@ async def mock_es(aiohttp_server):
     app.router.add_post("/idx/_bulk", bulk)
     app.router.add_post("/idx/_search", search)
     app.router.add_post("/idx/_refresh", refresh)
-    app.router.add_get("/_nodes/_local/stats/jvm,indices", stats)
+    app.router.add_get("/_nodes/_local/stats/jvm,indices,thread_pool,breaker", stats)
     server = await aiohttp_server(app)
     server.state = state
     return server
