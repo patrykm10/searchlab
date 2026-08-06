@@ -1804,12 +1804,9 @@ async function showSegments(core) {
             <td class="segage">${g.age ? esc(String(g.age).replace("T", " ").slice(0, 19)) : "—"}</td>
           </tr>`).join("")}
         </table>
-        <div class="desc" style="margin:8px 0 0">A segment written by
-          <b>flush</b> came straight from indexing; one written by <b>merge</b>
-          was assembled from smaller ones. Many small flush segments that never
-          become merges mean merging is falling behind. Deleted documents keep
-          costing disk and search time until a merge rewrites the segment
-          holding them.</div>
+        <!-- the engine supplies its own explanation: Solr reports where a
+             segment came from, ES/OS report what state it is in -->
+        <div class="desc" style="margin:8px 0 0">${out.note || ""}</div>
       </details>
     </div>`;
   // remember the fold so the topology poll doesn't spring it back open

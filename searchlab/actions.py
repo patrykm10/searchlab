@@ -496,11 +496,22 @@ class ActionRunner:
         return {"ok": True, "busy": self._replica_busy, **detail}
 
     def segments(self, collection: str, core: str) -> dict:
-        """Lucene segment detail for one replica."""
-        if not collection or not core:
-            return {"ok": False, "error": "Pick a replica first."}
+        """Lucene segment detail for one replica (Solr) or shard (ES/OS)."""
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
         if self.spec.engine != "solr":
-            return {"ok": False, "error": "Segment detail is Solr-only for now."}
+            # ES/OS have no per-replica core name; the unit is the shard, and
+            # `core` carries the shard id (blank means the whole index)
+            from .segments_os import index_segments
+
+            try:
+                shard = core or None
+                return {"ok": True,
+                        **index_segments(self.spec, collection, shard)}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        if not core:
+            return {"ok": False, "error": "Pick a replica first."}
         from .segments import replica_segments
 
         try:
