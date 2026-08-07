@@ -77,6 +77,95 @@ def _filters(body: dict) -> list[dict]:
     return out
 
 
+# Where a condition sits in the bool query. This is the distinction the
+# builder exists to make visible: `must` and `should` are scored, `filter`
+# and `must_not` are not — which is why a filter can be cached and reused
+# and a must cannot.
+OCCURS = ("must", "filter", "should", "must_not")
+
+# What a condition can ask, and the DSL clause it becomes. Whether a given
+# operator suits a given field is a mapping question the UI answers; here
+# they are all buildable, because a keyword operator on a text field is a
+# lesson worth being able to run.
+OPS = ("is", "any_of", "contains", "phrase", "prefix", "wildcard",
+       "range", "exists")
+
+
+def _scalar(value):
+    """Numbers as numbers, so a range on a numeric field is not a string."""
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    text = str(value).strip()
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def _clause(cond: dict) -> dict:
+    """One structured condition, as its DSL clause."""
+    field = (cond.get("field") or "").strip()
+    if not field:
+        raise ValueError("Every condition needs a field.")
+    op = (cond.get("op") or "is").strip()
+    if op not in OPS:
+        raise ValueError(f"Condition operator must be one of {', '.join(OPS)}.")
+
+    if op == "exists":
+        return {"exists": {"field": field}}
+
+    if op == "range":
+        bounds = {}
+        for key in ("gte", "lte", "gt", "lt"):
+            raw = cond.get(key)
+            if raw not in (None, ""):
+                bounds[key] = _scalar(raw)
+        if not bounds:
+            raise ValueError(f"The range on “{field}” needs at least one bound.")
+        return {"range": {field: bounds}}
+
+    if op == "any_of":
+        raw = cond.get("values")
+        if isinstance(raw, str):
+            raw = [v for v in raw.replace(",", "\n").split("\n")]
+        values = [_scalar(v) for v in (raw or []) if str(v).strip()]
+        if not values:
+            raise ValueError(f"“Any of” on “{field}” needs at least one value.")
+        return {"terms": {field: values}}
+
+    value = cond.get("value")
+    if value in (None, ""):
+        raise ValueError(f"The condition on “{field}” needs a value.")
+
+    if op == "is":
+        # term does no analysis, which is exactly why it belongs on keyword
+        return {"term": {field: {"value": _scalar(value)}}}
+    if op == "contains":
+        return {"match": {field: str(value)}}
+    if op == "phrase":
+        return {"match_phrase": {field: str(value)}}
+    if op == "prefix":
+        return {"prefix": {field: {"value": str(value)}}}
+    return {"wildcard": {field: {"value": str(value)}}}
+
+
+def _bool_parts(body: dict) -> dict[str, list]:
+    """Structured conditions, grouped by where they sit in the bool query."""
+    parts: dict[str, list] = {}
+    for cond in body.get("clauses") or []:
+        if not isinstance(cond, dict) or cond.get("off"):
+            continue
+        occur = (cond.get("occur") or "filter").strip()
+        if occur not in OCCURS:
+            raise ValueError(f"Condition must be one of {', '.join(OCCURS)}.")
+        parts.setdefault(occur, []).append(_clause(cond))
+    return parts
+
+
 def _num(body: dict, key: str, label: str, lo: float, hi: float,
          default=None, cast=float):
     """Read an optional numeric field, or explain what is wrong with it."""
@@ -235,8 +324,25 @@ def build_body(body: dict, embedder=None) -> dict:
     _put(out, "from", _num(body, "from", "From", 0, MAX_FROM, cast=int))
 
     inner = _inner_query(body, qtype, size, embedder)
-    filters = _filters(body)
-    out["query"] = {"bool": {"must": [inner], "filter": filters}} if filters else inner
+    parts = _bool_parts(body)
+    filters = _filters(body)          # the raw fq escape hatch, still honoured
+    if filters:
+        parts.setdefault("filter", []).extend(filters)
+
+    if not parts:
+        out["query"] = inner
+    else:
+        # a bare match_all next to real conditions is noise: the conditions
+        # already say what to match, so it is left out of the preview
+        if inner != {"match_all": {}}:
+            parts.setdefault("must", []).insert(0, inner)
+        # ordered so the body reads the way the bool query is explained:
+        # what must match, what merely filters, what boosts, what excludes
+        out["query"] = {"bool": {k: parts[k] for k in OCCURS if parts.get(k)}}
+        # a should clause alongside a must is pure boosting and matches
+        # nothing on its own; alone, at least one of them has to match
+        if parts.get("should") and not (parts.get("must") or parts.get("filter")):
+            out["query"]["bool"]["minimum_should_match"] = 1
 
     sort = (body.get("sort") or "").strip()
     if sort:
