@@ -21,6 +21,9 @@ class StubEmbedder:
     def embed_one(self, text):
         return [float(len(text)), 0.5, -0.25, 1.0]
 
+    def embed(self, texts):
+        return [self.embed_one(t) for t in texts]
+
 
 # --------------------------------------------------------------- tuning ---
 
@@ -429,3 +432,206 @@ async def test_commit_refreshes_and_flushes_because_os_splits_them(aiohttp_serve
     await asyncio.to_thread(commit, spec, "products")
     # order matters: refresh opens the searcher, flush fsyncs what is there
     assert called == ["refresh", "flush"]
+
+
+# ------------------------------------------------------------ vectorize ---
+
+@pytest.fixture
+async def mock_vec(aiohttp_server):
+    """An index that starts without index.knn, so the close/reopen path runs."""
+    state = {"knn": False, "closed": 0, "opened": 0, "mapped": None,
+             "bulks": [], "refreshed": 0, "flushed": 0, "scroll_deleted": 0,
+             "props": {}}
+
+    async def settings_get(request):
+        return web.json_response({"idx": {"settings": {"index": {
+            "knn": "true" if state["knn"] else "false"}}}})
+
+    async def settings_put(request):
+        body = await request.json()
+        if not state["closed"]:
+            return web.json_response(
+                {"error": {"reason": "Can't update non dynamic settings"}}, status=400)
+        state["knn"] = bool(body["index"]["knn"])
+        return web.json_response({"acknowledged": True})
+
+    async def close_idx(request):
+        state["closed"] += 1
+        return web.json_response({"acknowledged": True})
+
+    async def open_idx(request):
+        state["opened"] += 1
+        return web.json_response({"acknowledged": True})
+
+    async def mapping_get(request):
+        return web.json_response({"idx": {"mappings": {"properties": state["props"]}}})
+
+    async def mapping_put(request):
+        state["mapped"] = await request.json()
+        state["props"].update(state["mapped"]["properties"])
+        return web.json_response({"acknowledged": True})
+
+    async def search(request):
+        return web.json_response({"_scroll_id": "s1", "hits": {"hits": [
+            {"_id": "a", "_source": {"body": "alpha"}},
+            {"_id": "b", "_source": {"body": "beta"}},
+        ]}})
+
+    async def scroll(request):
+        return web.json_response({"_scroll_id": "s1", "hits": {"hits": []}})
+
+    async def scroll_delete(request):
+        state["scroll_deleted"] += 1
+        return web.json_response({"succeeded": True})
+
+    async def bulk(request):
+        state["bulks"].append((await request.text()).strip().splitlines())
+        return web.json_response({"errors": False, "items": []})
+
+    async def refresh(request):
+        state["refreshed"] += 1
+        return web.json_response({"_shards": {"failed": 0}})
+
+    async def flush(request):
+        state["flushed"] += 1
+        return web.json_response({"_shards": {"failed": 0}})
+
+    app = web.Application()
+    app.router.add_get("/idx/_settings", settings_get)
+    app.router.add_put("/idx/_settings", settings_put)
+    app.router.add_post("/idx/_close", close_idx)
+    app.router.add_post("/idx/_open", open_idx)
+    app.router.add_get("/idx/_mapping", mapping_get)
+    app.router.add_put("/idx/_mapping", mapping_put)
+    app.router.add_post("/idx/_search", search)
+    app.router.add_post("/_search/scroll", scroll)
+    app.router.add_delete("/_search/scroll", scroll_delete)
+    app.router.add_post("/_bulk", bulk)
+    app.router.add_post("/idx/_refresh", refresh)
+    app.router.add_post("/idx/_flush", flush)
+    server = await aiohttp_server(app)
+    server.state = state
+    return server
+
+
+async def test_enabling_vectors_closes_and_reopens_because_knn_is_static(mock_vec):
+    """index.knn cannot be set on an open index, so an index that was not
+    built for vectors has to go down briefly. The caller is told, because
+    on a real cluster that is an outage to plan for."""
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    n, reopened = await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+
+    assert reopened is True
+    assert mock_vec.state["closed"] == 1 and mock_vec.state["opened"] == 1
+    assert mock_vec.state["knn"] is True
+    assert n == 2
+
+
+async def test_an_index_already_built_for_vectors_stays_up(mock_vec):
+    from searchlab.vectorize_os import embed_existing_docs
+
+    mock_vec.state["knn"] = True
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    _, reopened = await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+
+    assert reopened is False
+    assert mock_vec.state["closed"] == 0
+
+
+async def test_the_index_is_reopened_even_when_the_setting_fails(aiohttp_server):
+    """Leaving an index closed would take every query down with it, so the
+    reopen has to happen on the failure path too."""
+    from searchlab.vectorize_os import enable_knn
+
+    state = {"opened": 0}
+
+    async def close_idx(request):
+        return web.json_response({"acknowledged": True})
+
+    async def settings_put(request):
+        return web.json_response({"error": {"reason": "nope"}}, status=400)
+
+    async def open_idx(request):
+        state["opened"] += 1
+        return web.json_response({"acknowledged": True})
+
+    app = web.Application()
+    app.router.add_post("/idx/_close", close_idx)
+    app.router.add_put("/idx/_settings", settings_put)
+    app.router.add_post("/idx/_open", open_idx)
+    server = await aiohttp_server(app)
+
+    spec = ClusterSpec(base_port=server.port, engine="opensearch")
+    with pytest.raises(Exception):
+        await asyncio.to_thread(enable_knn, spec, "idx")
+    assert state["opened"] == 1
+
+
+async def test_vectors_are_written_as_partial_updates_not_replacements(mock_vec):
+    """A bulk `update` with a partial doc sets the vector and leaves every
+    other field alone — the equivalent of Solr's atomic update. An `index`
+    action would blank the rest of the document."""
+    import json
+
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+
+    lines = [json.loads(x) for x in mock_vec.state["bulks"][0]]
+    assert list(lines[0]) == ["update"]
+    assert lines[0]["update"]["_id"] == "a"
+    assert list(lines[1]) == ["doc"]
+    assert list(lines[1]["doc"]) == ["vec"]
+    assert len(lines[1]["doc"]["vec"]) == StubEmbedder.dims
+
+
+async def test_the_scroll_context_is_released(mock_vec):
+    """A leaked scroll holds heap on every shard until it times out."""
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+    assert mock_vec.state["scroll_deleted"] == 1
+
+
+async def test_vectors_are_made_searchable_and_durable(mock_vec):
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+    assert mock_vec.state["refreshed"] == 1 and mock_vec.state["flushed"] == 1
+
+
+async def test_a_dimension_mismatch_is_explained_before_anything_is_written(mock_vec):
+    """Writing the wrong width fails per-document, deep inside a bulk
+    response. Catching it up front is the difference between a sentence and
+    a wall of Java."""
+    from searchlab.vectorize_os import ensure_vector_field
+
+    mock_vec.state["knn"] = True
+    mock_vec.state["props"] = {"vec": {"type": "knn_vector", "dimension": 384}}
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+
+    with pytest.raises(RuntimeError, match="384-dimension"):
+        await asyncio.to_thread(ensure_vector_field, spec, "idx",
+                                StubEmbedder.dims, "vec")
+    assert mock_vec.state["bulks"] == []
+
+
+def test_a_bulk_error_surfaces_the_real_reason():
+    """A bulk response is 200 even when every item failed; the reason is
+    per-item, and the useful part is nested under caused_by."""
+    from searchlab import vectorize_os
+
+    body = {"errors": True, "items": [{"update": {
+        "error": {"reason": "failed to parse",
+                  "caused_by": {"reason": "expected 8 dimensions, got 4"}}}}]}
+    assert vectorize_os._first_bulk_error(body) == "expected 8 dimensions, got 4"

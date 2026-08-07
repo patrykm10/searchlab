@@ -381,11 +381,25 @@ class ActionRunner:
         model = emb.get(self._model_name)
 
         def job():
-            from .vectorize import embed_existing_docs
+            if self.spec.engine == "solr":
+                from .vectorize import embed_existing_docs
 
-            n = embed_existing_docs(self.spec, collection, model,
-                                    text_field, vector_field)
-            return f"Embedded {n:,} documents into “{vector_field}”."
+                n = embed_existing_docs(self.spec, collection, model,
+                                        text_field, vector_field)
+                return f"Embedded {n:,} documents into “{vector_field}”."
+
+            from .vectorize_os import embed_existing_docs
+
+            n, reopened = embed_existing_docs(self.spec, collection, model,
+                                              text_field, vector_field)
+            msg = f"Embedded {n:,} documents into “{vector_field}”."
+            if reopened:
+                # not a footnote: the index was unavailable while this ran,
+                # and on a real cluster that is an outage to plan for
+                msg += (" The index had to be closed and reopened first — "
+                        "vectors need index.knn, which cannot be changed "
+                        "while the index is open.")
+            return msg
 
         return self._maintenance_job(collection, "embed",
                                      "Embedding finished.", job)
