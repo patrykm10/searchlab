@@ -263,6 +263,8 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return runner.optimize(coll)
             if path == "/api/query":
                 return runner.run_query(coll, body)
+            if path == "/api/query/preview":
+                return runner.preview_query(coll, body)
             if path == "/api/fields":
                 return runner.fields(coll)
             if path == "/api/model/load":
@@ -289,6 +291,10 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 return runner.segments(coll, str(body.get("core", "")))
             if path == "/api/shard/split":
                 return runner.split_shard(coll, str(body.get("shard", "")))
+            if path == "/api/index/split":
+                # ES/OS: a whole-index copy into more shards, not Solr's
+                # per-shard split
+                return runner.split_index(coll, body.get("shards"))
             if path == "/api/replica/remove":
                 return runner.remove_replica(coll, str(body.get("shard", "")),
                                              str(body.get("replica", "")))

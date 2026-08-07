@@ -221,7 +221,9 @@ class ActionRunner:
             cl.commit(self.spec, collection)
         except Exception as e:
             return self._done("commit", False, str(e))
-        return self._done("commit", True, "Committed — recent documents are now searchable.")
+        return self._done("commit", True,
+                          "Committed — recent documents are now searchable "
+                          "and safely on disk.")
 
     def _maintenance_job(self, collection: str, action: str, message: str,
                          fn) -> dict:
@@ -379,11 +381,25 @@ class ActionRunner:
         model = emb.get(self._model_name)
 
         def job():
-            from .vectorize import embed_existing_docs
+            if self.spec.engine == "solr":
+                from .vectorize import embed_existing_docs
 
-            n = embed_existing_docs(self.spec, collection, model,
-                                    text_field, vector_field)
-            return f"Embedded {n:,} documents into “{vector_field}”."
+                n = embed_existing_docs(self.spec, collection, model,
+                                        text_field, vector_field)
+                return f"Embedded {n:,} documents into “{vector_field}”."
+
+            from .vectorize_os import embed_existing_docs
+
+            n, reopened = embed_existing_docs(self.spec, collection, model,
+                                              text_field, vector_field)
+            msg = f"Embedded {n:,} documents into “{vector_field}”."
+            if reopened:
+                # not a footnote: the index was unavailable while this ran,
+                # and on a real cluster that is an outage to plan for
+                msg += (" The index had to be closed and reopened first — "
+                        "vectors need index.knn, which cannot be changed "
+                        "while the index is open.")
+            return msg
 
         return self._maintenance_job(collection, "embed",
                                      "Embedding finished.", job)
@@ -426,6 +442,33 @@ class ActionRunner:
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def preview_query(self, collection: str, body: dict) -> dict:
+        """What the builder would send, without sending it.
+
+        This runs on every keystroke, so it never touches the cluster and a
+        half-typed value reports its own complaint rather than an error the
+        user has to decode.
+        """
+        mod = self._query_module()
+        preview = getattr(mod, "preview_body", None)
+        if preview is None:
+            # Solr sends params, not a body; the request line is the preview
+            return {"ok": True, "kind": "params",
+                    "request": mod.build_params(dict(body, wt="json"))}
+
+        embedder = None
+        if body.get("semantic"):
+            from . import embeddings as emb
+
+            if emb.available() and self._model_name in emb.loaded_names():
+                embedder = emb.get(self._model_name)
+        try:
+            return {"ok": True, "kind": "dsl",
+                    "url": f"POST /{collection or '<index>'}/_search",
+                    "request": preview(body, embedder)}
+        except ValueError as e:
             return {"ok": False, "error": str(e)}
 
     # --------------------------------------------------------- collections --
@@ -488,19 +531,38 @@ class ActionRunner:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
         if self.spec.engine != "solr":
-            return {"ok": False, "error": "Replica management is Solr-only for now."}
+            # same table, but the copies are placed by the cluster rather
+            # than added one at a time, so it renders read-only
+            from .topology_os import index_topology
+
+            try:
+                return {"ok": True, "busy": False,
+                        **index_topology(self.spec, collection)}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
         try:
             detail = cl.collection_detail(self.spec, collection)
         except Exception as e:
             return {"ok": False, "error": str(e)}
-        return {"ok": True, "busy": self._replica_busy, **detail}
+        return {"ok": True, "busy": self._replica_busy, "manage": True, **detail}
 
     def segments(self, collection: str, core: str) -> dict:
-        """Lucene segment detail for one replica."""
-        if not collection or not core:
-            return {"ok": False, "error": "Pick a replica first."}
+        """Lucene segment detail for one replica (Solr) or shard (ES/OS)."""
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
         if self.spec.engine != "solr":
-            return {"ok": False, "error": "Segment detail is Solr-only for now."}
+            # ES/OS have no per-replica core name; the unit is the shard, and
+            # `core` carries the shard id (blank means the whole index)
+            from .segments_os import index_segments
+
+            try:
+                shard = core or None
+                return {"ok": True,
+                        **index_segments(self.spec, collection, shard)}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        if not core:
+            return {"ok": False, "error": "Pick a replica first."}
         from .segments import replica_segments
 
         try:
@@ -560,6 +622,34 @@ class ActionRunner:
             "split_shard",
             f"Split {shard} into two sub-shards — the original is now inactive.",
             lambda: cl.split_shard(self.spec, collection, shard))
+
+    def split_index(self, collection: str, target_shards) -> dict:
+        """The ES/OS counterpart of splitting: copy the index into a new one
+        with more shards. Not the same operation as Solr's, so it is not the
+        same button — see topology_os.SPLIT_NOTE."""
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if self.spec.engine == "solr":
+            return {"ok": False,
+                    "error": "Solr splits a single shard — use Split shard."}
+        try:
+            target = int(target_shards)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Pick how many shards to split into."}
+
+        from .topology_os import split_index
+
+        def job():
+            out = split_index(self.spec, collection, target)
+            return (f"Split “{out['source']}” into “{out['target']}” with "
+                    f"{out['to_shards']} shards. The original still has its "
+                    f"documents but is read-only now — clear "
+                    f"index.blocks.write once you no longer need it.")
+
+        # a maintenance job, not a replica job: it is slow, index-wide, and
+        # its message is only known once it has run
+        return self._maintenance_job(collection, "split_index",
+                                     "Split finished.", job)
 
     def remove_replica(self, collection: str, shard: str, replica: str) -> dict:
         if not collection or not shard or not replica:

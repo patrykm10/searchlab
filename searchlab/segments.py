@@ -19,6 +19,14 @@ import httpx
 
 from .cluster import ClusterSpec
 
+# Each engine explains its own segment table, because they report different
+# facts: Solr says where a segment came from, ES/OS say what state it is in.
+NOTE = ("A segment written by <b>flush</b> came straight from indexing; one "
+        "written by <b>merge</b> was assembled from smaller ones. Many small "
+        "flush segments that never become merges mean merging is falling "
+        "behind. Deleted documents keep costing disk and search time until a "
+        "merge rewrites the segment holding them.")
+
 
 def _fmt_bytes(n: int | None) -> str:
     if not n:
@@ -77,6 +85,7 @@ def replica_segments(spec: ClusterSpec, core: str, node: int = 0,
     return {
         "core": core,
         "segments": segments,
+        "note": NOTE,
         "summary": {
             "count": len(segments),
             "docs": total_docs,

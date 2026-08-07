@@ -219,7 +219,13 @@ def delete_replica(spec: ClusterSpec, collection: str, shard: str, replica: str,
 
 
 def commit(spec: ClusterSpec, collection: str, timeout: float = 60.0) -> dict:
-    """Hard commit (Solr) / refresh (ES/OS): make recent updates searchable.
+    """Hard commit: make recent updates both searchable and durable.
+
+    Solr does both in one call. ES/OS split them, and it takes both to
+    match: `_refresh` opens a new searcher so the documents can be found,
+    `_flush` fsyncs the segments so they survive a restart. Refreshing
+    alone is the equivalent of a *soft* commit, which would leave every
+    segment showing as searchable-but-uncommitted.
 
     Raises httpx.HTTPError on failure — callers decide how to surface it.
     """
@@ -227,8 +233,11 @@ def commit(spec: ClusterSpec, collection: str, timeout: float = 60.0) -> dict:
         if spec.engine == "solr":
             r = client.get(f"{spec.base_url()}/{collection}/update",
                            params={"commit": "true", "wt": "json"})
-        else:
-            r = client.post(f"{spec.base_url()}/{collection}/_refresh")
+            r.raise_for_status()
+            return r.json()
+        r = client.post(f"{spec.base_url()}/{collection}/_refresh")
+        r.raise_for_status()
+        r = client.post(f"{spec.base_url()}/{collection}/_flush")
         r.raise_for_status()
         return r.json()
 

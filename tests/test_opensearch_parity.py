@@ -21,6 +21,9 @@ class StubEmbedder:
     def embed_one(self, text):
         return [float(len(text)), 0.5, -0.25, 1.0]
 
+    def embed(self, texts):
+        return [self.embed_one(t) for t in texts]
+
 
 # --------------------------------------------------------------- tuning ---
 
@@ -236,3 +239,635 @@ def test_aggregating_a_text_field_explains_the_fix():
         }}],
     }}))
     assert ".keyword" in msg
+
+
+# ------------------------------------------------------------- topology ---
+
+_CAT_SHARDS = [
+    {"shard": "0", "prirep": "p", "state": "STARTED",
+     "node": "os1", "docs": "500", "store": "1.2mb"},
+    {"shard": "0", "prirep": "r", "state": "STARTED",
+     "node": "os2", "docs": "500", "store": "1.2mb"},
+    {"shard": "1", "prirep": "r", "state": "UNASSIGNED",
+     "node": None, "docs": None, "store": None},
+    {"shard": "1", "prirep": "p", "state": "INITIALIZING",
+     "node": "os2", "docs": "0", "store": "230b"},
+]
+
+_SEGMENTS = {"indices": {"products": {"shards": {
+    "0": [
+        {"routing": {"state": "STARTED", "primary": True, "node": "os1"},
+         "segments": {
+             "_0": {"num_docs": 100, "deleted_docs": 5, "size_in_bytes": 5000,
+                    "committed": True, "search": True, "version": "9.7.0"},
+             "_1": {"num_docs": 20, "deleted_docs": 0, "size_in_bytes": 900,
+                    "committed": False, "search": True, "version": "9.7.0"},
+         }},
+        # the replica reports the same segments; counting it would double
+        # every total on the page
+        {"routing": {"state": "STARTED", "primary": False, "node": "os2"},
+         "segments": {
+             "_0": {"num_docs": 100, "deleted_docs": 5, "size_in_bytes": 5000,
+                    "committed": True, "search": True, "version": "9.7.0"},
+         }},
+    ],
+    "1": [
+        {"routing": {"state": "STARTED", "primary": True, "node": "os2"},
+         "segments": {
+             "_0": {"num_docs": 80, "deleted_docs": 0, "size_in_bytes": 4000,
+                    "committed": True, "search": False, "version": "9.7.0"},
+         }},
+    ],
+}}}}
+
+
+@pytest.fixture
+async def mock_shards(aiohttp_server):
+    async def cat_shards(request):
+        return web.json_response(_CAT_SHARDS)
+
+    async def segments(request):
+        return web.json_response(_SEGMENTS)
+
+    app = web.Application()
+    app.router.add_get("/_cat/shards/products", cat_shards)
+    app.router.add_get("/products/_segments", segments)
+    return await aiohttp_server(app)
+
+
+async def test_topology_maps_primaries_and_replicas_onto_the_solr_shape(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+
+    assert set(out["shards"]) == {"shard 0", "shard 1"}
+    reps = out["shards"]["shard 0"]["replicas"]
+    assert reps["primary"]["leader"] is True
+    assert reps["primary"]["type"] == "primary"
+    assert reps["replica 1"]["leader"] is False
+    # docs come straight off _cat, so the table needs no metrics snapshot
+    assert reps["primary"]["docs"] == 500
+
+
+async def test_topology_translates_states_into_the_vocabulary_the_ui_colours(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+
+    shard1 = out["shards"]["shard 1"]
+    # INITIALIZING is "not ready yet", which the dashboard already draws
+    assert shard1["state"] == "recovering"
+    assert shard1["replicas"]["primary"]["state"] == "recovering"
+    # an unplaced copy has nowhere to live and no documents
+    unassigned = shard1["replicas"]["replica 1"]
+    assert unassigned["state"] == "down"
+    assert unassigned["node"] == "unassigned"
+    assert unassigned["docs"] is None
+
+
+async def test_only_the_primary_offers_segments(mock_shards):
+    """A replica's segments are the primary's; giving it a button would
+    show one thing while labelling it another."""
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+
+    reps = out["shards"]["shard 0"]["replicas"]
+    assert reps["primary"]["core"] == "0"
+    assert reps["replica 1"]["core"] == ""
+
+
+async def test_topology_renders_read_only_because_os_places_copies_itself(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+    assert out["manage"] is False
+    assert "number of replicas" in out["note"]
+
+
+# ------------------------------------------------------------- segments ---
+
+async def test_segments_count_primaries_once_not_once_per_copy(mock_shards):
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products")
+
+    # 2 segments on shard 0 + 1 on shard 1; the replica's copy of _0 is not
+    # a third occurrence of the same 100 documents
+    assert out["summary"]["count"] == 3
+    assert out["summary"]["docs"] == 200
+    assert out["summary"]["bytes"] == 9900
+
+
+async def test_segments_report_committed_and_searchable_independently(mock_shards):
+    """The state pair is the whole "I indexed it, where is it?" question:
+    searchable-but-uncommitted lives in memory, committed-but-unsearchable
+    is on disk waiting for a refresh."""
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products")
+
+    assert out["summary"]["by_source"] == {
+        "committed": 1, "searchable only": 1, "committed only": 1}
+
+
+async def test_segments_can_be_narrowed_to_one_shard(mock_shards):
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products", "1")
+
+    assert out["summary"]["count"] == 1
+    assert out["core"] == "products shard 1"
+    # the shard is already named in the header, so the rows do not repeat it
+    assert out["segments"][0]["name"] == "_0"
+
+    whole = await asyncio.to_thread(index_segments, spec, "products")
+    # across shards the names collide (_0 exists in both), so they are tagged
+    assert {s["name"] for s in whole["segments"]} == {
+        "_0 (shard 0)", "_1 (shard 0)", "_0 (shard 1)"}
+
+
+async def test_deleted_documents_are_reported_as_a_share_of_the_segment(mock_shards):
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products")
+
+    biggest = out["segments"][0]                 # _0 on shard 0, 5000 bytes
+    assert biggest["deleted"] == 5
+    assert biggest["deleted_pct"] == pytest.approx(4.8, abs=0.05)  # 5/105
+
+
+# --------------------------------------------------------------- commit ---
+
+async def test_commit_refreshes_and_flushes_because_os_splits_them(aiohttp_server):
+    """Solr's hard commit makes documents searchable *and* durable. OS needs
+    both calls to match: refreshing alone is a soft commit, which would
+    leave every segment reading as searchable-but-uncommitted forever."""
+    from searchlab.cluster import commit
+
+    called = []
+
+    async def refresh(request):
+        called.append("refresh")
+        return web.json_response({"_shards": {"failed": 0}})
+
+    async def flush(request):
+        called.append("flush")
+        return web.json_response({"_shards": {"failed": 0}})
+
+    app = web.Application()
+    app.router.add_post("/products/_refresh", refresh)
+    app.router.add_post("/products/_flush", flush)
+    server = await aiohttp_server(app)
+
+    spec = ClusterSpec(base_port=server.port, engine="opensearch")
+    await asyncio.to_thread(commit, spec, "products")
+    # order matters: refresh opens the searcher, flush fsyncs what is there
+    assert called == ["refresh", "flush"]
+
+
+# ------------------------------------------------------------ vectorize ---
+
+@pytest.fixture
+async def mock_vec(aiohttp_server):
+    """An index that starts without index.knn, so the close/reopen path runs."""
+    state = {"knn": False, "closed": 0, "opened": 0, "mapped": None,
+             "bulks": [], "refreshed": 0, "flushed": 0, "scroll_deleted": 0,
+             "props": {}}
+
+    async def settings_get(request):
+        return web.json_response({"idx": {"settings": {"index": {
+            "knn": "true" if state["knn"] else "false"}}}})
+
+    async def settings_put(request):
+        body = await request.json()
+        if not state["closed"]:
+            return web.json_response(
+                {"error": {"reason": "Can't update non dynamic settings"}}, status=400)
+        state["knn"] = bool(body["index"]["knn"])
+        return web.json_response({"acknowledged": True})
+
+    async def close_idx(request):
+        state["closed"] += 1
+        return web.json_response({"acknowledged": True})
+
+    async def open_idx(request):
+        state["opened"] += 1
+        return web.json_response({"acknowledged": True})
+
+    async def mapping_get(request):
+        return web.json_response({"idx": {"mappings": {"properties": state["props"]}}})
+
+    async def mapping_put(request):
+        state["mapped"] = await request.json()
+        state["props"].update(state["mapped"]["properties"])
+        return web.json_response({"acknowledged": True})
+
+    async def search(request):
+        return web.json_response({"_scroll_id": "s1", "hits": {"hits": [
+            {"_id": "a", "_source": {"body": "alpha"}},
+            {"_id": "b", "_source": {"body": "beta"}},
+        ]}})
+
+    async def scroll(request):
+        return web.json_response({"_scroll_id": "s1", "hits": {"hits": []}})
+
+    async def scroll_delete(request):
+        state["scroll_deleted"] += 1
+        return web.json_response({"succeeded": True})
+
+    async def bulk(request):
+        state["bulks"].append((await request.text()).strip().splitlines())
+        return web.json_response({"errors": False, "items": []})
+
+    async def refresh(request):
+        state["refreshed"] += 1
+        return web.json_response({"_shards": {"failed": 0}})
+
+    async def flush(request):
+        state["flushed"] += 1
+        return web.json_response({"_shards": {"failed": 0}})
+
+    app = web.Application()
+    app.router.add_get("/idx/_settings", settings_get)
+    app.router.add_put("/idx/_settings", settings_put)
+    app.router.add_post("/idx/_close", close_idx)
+    app.router.add_post("/idx/_open", open_idx)
+    app.router.add_get("/idx/_mapping", mapping_get)
+    app.router.add_put("/idx/_mapping", mapping_put)
+    app.router.add_post("/idx/_search", search)
+    app.router.add_post("/_search/scroll", scroll)
+    app.router.add_delete("/_search/scroll", scroll_delete)
+    app.router.add_post("/_bulk", bulk)
+    app.router.add_post("/idx/_refresh", refresh)
+    app.router.add_post("/idx/_flush", flush)
+    server = await aiohttp_server(app)
+    server.state = state
+    return server
+
+
+async def test_enabling_vectors_closes_and_reopens_because_knn_is_static(mock_vec):
+    """index.knn cannot be set on an open index, so an index that was not
+    built for vectors has to go down briefly. The caller is told, because
+    on a real cluster that is an outage to plan for."""
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    n, reopened = await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+
+    assert reopened is True
+    assert mock_vec.state["closed"] == 1 and mock_vec.state["opened"] == 1
+    assert mock_vec.state["knn"] is True
+    assert n == 2
+
+
+async def test_an_index_already_built_for_vectors_stays_up(mock_vec):
+    from searchlab.vectorize_os import embed_existing_docs
+
+    mock_vec.state["knn"] = True
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    _, reopened = await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+
+    assert reopened is False
+    assert mock_vec.state["closed"] == 0
+
+
+async def test_the_index_is_reopened_even_when_the_setting_fails(aiohttp_server):
+    """Leaving an index closed would take every query down with it, so the
+    reopen has to happen on the failure path too."""
+    from searchlab.vectorize_os import enable_knn
+
+    state = {"opened": 0}
+
+    async def close_idx(request):
+        return web.json_response({"acknowledged": True})
+
+    async def settings_put(request):
+        return web.json_response({"error": {"reason": "nope"}}, status=400)
+
+    async def open_idx(request):
+        state["opened"] += 1
+        return web.json_response({"acknowledged": True})
+
+    app = web.Application()
+    app.router.add_post("/idx/_close", close_idx)
+    app.router.add_put("/idx/_settings", settings_put)
+    app.router.add_post("/idx/_open", open_idx)
+    server = await aiohttp_server(app)
+
+    spec = ClusterSpec(base_port=server.port, engine="opensearch")
+    with pytest.raises(Exception):
+        await asyncio.to_thread(enable_knn, spec, "idx")
+    assert state["opened"] == 1
+
+
+async def test_vectors_are_written_as_partial_updates_not_replacements(mock_vec):
+    """A bulk `update` with a partial doc sets the vector and leaves every
+    other field alone — the equivalent of Solr's atomic update. An `index`
+    action would blank the rest of the document."""
+    import json
+
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+
+    lines = [json.loads(x) for x in mock_vec.state["bulks"][0]]
+    assert list(lines[0]) == ["update"]
+    assert lines[0]["update"]["_id"] == "a"
+    assert list(lines[1]) == ["doc"]
+    assert list(lines[1]["doc"]) == ["vec"]
+    assert len(lines[1]["doc"]["vec"]) == StubEmbedder.dims
+
+
+async def test_the_scroll_context_is_released(mock_vec):
+    """A leaked scroll holds heap on every shard until it times out."""
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+    assert mock_vec.state["scroll_deleted"] == 1
+
+
+async def test_vectors_are_made_searchable_and_durable(mock_vec):
+    from searchlab.vectorize_os import embed_existing_docs
+
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+    await asyncio.to_thread(
+        embed_existing_docs, spec, "idx", StubEmbedder(), "body", "vec")
+    assert mock_vec.state["refreshed"] == 1 and mock_vec.state["flushed"] == 1
+
+
+async def test_a_dimension_mismatch_is_explained_before_anything_is_written(mock_vec):
+    """Writing the wrong width fails per-document, deep inside a bulk
+    response. Catching it up front is the difference between a sentence and
+    a wall of Java."""
+    from searchlab.vectorize_os import ensure_vector_field
+
+    mock_vec.state["knn"] = True
+    mock_vec.state["props"] = {"vec": {"type": "knn_vector", "dimension": 384}}
+    spec = ClusterSpec(base_port=mock_vec.port, engine="opensearch")
+
+    with pytest.raises(RuntimeError, match="384-dimension"):
+        await asyncio.to_thread(ensure_vector_field, spec, "idx",
+                                StubEmbedder.dims, "vec")
+    assert mock_vec.state["bulks"] == []
+
+
+def test_a_bulk_error_surfaces_the_real_reason():
+    """A bulk response is 200 even when every item failed; the reason is
+    per-item, and the useful part is nested under caused_by."""
+    from searchlab import vectorize_os
+
+    body = {"errors": True, "items": [{"update": {
+        "error": {"reason": "failed to parse",
+                  "caused_by": {"reason": "expected 8 dimensions, got 4"}}}}]}
+    assert vectorize_os._first_bulk_error(body) == "expected 8 dimensions, got 4"
+
+
+# ---------------------------------------------------------------- split ---
+
+def test_split_targets_are_only_the_multiples_the_api_accepts():
+    """The API requires the source count to be a factor of the target, so
+    offering anything else just produces a rejection to read."""
+    from searchlab.topology_os import split_targets
+
+    assert split_targets(2)[:4] == [4, 6, 8, 10]
+    assert split_targets(3)[:3] == [6, 9, 12]
+    assert all(n % 5 == 0 for n in split_targets(5))
+    # splitting has to increase the count, so the current value is not offered
+    assert 2 not in split_targets(2)
+
+
+@pytest.fixture
+async def mock_split(aiohttp_server):
+    state = {"blocked": False, "split": None, "shards": 2, "fail": False}
+
+    async def settings_get(request):
+        return web.json_response({"idx": {"settings": {"index": {
+            "number_of_shards": str(state["shards"])}}}})
+
+    async def settings_put(request):
+        body = await request.json()
+        if body.get("index.blocks.write"):
+            state["blocked"] = True
+        return web.json_response({"acknowledged": True})
+
+    async def split(request):
+        if state["fail"]:
+            return web.json_response(
+                {"error": {"reason": "target index already exists"}}, status=400)
+        state["split"] = (request.match_info["target"], await request.json())
+        return web.json_response({"acknowledged": True,
+                                  "shards_acknowledged": True})
+
+    app = web.Application()
+    app.router.add_get("/idx/_settings", settings_get)
+    app.router.add_put("/idx/_settings", settings_put)
+    app.router.add_post("/idx/_split/{target}", split)
+    server = await aiohttp_server(app)
+    server.state = state
+    return server
+
+
+async def test_split_blocks_writes_first_because_the_api_demands_it(mock_split):
+    from searchlab.topology_os import split_index
+
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    out = await asyncio.to_thread(split_index, spec, "idx", 4)
+
+    assert mock_split.state["blocked"] is True
+    target, body = mock_split.state["split"]
+    assert target == "idx_s4"
+    assert body["settings"]["index.number_of_shards"] == 4
+    assert out["from_shards"] == 2 and out["to_shards"] == 4
+
+
+async def test_a_non_multiple_is_refused_before_the_index_goes_read_only(mock_split):
+    """Blocking writes and *then* failing would leave the index unable to
+    take writes for no reason at all."""
+    from searchlab.topology_os import split_index
+
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    with pytest.raises(ValueError, match="multiple of 2"):
+        await asyncio.to_thread(split_index, spec, "idx", 3)
+    assert mock_split.state["blocked"] is False
+
+
+async def test_splitting_to_the_same_or_fewer_shards_is_refused(mock_split):
+    from searchlab.topology_os import split_index
+
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    with pytest.raises(ValueError, match="already has 2 shards"):
+        await asyncio.to_thread(split_index, spec, "idx", 2)
+    assert mock_split.state["blocked"] is False
+
+
+async def test_a_failed_split_says_the_index_is_now_read_only(mock_split):
+    """By the time the split is attempted the writes are already blocked.
+    Reporting only the API's reason would leave the user with an index that
+    quietly stopped accepting writes."""
+    from searchlab.topology_os import split_index
+
+    mock_split.state["fail"] = True
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    with pytest.raises(RuntimeError) as e:
+        await asyncio.to_thread(split_index, spec, "idx", 4)
+
+    assert "already exists" in str(e.value)          # the real reason
+    assert "read-only now" in str(e.value)           # and the consequence
+    assert "index.blocks.write" in str(e.value)      # and how to undo it
+
+
+async def test_topology_offers_split_targets_for_its_current_shard_count(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+    assert out["split"]["current"] == 2
+    assert out["split"]["targets"][:2] == [4, 6]
+    assert "read-only" in out["split"]["note"]
+
+
+# ------------------------------------------------- native DSL parameters ---
+
+def test_multi_match_type_is_carried_because_it_changes_the_query():
+    """best_fields / most_fields / cross_fields are genuinely different
+    queries behind one name, so the type has to reach the clause."""
+    body = query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                                "fields": "title^3 body",
+                                "mm_type": "cross_fields", "operator": "AND"})
+    mm = body["query"]["multi_match"]
+    assert mm["type"] == "cross_fields"
+    assert mm["fields"] == ["title^3", "body"]
+    assert mm["operator"] == "AND"
+
+
+def test_only_the_parameters_that_were_set_appear_in_the_body():
+    """A preview full of defaults teaches nothing about what was asked for."""
+    body = query_os.build_body({"q": "shoes", "qtype": "multi_match",
+                                "fields": "title"})
+    assert body["query"]["multi_match"] == {"query": "shoes",
+                                            "fields": ["title"]}
+    assert "from" not in body and "highlight" not in body
+    assert "min_score" not in body and "track_total_hits" not in body
+
+
+@pytest.mark.parametrize("qtype,clause", [
+    ("match", "match"), ("match_phrase", "match_phrase"), ("term", "term"),
+])
+def test_single_field_clauses_target_the_named_field(qtype, clause):
+    body = query_os.build_body({"q": "shoes", "qtype": qtype, "field": "title"})
+    assert clause in body["query"]
+    assert "title" in body["query"][clause]
+
+
+def test_a_single_field_clause_without_a_field_says_so():
+    with pytest.raises(ValueError, match="needs one field"):
+        query_os.build_body({"q": "shoes", "qtype": "match"})
+
+
+def test_a_bare_match_stays_bare_but_grows_when_parameters_are_added():
+    """{"match": {"title": "shoes"}} is the readable form; the long form is
+    only worth it once there is something to say."""
+    plain = query_os.build_body({"q": "shoes", "qtype": "match",
+                                 "field": "title"})
+    assert plain["query"]["match"] == {"title": "shoes"}
+
+    tuned = query_os.build_body({"q": "shoes", "qtype": "match",
+                                 "field": "title", "fuzziness": "AUTO"})
+    assert tuned["query"]["match"] == {"title": {"query": "shoes",
+                                                 "fuzziness": "AUTO"}}
+
+
+def test_fuzziness_on_a_phrase_type_is_refused_with_the_reason():
+    """The engine rejects it as a shard failure; saying it up front is the
+    difference between a sentence and a stack trace."""
+    with pytest.raises(ValueError, match="matches terms in sequence"):
+        query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                             "mm_type": "phrase", "fuzziness": "AUTO"})
+
+
+def test_slop_only_reaches_the_clauses_that_understand_it():
+    phrase = query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                                  "mm_type": "phrase", "slop": 2})
+    assert phrase["query"]["multi_match"]["slop"] == 2
+    # best_fields has no notion of slop, so it must not be sent one
+    best = query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                                "mm_type": "best_fields", "slop": 2})
+    assert "slop" not in best["query"]["multi_match"]
+
+
+def test_track_total_hits_is_offered_because_counts_stop_being_exact():
+    body = query_os.build_body({"q": "shoes", "track_total_hits": True})
+    assert body["track_total_hits"] is True
+
+
+def test_highlight_accepts_either_separator():
+    body = query_os.build_body({"q": "shoes", "highlight": "title, body"})
+    assert body["highlight"] == {"fields": {"title": {}, "body": {}}}
+
+
+def test_paging_beyond_the_result_window_is_refused():
+    assert query_os.build_body({"q": "a", "from": 20})["from"] == 20
+    with pytest.raises(ValueError, match="From must be between"):
+        query_os.build_body({"q": "a", "from": 10_001})
+
+
+@pytest.mark.parametrize("field,value,msg", [
+    ("tie_breaker", 5, "Tie breaker"),
+    ("operator", "MAYBE", "Operator"),
+    ("fuzziness", "9", "Fuzziness"),
+    ("mm_type", "nonsense", "multi_match type"),
+    ("qtype", "nonsense", "Query type"),
+])
+def test_bad_values_are_named_rather_than_passed_through(field, value, msg):
+    with pytest.raises(ValueError, match=msg):
+        query_os.build_body({"q": "a", "qtype": "multi_match", field: value})
+
+
+# ------------------------------------------------------------- preview ----
+
+def test_the_preview_abbreviates_vectors_so_the_shape_stays_readable():
+    """A 384-float vector *is* the preview otherwise, and the shape is the
+    point — not the numbers."""
+    body = query_os.preview_body(
+        {"q": "quiet mouse", "semantic": True, "vector_field": "vec"},
+        embedder=_LongEmbedder())
+    vector = body["query"]["knn"]["vec"]["vector"]
+    assert len(vector) == 4
+    assert vector[-1] == "…384 floats"
+
+
+def test_a_semantic_query_can_be_previewed_before_a_model_is_loaded():
+    """The preview exists to show which clause the controls build; refusing
+    to draw it until a 90 MB download finishes withholds exactly that."""
+    body = query_os.preview_body({"q": "quiet mouse", "semantic": True})
+    assert "knn" in body["query"]
+    assert body["query"]["knn"]["vec"]["vector"] == [
+        "<vector from the embedding model>"]
+
+
+def test_running_a_query_still_needs_a_real_model():
+    """Previewing with a placeholder must not make it look runnable."""
+    with pytest.raises(ValueError, match="Load an embedding model"):
+        query_os.build_body({"q": "quiet mouse", "semantic": True})
+
+
+class _LongEmbedder:
+    dims = 384
+
+    def embed_one(self, text):
+        return [0.0123456] * 384
