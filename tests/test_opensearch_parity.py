@@ -236,3 +236,190 @@ def test_aggregating_a_text_field_explains_the_fix():
         }}],
     }}))
     assert ".keyword" in msg
+
+
+# ------------------------------------------------------------- topology ---
+
+_CAT_SHARDS = [
+    {"shard": "0", "prirep": "p", "state": "STARTED",
+     "node": "os1", "docs": "500", "store": "1.2mb"},
+    {"shard": "0", "prirep": "r", "state": "STARTED",
+     "node": "os2", "docs": "500", "store": "1.2mb"},
+    {"shard": "1", "prirep": "r", "state": "UNASSIGNED",
+     "node": None, "docs": None, "store": None},
+    {"shard": "1", "prirep": "p", "state": "INITIALIZING",
+     "node": "os2", "docs": "0", "store": "230b"},
+]
+
+_SEGMENTS = {"indices": {"products": {"shards": {
+    "0": [
+        {"routing": {"state": "STARTED", "primary": True, "node": "os1"},
+         "segments": {
+             "_0": {"num_docs": 100, "deleted_docs": 5, "size_in_bytes": 5000,
+                    "committed": True, "search": True, "version": "9.7.0"},
+             "_1": {"num_docs": 20, "deleted_docs": 0, "size_in_bytes": 900,
+                    "committed": False, "search": True, "version": "9.7.0"},
+         }},
+        # the replica reports the same segments; counting it would double
+        # every total on the page
+        {"routing": {"state": "STARTED", "primary": False, "node": "os2"},
+         "segments": {
+             "_0": {"num_docs": 100, "deleted_docs": 5, "size_in_bytes": 5000,
+                    "committed": True, "search": True, "version": "9.7.0"},
+         }},
+    ],
+    "1": [
+        {"routing": {"state": "STARTED", "primary": True, "node": "os2"},
+         "segments": {
+             "_0": {"num_docs": 80, "deleted_docs": 0, "size_in_bytes": 4000,
+                    "committed": True, "search": False, "version": "9.7.0"},
+         }},
+    ],
+}}}}
+
+
+@pytest.fixture
+async def mock_shards(aiohttp_server):
+    async def cat_shards(request):
+        return web.json_response(_CAT_SHARDS)
+
+    async def segments(request):
+        return web.json_response(_SEGMENTS)
+
+    app = web.Application()
+    app.router.add_get("/_cat/shards/products", cat_shards)
+    app.router.add_get("/products/_segments", segments)
+    return await aiohttp_server(app)
+
+
+async def test_topology_maps_primaries_and_replicas_onto_the_solr_shape(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+
+    assert set(out["shards"]) == {"shard 0", "shard 1"}
+    reps = out["shards"]["shard 0"]["replicas"]
+    assert reps["primary"]["leader"] is True
+    assert reps["primary"]["type"] == "primary"
+    assert reps["replica 1"]["leader"] is False
+    # docs come straight off _cat, so the table needs no metrics snapshot
+    assert reps["primary"]["docs"] == 500
+
+
+async def test_topology_translates_states_into_the_vocabulary_the_ui_colours(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+
+    shard1 = out["shards"]["shard 1"]
+    # INITIALIZING is "not ready yet", which the dashboard already draws
+    assert shard1["state"] == "recovering"
+    assert shard1["replicas"]["primary"]["state"] == "recovering"
+    # an unplaced copy has nowhere to live and no documents
+    unassigned = shard1["replicas"]["replica 1"]
+    assert unassigned["state"] == "down"
+    assert unassigned["node"] == "unassigned"
+    assert unassigned["docs"] is None
+
+
+async def test_only_the_primary_offers_segments(mock_shards):
+    """A replica's segments are the primary's; giving it a button would
+    show one thing while labelling it another."""
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+
+    reps = out["shards"]["shard 0"]["replicas"]
+    assert reps["primary"]["core"] == "0"
+    assert reps["replica 1"]["core"] == ""
+
+
+async def test_topology_renders_read_only_because_os_places_copies_itself(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+    assert out["manage"] is False
+    assert "number of replicas" in out["note"]
+
+
+# ------------------------------------------------------------- segments ---
+
+async def test_segments_count_primaries_once_not_once_per_copy(mock_shards):
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products")
+
+    # 2 segments on shard 0 + 1 on shard 1; the replica's copy of _0 is not
+    # a third occurrence of the same 100 documents
+    assert out["summary"]["count"] == 3
+    assert out["summary"]["docs"] == 200
+    assert out["summary"]["bytes"] == 9900
+
+
+async def test_segments_report_committed_and_searchable_independently(mock_shards):
+    """The state pair is the whole "I indexed it, where is it?" question:
+    searchable-but-uncommitted lives in memory, committed-but-unsearchable
+    is on disk waiting for a refresh."""
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products")
+
+    assert out["summary"]["by_source"] == {
+        "committed": 1, "searchable only": 1, "committed only": 1}
+
+
+async def test_segments_can_be_narrowed_to_one_shard(mock_shards):
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products", "1")
+
+    assert out["summary"]["count"] == 1
+    assert out["core"] == "products shard 1"
+    assert all("shard 1" in s["name"] for s in out["segments"])
+
+
+async def test_deleted_documents_are_reported_as_a_share_of_the_segment(mock_shards):
+    from searchlab.segments_os import index_segments
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_segments, spec, "products")
+
+    biggest = out["segments"][0]                 # _0 on shard 0, 5000 bytes
+    assert biggest["deleted"] == 5
+    assert biggest["deleted_pct"] == pytest.approx(4.8, abs=0.05)  # 5/105
+
+
+# --------------------------------------------------------------- commit ---
+
+async def test_commit_refreshes_and_flushes_because_os_splits_them(aiohttp_server):
+    """Solr's hard commit makes documents searchable *and* durable. OS needs
+    both calls to match: refreshing alone is a soft commit, which would
+    leave every segment reading as searchable-but-uncommitted forever."""
+    from searchlab.cluster import commit
+
+    called = []
+
+    async def refresh(request):
+        called.append("refresh")
+        return web.json_response({"_shards": {"failed": 0}})
+
+    async def flush(request):
+        called.append("flush")
+        return web.json_response({"_shards": {"failed": 0}})
+
+    app = web.Application()
+    app.router.add_post("/products/_refresh", refresh)
+    app.router.add_post("/products/_flush", flush)
+    server = await aiohttp_server(app)
+
+    spec = ClusterSpec(base_port=server.port, engine="opensearch")
+    await asyncio.to_thread(commit, spec, "products")
+    # order matters: refresh opens the searcher, flush fsyncs what is there
+    assert called == ["refresh", "flush"]

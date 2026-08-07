@@ -221,7 +221,9 @@ class ActionRunner:
             cl.commit(self.spec, collection)
         except Exception as e:
             return self._done("commit", False, str(e))
-        return self._done("commit", True, "Committed — recent documents are now searchable.")
+        return self._done("commit", True,
+                          "Committed — recent documents are now searchable "
+                          "and safely on disk.")
 
     def _maintenance_job(self, collection: str, action: str, message: str,
                          fn) -> dict:
@@ -488,12 +490,20 @@ class ActionRunner:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
         if self.spec.engine != "solr":
-            return {"ok": False, "error": "Replica management is Solr-only for now."}
+            # same table, but the copies are placed by the cluster rather
+            # than added one at a time, so it renders read-only
+            from .topology_os import index_topology
+
+            try:
+                return {"ok": True, "busy": False,
+                        **index_topology(self.spec, collection)}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
         try:
             detail = cl.collection_detail(self.spec, collection)
         except Exception as e:
             return {"ok": False, "error": str(e)}
-        return {"ok": True, "busy": self._replica_busy, **detail}
+        return {"ok": True, "busy": self._replica_busy, "manage": True, **detail}
 
     def segments(self, collection: str, core: str) -> dict:
         """Lucene segment detail for one replica (Solr) or shard (ES/OS)."""

@@ -174,7 +174,7 @@ canvas { width: 100%; height: 150px; display: block;
   font-family: var(--mono); font-size: 13px; padding: 0 4px; }
 .xbtn:hover { color: var(--cobalt); }
 .xbtn:disabled { color: var(--line); cursor: default; }
-#topo-controls { margin-top: 16px; display: flex; align-items: baseline; gap: 12px;
+.topo-controls { margin-top: 16px; display: flex; align-items: baseline; gap: 12px;
   flex-wrap: wrap; }
 /* per-replica segment detail, expanded under its topology row */
 .segbtn { background: none; border: none; padding: 0; cursor: pointer;
@@ -440,8 +440,8 @@ textarea:focus { border-color: var(--cobalt); }
   width: 12px; text-align: center; vertical-align: 1px; }
 .sec-toggle:hover { color: var(--cobalt); }
 .sec-toggle:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
-/* !important: these must beat the id-based display rules on children like
-   #topo-controls (flex) and #knobs (grid), which otherwise out-specify a
+/* !important: these must beat the display rules on children like #knobs
+   (grid) and .topo-controls (flex), which otherwise out-specify a
    collapsed section and stay visible. */
 section.collapsed > *:not(h2) { display: none !important; }
 section.collapsed { padding-bottom: 20px; }
@@ -654,7 +654,8 @@ section.collapsed h2 { margin-bottom: 0; }
 <section id="topo-section" style="display:none">
   <h2>Topology</h2>
   <table id="topo" class="mtable"></table>
-  <div id="topo-controls">
+  <p class="desc" id="topo-note" style="display:none"></p>
+  <div class="topo-controls" id="topo-addrow">
     <label for="topo-shard">Add a replica to</label>
     <select id="topo-shard"></select>
     <select id="topo-type">
@@ -664,7 +665,7 @@ section.collapsed h2 { margin-bottom: 0; }
     </select>
     <button class="btn" id="btn-addreplica">Add replica</button>
   </div>
-  <div id="topo-controls">
+  <div class="topo-controls" id="topo-splitrow">
     <label for="topo-split">Split shard</label>
     <select id="topo-split"></select>
     <button class="btn" id="btn-splitshard">Split shard</button>
@@ -1851,6 +1852,9 @@ async function pollTopology() {
     if (!out.ok) { $("topo-section").style.display = "none"; return; }
     $("topo-section").style.display = "block";
     const busy = out.busy;
+    // Solr places replicas one at a time; ES/OS place them for you from
+    // number_of_replicas, so the add/remove/split controls do not apply
+    const manage = out.manage !== false;
     let rows = `<tr><th>Shard</th><th>Replica</th><th>Node</th><th>Type</th>
       <th>Docs</th><th></th><th></th></tr>`;
     const shardNames = Object.keys(out.shards).sort();
@@ -1862,18 +1866,25 @@ async function pollTopology() {
         ? `${esc(sname)} <span style="color:var(--faint)">(${esc(shard.state)})</span>`
         : esc(sname);
       for (const [rname, rep] of Object.entries(reps).sort()) {
-        const docs = coreDocs(rep.core);
+        // ES/OS report docs per shard copy directly; Solr's come from the
+        // metrics snapshot, matched by core name
+        const docs = rep.docs != null ? rep.docs : coreDocs(rep.core);
         const known = ["active", "recovering", "down", "recovery_failed"];
         const dotCls = known.includes(rep.state) ? rep.state : "unknown";
+        // no core means no segments to show for this row (an ES/OS replica,
+        // whose segments the primary already accounts for)
+        const label = rep.core
+          ? `<button class="segbtn" data-core="${esc(rep.core)}"
+               title="Lucene segment detail">${esc(rname)}</button>`
+          : esc(rname);
         rows += `<tr><td>${slabel}</td>
           <td><span class="repdot ${dotCls}" title="${esc(rep.state)}"></span>
-            <button class="segbtn" data-core="${esc(rep.core || "")}"
-              title="Lucene segment detail for this replica">${esc(rname)}</button></td>
+            ${label}</td>
           <td>${esc(rep.node)}</td><td>${esc(rep.type)}</td>
           <td>${docs == null ? "—" : Number(docs).toLocaleString()}</td>
-          <td>${rep.leader ? '<span class="leadchip">LEADER</span>' : ""}</td>
-          <td><button class="xbtn" title="Remove this replica" ${busy ? "disabled" : ""}
-            data-shard="${esc(sname)}" data-replica="${esc(rname)}">&times;</button></td></tr>`;
+          <td>${rep.leader ? `<span class="leadchip">${manage ? "LEADER" : "PRIMARY"}</span>` : ""}</td>
+          <td>${manage ? `<button class="xbtn" title="Remove this replica" ${busy ? "disabled" : ""}
+            data-shard="${esc(sname)}" data-replica="${esc(rname)}">&times;</button>` : ""}</td></tr>`;
       }
     }
     // preserve an expanded segment panel across the topology poll, which
@@ -1894,6 +1905,11 @@ async function pollTopology() {
         setTimeout(pollTopology, 1500);
       });
     }
+    $("topo-note").style.display = out.note ? "" : "none";
+    if (out.note) $("topo-note").innerHTML = out.note;
+    $("topo-addrow").style.display = manage ? "" : "none";
+    $("topo-splitrow").style.display = manage ? "" : "none";
+    if (!manage) return;
     const ssel = $("topo-shard");
     if (ssel.dataset.opts !== shardNames.join()) {
       ssel.dataset.opts = shardNames.join();
