@@ -176,6 +176,17 @@ canvas { width: 100%; height: 150px; display: block;
 .xbtn:disabled { color: var(--line); cursor: default; }
 .topo-controls { margin-top: 16px; display: flex; align-items: baseline; gap: 12px;
   flex-wrap: wrap; }
+/* live DSL preview: the builder's controls, as the body they produce */
+.qdsl { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--sunk, #fafafa); }
+.qdsl > summary { cursor: pointer; padding: 10px 14px; font-family: var(--mono);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--faint); }
+.qdsl > summary:hover { color: var(--cobalt); }
+.qdsl pre { margin: 0; padding: 0 14px 14px; font-family: var(--mono);
+  font-size: 12px; line-height: 1.55; color: var(--ink); overflow-x: auto;
+  white-space: pre; }
+.qdsl .desc { padding: 0 14px 12px; margin: 0; color: var(--warn, #b4541a); }
 /* per-replica segment detail, expanded under its topology row */
 .segbtn { background: none; border: none; padding: 0; cursor: pointer;
   font: inherit; color: var(--ink); border-bottom: 1px dotted var(--line); }
@@ -767,6 +778,63 @@ section.collapsed h2 { margin-bottom: 0; }
         <label for="q-vecfield">Vector field</label>
         <input type="text" id="q-vecfield" value="vec">
       </div>
+      <div id="q-field-wrap" style="display:none">
+        <label for="q-field">Field</label>
+        <input type="text" id="q-field" placeholder="title_t">
+      </div>
+    </div>
+
+    <!-- ES/OS only: the parameters that actually change what a clause does.
+         Solr reaches most of these through local params on one parser; here
+         they are named keys on the clause, so they get named controls. -->
+    <div class="qrow qsplit3 esonly" id="q-mm-row" style="display:none">
+      <div>
+        <label for="q-mmtype">multi_match type</label>
+        <select id="q-mmtype">
+          <option value="best_fields" title="Score by the single best-matching field. The default, and what you want when the words belong together in one field.">best_fields — one field wins</option>
+          <option value="most_fields" title="Add up the scores from every field that matches. Good when the same text is indexed several ways (stemmed, exact, ngram).">most_fields — add them up</option>
+          <option value="cross_fields" title="Treat the listed fields as one big field. Built for structured input split across fields, like first_name and last_name.">cross_fields — fields as one</option>
+          <option value="phrase" title="The words must appear in order, in one field.">phrase — in order</option>
+          <option value="phrase_prefix" title="Like phrase, but the last word is a prefix — the query type behind search-as-you-type.">phrase_prefix — as-you-type</option>
+          <option value="bool_prefix" title="Each word must match, and the last one may be a prefix. Unlike phrase_prefix the words need not be adjacent.">bool_prefix — any order</option>
+        </select>
+      </div>
+      <div>
+        <label for="q-operator">Operator</label>
+        <select id="q-operator">
+          <option value="" title="Leave it to the engine (OR).">default</option>
+          <option value="OR" title="Any word may match. More results, looser.">OR — any word</option>
+          <option value="AND" title="Every word must match. Fewer results, stricter.">AND — every word</option>
+        </select>
+      </div>
+      <div>
+        <label for="q-msm">minimum_should_match</label>
+        <input type="text" id="q-msm" placeholder="75% or 2"
+               title="How many of the query's words must match — a count (2) or a share (75%). The middle ground between OR and AND.">
+      </div>
+    </div>
+
+    <div class="qrow qsplit3 esonly" id="q-fuzzy-row" style="display:none">
+      <div>
+        <label for="q-fuzziness">Fuzziness</label>
+        <select id="q-fuzziness">
+          <option value="" title="Exact terms only.">off</option>
+          <option value="AUTO" title="Allow more edits for longer words: none under 3 letters, 1 up to 5, 2 beyond. Usually the right choice.">AUTO — by word length</option>
+          <option value="1" title="Allow one character's difference — one typo.">1 — one typo</option>
+          <option value="2" title="Allow two characters' difference. Slower, and starts matching unrelated words.">2 — two typos</option>
+        </select>
+      </div>
+      <div>
+        <label for="q-tiebreak">tie_breaker</label>
+        <input type="number" id="q-tiebreak" step="0.1" min="0" max="1"
+               placeholder="0.3"
+               title="How much the non-winning fields count, 0 to 1. 0 means only the best field scores; raising it lets matches in other fields break ties.">
+      </div>
+      <div>
+        <label for="q-slop">Slop</label>
+        <input type="number" id="q-slop" min="0" max="100" placeholder="0"
+               title="How far apart the phrase's words may drift and still match. 0 means strictly adjacent.">
+      </div>
     </div>
 
     <div class="qrow" id="q-model-row" style="display:none">
@@ -798,6 +866,25 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
     </div>
 
+    <div class="qrow qsplit3 esonly" id="q-extra-row" style="display:none">
+      <div>
+        <label for="q-from">From (offset)</label>
+        <input type="number" id="q-from" min="0" placeholder="0"
+               title="Skip this many hits. from + size cannot exceed index.max_result_window (10,000 by default) — deep paging is what search_after exists for.">
+      </div>
+      <div>
+        <label for="q-highlight">Highlight fields</label>
+        <input type="text" id="q-highlight" placeholder="title_t body_t"
+               title="Return the matching fragments with the matched terms marked, so you can see why a document matched.">
+      </div>
+      <div>
+        <label for="q-minscore">min_score</label>
+        <input type="number" id="q-minscore" step="0.1" min="0"
+               placeholder="none"
+               title="Drop hits scoring below this. Scores are not comparable between queries, so this is a per-query tool, not a quality threshold.">
+      </div>
+    </div>
+
     <div class="qrow">
       <label for="q-facet">Facets</label>
       <div class="frow" style="margin-bottom:8px">
@@ -817,8 +904,21 @@ section.collapsed h2 { margin-bottom: 0; }
         <input type="checkbox" id="q-explain" style="vertical-align:-1px">
         explain — parsed query, timing and scoring
       </label>
+      <label class="esonly" id="q-tth-wrap" style="display:none;
+                    text-transform:none; letter-spacing:0; font-family:var(--sans);
+                    font-size:13px; color:var(--ink); cursor:pointer">
+        <input type="checkbox" id="q-tth" style="vertical-align:-1px">
+        track_total_hits — count past 10,000
+      </label>
       <span class="desc" id="q-summary" style="margin:0 0 0 auto"></span>
     </div>
+
+    <!-- the whole point: every control above is a key in this body -->
+    <details class="qdsl esonly" id="q-dsl-wrap" style="display:none" open>
+      <summary>Query DSL — what the controls above build</summary>
+      <pre id="q-dsl"></pre>
+      <div class="desc" id="q-dsl-err" style="display:none"></div>
+    </details>
 
     <div class="frow" style="margin-top:6px; padding-top:14px;
                              border-top:1px solid var(--line)">
@@ -1465,6 +1565,121 @@ function renderTraffic() {
 /* ---------- query builder ---------- */
 
 let fieldsFor = null;
+let esFormReady = false;
+
+// Solr and ES/OS do not just spell things differently — they offer
+// different clauses. The form follows whichever engine is running.
+function isES() {
+  const e = lastSnap && lastSnap.spec && lastSnap.spec.engine;
+  return e === "opensearch" || e === "elasticsearch";
+}
+
+const ES_QTYPES = [
+  ["multi_match", "multi_match — across fields",
+   "One query text over several fields at once, with per-field boosts (title_t^3). The everyday choice, and the type dropdown below changes how it combines them."],
+  ["query_string", "query_string — exact syntax",
+   "Full Lucene syntax: field:value, AND/OR/NOT, ranges, wildcards. You write it, so a syntax error is yours — which is why it is a poor fit for raw user input."],
+  ["match", "match — one field",
+   "Analyse the text the same way the field was analysed, then match the resulting terms in that one field. The simplest full-text query there is."],
+  ["match_phrase", "match_phrase — in order",
+   "The words must appear in this order, in one field. Slop allows a little drift between them."],
+  ["term", "term — no analysis",
+   "Match the value exactly as typed, with no analysis at all. On an analysed text field this almost never matches — it belongs on keyword fields."],
+  ["semantic", "knn — by meaning",
+   "Embed the query with the loaded model and find the nearest vectors, so it can match documents that share no words with the query."],
+];
+
+const SOLR_LABELS = {"q-fq": "Filters (fq) — one per line", "q-rows": "Rows",
+                     "q-fl": "Fields to return (fl)",
+                     "q-qf": "Fields to search (qf)", "q-parser": "Parser"};
+const ES_LABELS = {"q-fq": "Filters — one per line, each a bool filter clause",
+                   "q-rows": "size", "q-fl": "_source — fields to return",
+                   "q-qf": "fields — with boosts, e.g. title_t^3",
+                   "q-parser": "Query type"};
+
+function setLabel(id, text) {
+  const el = document.querySelector(`label[for="${id}"]`);
+  if (el) el.textContent = text;
+}
+
+/* Reshape the query form for the running engine. Runs once the first
+   snapshot says which one it is, and again if it ever changes. */
+function applyEngineToQueryForm() {
+  const es = isES();
+  const labels = es ? ES_LABELS : SOLR_LABELS;
+  for (const [id, text] of Object.entries(labels)) setLabel(id, text);
+
+  if (es && !esFormReady) {
+    const sel = $("q-parser"), keep = sel.value;
+    sel.innerHTML = ES_QTYPES.map(([v, label, tip]) =>
+      `<option value="${v}" title="${esc(tip)}">${esc(label)}</option>`).join("");
+    // keep an explicit choice that exists in both (semantic), but otherwise
+    // land on multi_match: it is what ES reaches for by default, and the
+    // Solr-shaped starting point is query_string, which is the thing that
+    // made this form look like Solr in the first place
+    sel.value = [...sel.options].some(o => o.value === keep) ? keep
+                                                            : "multi_match";
+    esFormReady = true;
+  }
+  for (const el of document.querySelectorAll(".esonly"))
+    el.style.display = es ? "" : "none";
+  $("q-dsl-wrap").style.display = es ? "" : "none";
+  onParserChange();
+}
+
+/* Which extra parameters a clause understands. One source of truth, used
+   both to show the controls and to build the body — so a parameter that is
+   hidden is also absent from the request, and the preview never reports a
+   problem with a control that is not on screen. */
+function esApplies() {
+  const p = $("q-parser").value;
+  const multi = p === "multi_match";
+  const phrase = multi && ["phrase", "phrase_prefix"].includes($("q-mmtype").value);
+  return {
+    p, multi, phrase,
+    semantic: p === "semantic",
+    fields: multi || p === "query_string",
+    field: ["match", "match_phrase", "term"].includes(p),
+    mmType: multi,
+    // query_string and term take neither: term does no analysis at all
+    operator: multi || p === "match" || p === "query_string",
+    msm: multi || p === "match" || p === "query_string",
+    // the phrase types match terms in sequence and reject fuzziness
+    fuzziness: (multi && !phrase) || p === "match",
+    tieBreaker: multi,
+    slop: p === "match_phrase" || phrase,
+  };
+}
+
+function onParserChange() {
+  const es = isES();
+  if (!es) {
+    const p = $("q-parser").value, semantic = p === "semantic";
+    $("q-qf-wrap").style.display = (p === "lucene" || semantic) ? "none" : "";
+    $("q-vec-wrap").style.display = semantic ? "" : "none";
+    $("q-model-row").style.display = semantic ? "" : "none";
+    if (semantic) refreshModel();
+    return;
+  }
+  const a = esApplies();
+  $("q-qf-wrap").style.display = a.fields ? "" : "none";
+  $("q-field-wrap").style.display = a.field ? "" : "none";
+  $("q-vec-wrap").style.display = a.semantic ? "" : "none";
+  $("q-model-row").style.display = a.semantic ? "" : "none";
+
+  const show = (el, on) => { el.style.display = on ? "" : "none"; };
+  show($("q-mm-row"), a.mmType || a.operator || a.msm);
+  show($("q-mmtype").parentElement, a.mmType);
+  show($("q-operator").parentElement, a.operator);
+  show($("q-msm").parentElement, a.msm);
+  show($("q-fuzzy-row"), a.fuzziness || a.tieBreaker || a.slop);
+  show($("q-fuzziness").parentElement, a.fuzziness);
+  show($("q-tiebreak").parentElement, a.tieBreaker);
+  show($("q-slop").parentElement, a.slop);
+
+  if (a.semantic) refreshModel();
+  scheduleDsl();
+}
 
 async function loadFields(collection) {
   if (!collection || demo) return;
@@ -1488,14 +1703,19 @@ async function loadFields(collection) {
   } catch (e) { /* leave the pickers as they were */ }
 }
 
-$("q-parser").addEventListener("change", () => {
-  const p = $("q-parser").value, semantic = p === "semantic";
-  // qf is a dismax/edismax concept; showing it under lucene invites confusion
-  $("q-qf-wrap").style.display = (p === "lucene" || semantic) ? "none" : "";
-  $("q-vec-wrap").style.display = semantic ? "" : "none";
-  $("q-model-row").style.display = semantic ? "" : "none";
-  if (semantic) refreshModel();
-});
+$("q-parser").addEventListener("change", onParserChange);
+$("q-mmtype").addEventListener("change", onParserChange);
+
+// every control feeds the preview, so they all nudge it
+for (const id of ["q-q", "q-qf", "q-field", "q-fq", "q-rows", "q-sort", "q-fl",
+                  "q-vecfield", "q-operator", "q-msm", "q-fuzziness",
+                  "q-tiebreak", "q-slop", "q-from", "q-highlight",
+                  "q-minscore", "q-facet-limit", "q-tth"]) {
+  const el = $(id);
+  if (!el) continue;
+  el.addEventListener("input", scheduleDsl);
+  el.addEventListener("change", scheduleDsl);
+}
 
 /* ---------- embedding model ----------
    One control, in Controls -> Add documents, since that's where you need a
@@ -1577,6 +1797,7 @@ function renderFacetChips() {
       renderFacetChips();
     });
   }
+  scheduleDsl();      // facets are aggs in the body, so the preview moves
 }
 
 $("btn-addfacet").addEventListener("click", () => {
@@ -1586,21 +1807,8 @@ $("btn-addfacet").addEventListener("click", () => {
 });
 
 $("btn-runquery").addEventListener("click", async () => {
-  const body = {
-    collection: coll(),
-    q: $("q-q").value,
-    parser: $("q-parser").value === "semantic" ? "lucene" : $("q-parser").value,
-    semantic: $("q-parser").value === "semantic",
-    vector_field: $("q-vecfield").value,
-    qf: $("q-qf").value,
-    rows: Number($("q-rows").value),
-    sort: $("q-sort").value,
-    fl: $("q-fl").value,
-    fq: $("q-fq").value.split("\n"),
-    facet_fields: facetFields,
-    facet_limit: Number($("q-facet-limit").value),
-    explain: $("q-explain").checked,
-  };
+  const body = queryBody();
+  body.explain = $("q-explain").checked;
   $("q-summary").textContent = "running…";
   const out = await post("/api/query", body);
   if (!out.ok) {
@@ -1616,11 +1824,14 @@ $("btn-runquery").addEventListener("click", async () => {
 });
 
 function queryBody() {
-  return {
+  const p = $("q-parser").value, semantic = p === "semantic";
+  const body = {
     collection: coll(),
     q: $("q-q").value,
-    parser: $("q-parser").value === "semantic" ? "lucene" : $("q-parser").value,
-    semantic: $("q-parser").value === "semantic",
+    // the Solr spelling still goes along, so the Solr engine and saved
+    // queries keep working unchanged
+    parser: semantic ? "lucene" : (isES() ? "lucene" : p),
+    semantic,
     vector_field: $("q-vecfield").value,
     qf: $("q-qf").value,
     rows: Number($("q-rows").value),
@@ -1630,6 +1841,57 @@ function queryBody() {
     facet_fields: facetFields,
     facet_limit: Number($("q-facet-limit").value),
   };
+  if (!isES()) return body;
+
+  // ES/OS: name the clause outright and carry its own parameters, rather
+  // than routing everything through a parser name it does not have. Only
+  // the parameters this clause understands go in — a hidden control must
+  // not quietly break the query it is no longer part of.
+  const a = esApplies();
+  body.qtype = semantic ? "knn" : p;
+  if (a.fields) body.fields = $("q-qf").value;
+  if (a.field) body.field = $("q-field").value;
+  if (a.mmType) body.mm_type = $("q-mmtype").value;
+  if (a.operator) body.operator = $("q-operator").value;
+  if (a.msm) body.minimum_should_match = $("q-msm").value;
+  if (a.fuzziness) body.fuzziness = $("q-fuzziness").value;
+  if (a.tieBreaker) body.tie_breaker = $("q-tiebreak").value;
+  if (a.slop) body.slop = $("q-slop").value;
+  body.from = $("q-from").value;
+  body.highlight = $("q-highlight").value;
+  body.min_score = $("q-minscore").value;
+  body.track_total_hits = $("q-tth").checked;
+  return body;
+}
+
+/* ---------- live DSL preview ----------
+   Every control in the form is a key in the body that gets sent. Showing
+   that body as it is built is the difference between "there is a fuzziness
+   dropdown" and "fuzziness is a key on the multi_match clause". */
+
+let dslTimer = null;
+
+function scheduleDsl() {
+  if (!isES()) return;
+  clearTimeout(dslTimer);
+  dslTimer = setTimeout(refreshDsl, 250);   // per keystroke, so debounce it
+}
+
+async function refreshDsl() {
+  if (!isES() || demo) return;
+  try {
+    const out = await post("/api/query/preview", queryBody());
+    const err = $("q-dsl-err");
+    if (!out.ok) {
+      // a half-typed value is normal here; keep the last good body visible
+      // and say what is wrong rather than blanking the panel
+      err.textContent = out.error || "cannot build this query yet";
+      err.style.display = "";
+      return;
+    }
+    err.style.display = "none";
+    $("q-dsl").textContent = JSON.stringify(out.request, null, 2);
+  } catch (e) { /* keep whatever is on screen */ }
 }
 
 $("btn-queryload").addEventListener("click", async () => {
@@ -1992,7 +2254,11 @@ $("btn-addreplica").addEventListener("click", async () => {
 
 function render(snap) {
   const t = snap.ts;
+  const prevEngine = lastSnap && lastSnap.spec && lastSnap.spec.engine;
   lastSnap = snap;
+  // the form can only be shaped once the snapshot says which engine is
+  // running, which is after the page has already been built
+  if (snap.spec && snap.spec.engine !== prevEngine) applyEngineToQueryForm();
   $("hmeta").textContent =
     `${snap.spec.engine} ${snap.spec.solr_version} · ${snap.spec.solr_nodes} nodes · heap ${snap.spec.heap}`;
 

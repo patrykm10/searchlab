@@ -444,6 +444,33 @@ class ActionRunner:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def preview_query(self, collection: str, body: dict) -> dict:
+        """What the builder would send, without sending it.
+
+        This runs on every keystroke, so it never touches the cluster and a
+        half-typed value reports its own complaint rather than an error the
+        user has to decode.
+        """
+        mod = self._query_module()
+        preview = getattr(mod, "preview_body", None)
+        if preview is None:
+            # Solr sends params, not a body; the request line is the preview
+            return {"ok": True, "kind": "params",
+                    "request": mod.build_params(dict(body, wt="json"))}
+
+        embedder = None
+        if body.get("semantic"):
+            from . import embeddings as emb
+
+            if emb.available() and self._model_name in emb.loaded_names():
+                embedder = emb.get(self._model_name)
+        try:
+            return {"ok": True, "kind": "dsl",
+                    "url": f"POST /{collection or '<index>'}/_search",
+                    "request": preview(body, embedder)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
     # --------------------------------------------------------- collections --
 
     def create_collection(self, name: str, shards: int, replicas: int) -> dict:

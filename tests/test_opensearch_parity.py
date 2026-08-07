@@ -739,3 +739,135 @@ async def test_topology_offers_split_targets_for_its_current_shard_count(mock_sh
     assert out["split"]["current"] == 2
     assert out["split"]["targets"][:2] == [4, 6]
     assert "read-only" in out["split"]["note"]
+
+
+# ------------------------------------------------- native DSL parameters ---
+
+def test_multi_match_type_is_carried_because_it_changes_the_query():
+    """best_fields / most_fields / cross_fields are genuinely different
+    queries behind one name, so the type has to reach the clause."""
+    body = query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                                "fields": "title^3 body",
+                                "mm_type": "cross_fields", "operator": "AND"})
+    mm = body["query"]["multi_match"]
+    assert mm["type"] == "cross_fields"
+    assert mm["fields"] == ["title^3", "body"]
+    assert mm["operator"] == "AND"
+
+
+def test_only_the_parameters_that_were_set_appear_in_the_body():
+    """A preview full of defaults teaches nothing about what was asked for."""
+    body = query_os.build_body({"q": "shoes", "qtype": "multi_match",
+                                "fields": "title"})
+    assert body["query"]["multi_match"] == {"query": "shoes",
+                                            "fields": ["title"]}
+    assert "from" not in body and "highlight" not in body
+    assert "min_score" not in body and "track_total_hits" not in body
+
+
+@pytest.mark.parametrize("qtype,clause", [
+    ("match", "match"), ("match_phrase", "match_phrase"), ("term", "term"),
+])
+def test_single_field_clauses_target_the_named_field(qtype, clause):
+    body = query_os.build_body({"q": "shoes", "qtype": qtype, "field": "title"})
+    assert clause in body["query"]
+    assert "title" in body["query"][clause]
+
+
+def test_a_single_field_clause_without_a_field_says_so():
+    with pytest.raises(ValueError, match="needs one field"):
+        query_os.build_body({"q": "shoes", "qtype": "match"})
+
+
+def test_a_bare_match_stays_bare_but_grows_when_parameters_are_added():
+    """{"match": {"title": "shoes"}} is the readable form; the long form is
+    only worth it once there is something to say."""
+    plain = query_os.build_body({"q": "shoes", "qtype": "match",
+                                 "field": "title"})
+    assert plain["query"]["match"] == {"title": "shoes"}
+
+    tuned = query_os.build_body({"q": "shoes", "qtype": "match",
+                                 "field": "title", "fuzziness": "AUTO"})
+    assert tuned["query"]["match"] == {"title": {"query": "shoes",
+                                                 "fuzziness": "AUTO"}}
+
+
+def test_fuzziness_on_a_phrase_type_is_refused_with_the_reason():
+    """The engine rejects it as a shard failure; saying it up front is the
+    difference between a sentence and a stack trace."""
+    with pytest.raises(ValueError, match="matches terms in sequence"):
+        query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                             "mm_type": "phrase", "fuzziness": "AUTO"})
+
+
+def test_slop_only_reaches_the_clauses_that_understand_it():
+    phrase = query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                                  "mm_type": "phrase", "slop": 2})
+    assert phrase["query"]["multi_match"]["slop"] == 2
+    # best_fields has no notion of slop, so it must not be sent one
+    best = query_os.build_body({"q": "red shoes", "qtype": "multi_match",
+                                "mm_type": "best_fields", "slop": 2})
+    assert "slop" not in best["query"]["multi_match"]
+
+
+def test_track_total_hits_is_offered_because_counts_stop_being_exact():
+    body = query_os.build_body({"q": "shoes", "track_total_hits": True})
+    assert body["track_total_hits"] is True
+
+
+def test_highlight_accepts_either_separator():
+    body = query_os.build_body({"q": "shoes", "highlight": "title, body"})
+    assert body["highlight"] == {"fields": {"title": {}, "body": {}}}
+
+
+def test_paging_beyond_the_result_window_is_refused():
+    assert query_os.build_body({"q": "a", "from": 20})["from"] == 20
+    with pytest.raises(ValueError, match="From must be between"):
+        query_os.build_body({"q": "a", "from": 10_001})
+
+
+@pytest.mark.parametrize("field,value,msg", [
+    ("tie_breaker", 5, "Tie breaker"),
+    ("operator", "MAYBE", "Operator"),
+    ("fuzziness", "9", "Fuzziness"),
+    ("mm_type", "nonsense", "multi_match type"),
+    ("qtype", "nonsense", "Query type"),
+])
+def test_bad_values_are_named_rather_than_passed_through(field, value, msg):
+    with pytest.raises(ValueError, match=msg):
+        query_os.build_body({"q": "a", "qtype": "multi_match", field: value})
+
+
+# ------------------------------------------------------------- preview ----
+
+def test_the_preview_abbreviates_vectors_so_the_shape_stays_readable():
+    """A 384-float vector *is* the preview otherwise, and the shape is the
+    point — not the numbers."""
+    body = query_os.preview_body(
+        {"q": "quiet mouse", "semantic": True, "vector_field": "vec"},
+        embedder=_LongEmbedder())
+    vector = body["query"]["knn"]["vec"]["vector"]
+    assert len(vector) == 4
+    assert vector[-1] == "…384 floats"
+
+
+def test_a_semantic_query_can_be_previewed_before_a_model_is_loaded():
+    """The preview exists to show which clause the controls build; refusing
+    to draw it until a 90 MB download finishes withholds exactly that."""
+    body = query_os.preview_body({"q": "quiet mouse", "semantic": True})
+    assert "knn" in body["query"]
+    assert body["query"]["knn"]["vec"]["vector"] == [
+        "<vector from the embedding model>"]
+
+
+def test_running_a_query_still_needs_a_real_model():
+    """Previewing with a placeholder must not make it look runnable."""
+    with pytest.raises(ValueError, match="Load an embedding model"):
+        query_os.build_body({"q": "quiet mouse", "semantic": True})
+
+
+class _LongEmbedder:
+    dims = 384
+
+    def embed_one(self, text):
+        return [0.0123456] * 384
