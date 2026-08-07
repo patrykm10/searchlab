@@ -382,7 +382,13 @@ async def test_segments_can_be_narrowed_to_one_shard(mock_shards):
 
     assert out["summary"]["count"] == 1
     assert out["core"] == "products shard 1"
-    assert all("shard 1" in s["name"] for s in out["segments"])
+    # the shard is already named in the header, so the rows do not repeat it
+    assert out["segments"][0]["name"] == "_0"
+
+    whole = await asyncio.to_thread(index_segments, spec, "products")
+    # across shards the names collide (_0 exists in both), so they are tagged
+    assert {s["name"] for s in whole["segments"]} == {
+        "_0 (shard 0)", "_1 (shard 0)", "_0 (shard 1)"}
 
 
 async def test_deleted_documents_are_reported_as_a_share_of_the_segment(mock_shards):

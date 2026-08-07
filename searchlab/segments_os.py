@@ -87,7 +87,10 @@ def index_segments(spec: ClusterSpec, index: str, shard: str | None = None,
                 total = live + deleted
                 lucene = lucene or seg.get("version")
                 segments.append({
-                    "name": f"{name} (shard {shard_id})",
+                    # segment names are only unique within a shard, so say
+                    # which one — unless the whole view is already one shard
+                    "name": name if shard is not None
+                            else f"{name} (shard {shard_id})",
                     "docs": live,
                     "deleted": deleted,
                     "deleted_pct": round(deleted / total * 100, 1) if total else 0.0,

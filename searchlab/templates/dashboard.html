@@ -1778,10 +1778,13 @@ async function showSegments(core) {
       stats.push(["index version", String(lu.index_version),
         "Increments on every commit that changes the index."]);
   }
+  // ES/OS do not report when a segment was written, so the column would be
+  // a full row of dashes — drop it rather than show an empty column
+  const anyAge = out.segments.some(g => g.age);
   $("segcell").innerHTML = `
     <div class="segwrap">
       <div class="segsum">
-        <b>${esc(core)}</b> &middot; ${s.count} segments &middot; ${esc(s.size)}
+        <b>${esc(out.core || core)}</b> &middot; ${s.count} segments &middot; ${esc(s.size)}
         &middot; ${Number(s.docs).toLocaleString()} live docs
         ${s.deleted ? `&middot; <span class="segdel">${Number(s.deleted).toLocaleString()}
           deleted (${s.deleted_pct}%)</span>` : ""}
@@ -1794,7 +1797,8 @@ async function showSegments(core) {
         <summary>${s.count} segments in detail</summary>
         <table class="segtable">
           <tr><th>Segment</th><th class="num">Live docs</th><th class="num">Deleted</th>
-              <th class="num">Size</th><th>Source</th><th>Written</th></tr>
+              <th class="num">Size</th><th>Source</th>
+              ${anyAge ? "<th>Written</th>" : ""}</tr>
           ${out.segments.map(g => `<tr>
             <td>${esc(g.name)}</td>
             <td class="num">${Number(g.docs).toLocaleString()}</td>
@@ -1802,7 +1806,8 @@ async function showSegments(core) {
               g.deleted ? Number(g.deleted).toLocaleString() + ` (${g.deleted_pct}%)` : "—"}</td>
             <td class="num">${esc(g.size)}</td>
             <td>${esc(g.source)}</td>
-            <td class="segage">${g.age ? esc(String(g.age).replace("T", " ").slice(0, 19)) : "—"}</td>
+            ${anyAge ? `<td class="segage">${g.age
+              ? esc(String(g.age).replace("T", " ").slice(0, 19)) : "—"}</td>` : ""}
           </tr>`).join("")}
         </table>
         <!-- the engine supplies its own explanation: Solr reports where a
