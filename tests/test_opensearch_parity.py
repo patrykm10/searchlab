@@ -635,3 +635,107 @@ def test_a_bulk_error_surfaces_the_real_reason():
         "error": {"reason": "failed to parse",
                   "caused_by": {"reason": "expected 8 dimensions, got 4"}}}}]}
     assert vectorize_os._first_bulk_error(body) == "expected 8 dimensions, got 4"
+
+
+# ---------------------------------------------------------------- split ---
+
+def test_split_targets_are_only_the_multiples_the_api_accepts():
+    """The API requires the source count to be a factor of the target, so
+    offering anything else just produces a rejection to read."""
+    from searchlab.topology_os import split_targets
+
+    assert split_targets(2)[:4] == [4, 6, 8, 10]
+    assert split_targets(3)[:3] == [6, 9, 12]
+    assert all(n % 5 == 0 for n in split_targets(5))
+    # splitting has to increase the count, so the current value is not offered
+    assert 2 not in split_targets(2)
+
+
+@pytest.fixture
+async def mock_split(aiohttp_server):
+    state = {"blocked": False, "split": None, "shards": 2, "fail": False}
+
+    async def settings_get(request):
+        return web.json_response({"idx": {"settings": {"index": {
+            "number_of_shards": str(state["shards"])}}}})
+
+    async def settings_put(request):
+        body = await request.json()
+        if body.get("index.blocks.write"):
+            state["blocked"] = True
+        return web.json_response({"acknowledged": True})
+
+    async def split(request):
+        if state["fail"]:
+            return web.json_response(
+                {"error": {"reason": "target index already exists"}}, status=400)
+        state["split"] = (request.match_info["target"], await request.json())
+        return web.json_response({"acknowledged": True,
+                                  "shards_acknowledged": True})
+
+    app = web.Application()
+    app.router.add_get("/idx/_settings", settings_get)
+    app.router.add_put("/idx/_settings", settings_put)
+    app.router.add_post("/idx/_split/{target}", split)
+    server = await aiohttp_server(app)
+    server.state = state
+    return server
+
+
+async def test_split_blocks_writes_first_because_the_api_demands_it(mock_split):
+    from searchlab.topology_os import split_index
+
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    out = await asyncio.to_thread(split_index, spec, "idx", 4)
+
+    assert mock_split.state["blocked"] is True
+    target, body = mock_split.state["split"]
+    assert target == "idx_s4"
+    assert body["settings"]["index.number_of_shards"] == 4
+    assert out["from_shards"] == 2 and out["to_shards"] == 4
+
+
+async def test_a_non_multiple_is_refused_before_the_index_goes_read_only(mock_split):
+    """Blocking writes and *then* failing would leave the index unable to
+    take writes for no reason at all."""
+    from searchlab.topology_os import split_index
+
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    with pytest.raises(ValueError, match="multiple of 2"):
+        await asyncio.to_thread(split_index, spec, "idx", 3)
+    assert mock_split.state["blocked"] is False
+
+
+async def test_splitting_to_the_same_or_fewer_shards_is_refused(mock_split):
+    from searchlab.topology_os import split_index
+
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    with pytest.raises(ValueError, match="already has 2 shards"):
+        await asyncio.to_thread(split_index, spec, "idx", 2)
+    assert mock_split.state["blocked"] is False
+
+
+async def test_a_failed_split_says_the_index_is_now_read_only(mock_split):
+    """By the time the split is attempted the writes are already blocked.
+    Reporting only the API's reason would leave the user with an index that
+    quietly stopped accepting writes."""
+    from searchlab.topology_os import split_index
+
+    mock_split.state["fail"] = True
+    spec = ClusterSpec(base_port=mock_split.port, engine="opensearch")
+    with pytest.raises(RuntimeError) as e:
+        await asyncio.to_thread(split_index, spec, "idx", 4)
+
+    assert "already exists" in str(e.value)          # the real reason
+    assert "read-only now" in str(e.value)           # and the consequence
+    assert "index.blocks.write" in str(e.value)      # and how to undo it
+
+
+async def test_topology_offers_split_targets_for_its_current_shard_count(mock_shards):
+    from searchlab.topology_os import index_topology
+
+    spec = ClusterSpec(base_port=mock_shards.port, engine="opensearch")
+    out = await asyncio.to_thread(index_topology, spec, "products")
+    assert out["split"]["current"] == 2
+    assert out["split"]["targets"][:2] == [4, 6]
+    assert "read-only" in out["split"]["note"]

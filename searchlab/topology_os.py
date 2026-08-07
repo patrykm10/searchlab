@@ -40,6 +40,15 @@ NOTE = ("Replica placement is not per-shard here the way it is in Solr: "
         "copy will not share a node with itself.")
 
 
+SPLIT_NOTE = ("Splitting works differently here. Solr divides one shard "
+              "in place and the collection keeps taking writes. OpenSearch "
+              "copies the <i>whole index</i> into a new one with more "
+              "shards, and the original has to stop accepting writes "
+              "first — so this is a migration, not an adjustment. The "
+              "original is left behind, still read-only, so you can check "
+              "the new index before pointing anything at it.")
+
+
 def _int(v) -> int | None:
     try:
         return int(v)
@@ -96,4 +105,80 @@ def index_topology(spec: ClusterSpec, index: str, timeout: float = 15.0) -> dict
             }
         shards[f"shard {sid}"] = {"state": shard_state, "replicas": replicas}
 
-    return {"shards": shards, "manage": False, "note": NOTE}
+    current = len(shards)
+    return {"shards": shards, "manage": False, "note": NOTE,
+            # splitting is offered, but as its own operation with its own
+            # explanation — it is not the Solr button under a new label.
+            # Only the first few multiples: a lab cluster splitting into 64
+            # shards is a menu full of answers nobody wants.
+            "split": {"current": current,
+                      "targets": split_targets(current)[:5],
+                      "note": SPLIT_NOTE}}
+
+
+def shard_count(spec: ClusterSpec, index: str, timeout: float = 15.0) -> int:
+    """How many primary shards the index has now."""
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(f"{spec.base_url()}/{index}/_settings")
+        r.raise_for_status()
+        block = next(iter(r.json().values()), {})
+    return int((block.get("settings") or {}).get("index", {})
+               .get("number_of_shards", 1))
+
+
+def split_targets(current: int, limit: int = 64) -> list[int]:
+    """Shard counts an index of `current` shards can be split into.
+
+    The API requires the source count to be a factor of the target, so
+    offering anything else just produces a rejection the user has to read.
+    """
+    return [n for n in range(current * 2, limit + 1) if n % current == 0]
+
+
+def split_index(spec: ClusterSpec, index: str, target_shards: int,
+                target_name: str | None = None, timeout: float = 900.0) -> dict:
+    """Copy `index` into a new index with more shards.
+
+    The source is put into read-only mode first, because the API refuses
+    to resize an index that is still taking writes — and it is left that
+    way afterwards rather than silently reopened, so the new index can be
+    checked before anything is pointed at it.
+    """
+    current = shard_count(spec, index)
+    if target_shards <= current:
+        raise ValueError(
+            f"“{index}” already has {current} shards; splitting has to "
+            f"increase that.")
+    if target_shards % current:
+        raise ValueError(
+            f"{current} shards can only be split into a multiple of "
+            f"{current} — {target_shards} is not one. Try "
+            f"{', '.join(str(n) for n in split_targets(current)[:4])}.")
+
+    target = target_name or f"{index}_s{target_shards}"
+    base = spec.base_url()
+    with httpx.Client(timeout=timeout) as client:
+        r = client.put(f"{base}/{index}/_settings",
+                       json={"index.blocks.write": True})
+        r.raise_for_status()
+        r = client.post(f"{base}/{index}/_split/{target}",
+                        json={"settings": {"index.number_of_shards": target_shards}})
+        if r.status_code >= 400:
+            # the source is already read-only at this point; say so, or the
+            # user is left with an index that quietly stopped taking writes
+            raise RuntimeError(
+                f"{_reason(r)} “{index}” is read-only now — clear "
+                f"index.blocks.write to let it take writes again.")
+        body = r.json()
+
+    return {"source": index, "target": target,
+            "from_shards": current, "to_shards": target_shards,
+            "acknowledged": bool(body.get("acknowledged"))}
+
+
+def _reason(resp) -> str:
+    try:
+        err = resp.json().get("error") or {}
+        return (err.get("reason") or str(err)).rstrip(".") + "."
+    except ValueError:
+        return f"Split failed ({resp.status_code})."

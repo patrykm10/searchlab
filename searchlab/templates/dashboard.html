@@ -665,6 +665,12 @@ section.collapsed h2 { margin-bottom: 0; }
     </select>
     <button class="btn" id="btn-addreplica">Add replica</button>
   </div>
+  <div class="topo-controls" id="topo-ossplitrow" style="display:none">
+    <label for="topo-osshards">Split index into</label>
+    <select id="topo-osshards"></select>
+    <button class="btn" id="btn-ossplit">Split index</button>
+  </div>
+  <p class="desc" id="topo-ossplitnote" style="display:none"></p>
   <div class="topo-controls" id="topo-splitrow">
     <label for="topo-split">Split shard</label>
     <select id="topo-split"></select>
@@ -842,6 +848,7 @@ const INKS = ["#14161a", "#2743c7", "#5b6068", "#9aa0a8"];
 const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [], gc: {}, seg: {} };
 const prevGC = {};      // node -> [ts, cumulative gc ms] for rate deltas
 let lastSnap = null;    // latest snapshot, reused by the topology renderer
+let maintBusy = false;  // a maintenance job is running, set by the snapshot poll
 const chartMeta = {};   // canvas id -> data for hover hit-testing
 let lastOk = 0, logCursor = 0, demo = false, dragging = false, rpsDebounce = null;
 
@@ -1153,6 +1160,7 @@ function renderControls(a) {
   $("index-status").className = idx.running ? "statusline on" : "statusline";
   // one collection-wide maintenance job at a time, so they gate together
   const busy = !!a.maintenance;
+  maintBusy = busy;               // the topology poll gates its split on this
   $("btn-optimize").disabled = busy;
   $("btn-optimize").textContent = busy ? "Working…" : "Merge segments";
   $("btn-expunge").disabled = busy;
@@ -1914,6 +1922,23 @@ async function pollTopology() {
     if (out.note) $("topo-note").innerHTML = out.note;
     $("topo-addrow").style.display = manage ? "" : "none";
     $("topo-splitrow").style.display = manage ? "" : "none";
+    // ES/OS splitting is a different operation, so it gets its own control
+    // rather than the Solr button under a new label
+    const sp = out.split;
+    $("topo-ossplitrow").style.display = sp && sp.targets.length ? "" : "none";
+    $("topo-ossplitnote").style.display = sp && sp.targets.length ? "" : "none";
+    if (sp && sp.targets.length) {
+      $("topo-ossplitnote").innerHTML = sp.note || "";
+      const osel = $("topo-osshards");
+      const opts = sp.targets.join();
+      if (osel.dataset.opts !== opts) {
+        osel.dataset.opts = opts;
+        osel.innerHTML = sp.targets.map(n =>
+          `<option value="${n}">${n} shards</option>`).join("");
+      }
+      $("btn-ossplit").disabled = !!maintBusy;
+      $("btn-ossplit").textContent = maintBusy ? "Working…" : "Split index";
+    }
     if (!manage) return;
     const ssel = $("topo-shard");
     if (ssel.dataset.opts !== shardNames.join()) {
@@ -1932,6 +1957,20 @@ async function pollTopology() {
     $("btn-splitshard").textContent = busy ? "Working…" : "Split shard";
   } catch (e) { /* retry next tick */ }
 }
+
+$("btn-ossplit").addEventListener("click", async () => {
+  const n = $("topo-osshards").value;
+  // the source stops taking writes and stays that way, so this is not a
+  // click to make by accident
+  if (!confirm(`Copy “${coll()}” into a new index with ${n} shards?\n\n`
+      + `“${coll()}” stops accepting writes to do it, and stays read-only `
+      + `afterwards so you can check the result first.`)) return;
+  const out = await post("/api/index/split", { collection: coll(), shards: n });
+  if (out.ok) showStrip("Splitting " + coll() + " into " + n
+    + " shards — this copies every document, so give it a moment…", false);
+  poll();
+  setTimeout(pollTopology, 2000);
+});
 
 $("btn-splitshard").addEventListener("click", async () => {
   const shard = $("topo-split").value;

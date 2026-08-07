@@ -596,6 +596,34 @@ class ActionRunner:
             f"Split {shard} into two sub-shards — the original is now inactive.",
             lambda: cl.split_shard(self.spec, collection, shard))
 
+    def split_index(self, collection: str, target_shards) -> dict:
+        """The ES/OS counterpart of splitting: copy the index into a new one
+        with more shards. Not the same operation as Solr's, so it is not the
+        same button — see topology_os.SPLIT_NOTE."""
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if self.spec.engine == "solr":
+            return {"ok": False,
+                    "error": "Solr splits a single shard — use Split shard."}
+        try:
+            target = int(target_shards)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Pick how many shards to split into."}
+
+        from .topology_os import split_index
+
+        def job():
+            out = split_index(self.spec, collection, target)
+            return (f"Split “{out['source']}” into “{out['target']}” with "
+                    f"{out['to_shards']} shards. The original still has its "
+                    f"documents but is read-only now — clear "
+                    f"index.blocks.write once you no longer need it.")
+
+        # a maintenance job, not a replica job: it is slow, index-wide, and
+        # its message is only known once it has run
+        return self._maintenance_job(collection, "split_index",
+                                     "Split finished.", job)
+
     def remove_replica(self, collection: str, shard: str, replica: str) -> dict:
         if not collection or not shard or not replica:
             return {"ok": False, "error": "Pick a replica to remove first."}
