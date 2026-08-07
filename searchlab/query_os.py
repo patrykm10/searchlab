@@ -307,6 +307,48 @@ def _put(target: dict, key: str, value) -> None:
         target[key] = value
 
 
+def _sorts(body: dict) -> list:
+    """Sort keys, structured or in Solr's "field desc" spelling.
+
+    ES sorts on several keys, each its own object — so this is a list, not
+    the single key the text box could express.
+    """
+    out = []
+    for entry in body.get("sorts") or []:
+        if not isinstance(entry, dict):
+            continue
+        field = (entry.get("field") or "").strip()
+        if not field:
+            continue
+        order = (entry.get("order") or "asc").strip().lower()
+        if order not in ("asc", "desc"):
+            raise ValueError("Sort order must be asc or desc.")
+        out.append({field: {"order": order}})
+    if out:
+        return out
+
+    raw = (body.get("sort") or "").strip()
+    if not raw:
+        return []
+    # Solr's spelling, one key per comma: "price desc, name asc"
+    for chunk in raw.split(","):
+        parts = chunk.split()
+        if not parts:
+            continue
+        out.append({parts[0]: {"order": parts[1]}} if len(parts) > 1
+                   else parts[0])
+    return out
+
+
+def _source_fields(body: dict) -> list[str]:
+    """Which fields come back. A list either way; the UI sends one already."""
+    raw = body.get("source_fields")
+    if isinstance(raw, list):
+        return [str(f).strip() for f in raw if str(f).strip()]
+    fl = (body.get("fl") or "").strip()
+    return [f.strip() for f in fl.split(",") if f.strip()] if fl else []
+
+
 def _highlight(body: dict) -> dict | None:
     raw = (body.get("highlight") or "").strip()
     if not raw:
@@ -344,15 +386,12 @@ def build_body(body: dict, embedder=None) -> dict:
         if parts.get("should") and not (parts.get("must") or parts.get("filter")):
             out["query"]["bool"]["minimum_should_match"] = 1
 
-    sort = (body.get("sort") or "").strip()
-    if sort:
-        # accept Solr's "field desc" spelling and translate it
-        parts = sort.split()
-        out["sort"] = [{parts[0]: {"order": parts[1]}} if len(parts) > 1
-                       else parts[0]]
-    fl = (body.get("fl") or "").strip()
+    sorts = _sorts(body)
+    if sorts:
+        out["sort"] = sorts
+    fl = _source_fields(body)
     if fl:
-        out["_source"] = [f.strip() for f in fl.split(",") if f.strip()]
+        out["_source"] = fl
 
     facets = [f for f in (body.get("facet_fields") or []) if f]
     if facets:

@@ -983,3 +983,38 @@ def test_raw_fq_lines_still_work_alongside_the_menus():
         {"term": {"cat": {"value": "toys"}}},
         {"query_string": {"query": "price:[1 TO 5]"}},
     ]
+
+
+# --------------------------------------------------- sort and _source ------
+
+def test_several_sort_keys_because_es_breaks_ties_with_the_next_one():
+    body = query_os.build_body({"sorts": [
+        {"field": "price", "order": "desc"}, {"field": "name", "order": "asc"}]})
+    assert body["sort"] == [{"price": {"order": "desc"}},
+                            {"name": {"order": "asc"}}]
+
+
+def test_the_solr_sort_spelling_still_parses_including_several_keys():
+    body = query_os.build_body({"sort": "price desc, name asc"})
+    assert body["sort"] == [{"price": {"order": "desc"}},
+                            {"name": {"order": "asc"}}]
+
+
+def test_a_half_chosen_sort_key_is_skipped_rather_than_sent_empty():
+    body = query_os.build_body({"sorts": [{"field": "", "order": "asc"},
+                                          {"field": "price", "order": "asc"}]})
+    assert body["sort"] == [{"price": {"order": "asc"}}]
+
+
+def test_a_bad_sort_order_is_named():
+    with pytest.raises(ValueError, match="asc or desc"):
+        query_os.build_body({"sorts": [{"field": "price", "order": "sideways"}]})
+
+
+def test_source_fields_come_from_the_picker_or_the_old_comma_string():
+    assert query_os.build_body(
+        {"source_fields": ["id", "title"]})["_source"] == ["id", "title"]
+    assert query_os.build_body(
+        {"fl": "id, title"})["_source"] == ["id", "title"]
+    # nothing chosen means the whole document, so no _source key at all
+    assert "_source" not in query_os.build_body({"source_fields": []})

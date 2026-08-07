@@ -912,6 +912,31 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
     </div>
 
+    <!-- ES/OS: sorting on an analysed text field fails the same way
+         aggregating on one does, so the picker only offers fields that can
+         actually be sorted. ES also sorts on several keys, which the single
+         text box could not say. -->
+    <div class="qrow esonly" id="q-sort-row" style="display:none">
+      <label>Sort</label>
+      <div id="q-sorts"></div>
+      <div class="frow" style="margin-top:8px">
+        <button class="btn preset" id="btn-addsort">Add sort key</button>
+        <span class="desc" style="margin:0">ties are broken by the next key
+          down — with none of them set, hits come back by score</span>
+      </div>
+    </div>
+
+    <div class="qrow esonly" id="q-src-row" style="display:none">
+      <label for="q-src">_source — fields to return</label>
+      <div class="frow" style="margin-bottom:8px">
+        <select id="q-src"><option value="">choose a field…</option></select>
+        <button class="btn preset" id="btn-addsrc">Add field</button>
+        <span class="desc" style="margin:0">with none chosen the whole
+          document comes back</span>
+      </div>
+      <div id="q-src-chips"></div>
+    </div>
+
     <div class="qrow">
       <label for="q-facet">Facets</label>
       <div class="frow" style="margin-bottom:8px">
@@ -1651,6 +1676,9 @@ function applyEngineToQueryForm() {
   }
   for (const el of document.querySelectorAll(".esonly"))
     el.style.display = es ? "" : "none";
+  // the text boxes these replaced would be two ways to say the same thing
+  $("q-sort").parentElement.style.display = es ? "none" : "";
+  $("q-fl").parentElement.style.display = es ? "none" : "";
   $("q-dsl-wrap").style.display = es ? "" : "none";
   onParserChange();
 }
@@ -1716,7 +1744,11 @@ async function loadFields(collection) {
     const out = await post("/api/fields", { collection });
     if (!out.ok) return;
     allFields = out.fields || [];
+    // every field can be returned, unlike sorting or faceting
+    $("q-src").innerHTML = `<option value="">choose a field…</option>` +
+      allFields.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
     renderConds();          // the field pickers follow the new collection
+    renderSorts();
     // facets only make sense on exact-match fields; analyzed text would
     // bucket by individual token, which is rarely what anyone wants
     const facetable = out.fields.filter(f => !f.text);
@@ -1943,6 +1975,74 @@ $("btn-addcond").addEventListener("click", () => {
   renderConds();
 });
 
+/* ---------- sort keys and _source ----------
+   Both were text boxes. Sorting on an analysed text field fails exactly the
+   way aggregating on one does, so the picker offers only fields that can be
+   sorted — and ES sorts on several keys, which one box could not say. */
+
+const sorts = [];
+const srcFields = [];
+
+function sortableFields() {
+  // same rule as facets: analysed text has no doc values to sort on
+  return allFields.filter(f => !f.text).map(f => f.name);
+}
+
+function renderSorts() {
+  const host = $("q-sorts");
+  if (!host) return;
+  const names = sortableFields();
+  host.innerHTML = sorts.map((s, i) => `<div class="cond" style="grid-template-columns:1fr 130px auto">
+      <select data-i="${i}" data-k="field">
+        <option value="">choose a field…</option>
+        ${names.map(n => `<option${n === s.field ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <select data-i="${i}" data-k="order">
+        <option value="asc"${s.order === "asc" ? " selected" : ""}>ascending</option>
+        <option value="desc"${s.order === "desc" ? " selected" : ""}>descending</option>
+      </select>
+      <button class="del" data-del="${i}" title="Remove this sort key">&times;</button>
+    </div>`).join("");
+  for (const el of host.querySelectorAll("[data-k]")) {
+    el.addEventListener("change", () => {
+      sorts[Number(el.dataset.i)][el.dataset.k] = el.value;
+      scheduleDsl();
+    });
+  }
+  for (const b of host.querySelectorAll("[data-del]")) {
+    b.addEventListener("click", () => {
+      sorts.splice(Number(b.dataset.del), 1);
+      renderSorts();
+      scheduleDsl();
+    });
+  }
+  scheduleDsl();
+}
+
+function renderSrcChips() {
+  $("q-src-chips").innerHTML = srcFields.map((f, i) =>
+    `<span class="fchip">${esc(f)}<button data-i="${i}" title="Remove">&times;</button></span>`
+  ).join("");
+  for (const b of $("q-src-chips").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      srcFields.splice(Number(b.dataset.i), 1);
+      renderSrcChips();
+    });
+  }
+  scheduleDsl();
+}
+
+$("btn-addsort").addEventListener("click", () => {
+  const names = sortableFields();
+  sorts.push({field: names[0] || "", order: "desc"});
+  renderSorts();
+});
+
+$("btn-addsrc").addEventListener("click", () => {
+  const f = $("q-src").value;
+  if (f && !srcFields.includes(f)) { srcFields.push(f); renderSrcChips(); }
+  $("q-src").value = "";
+});
+
 const facetFields = [];
 
 function renderFacetChips() {
@@ -2009,6 +2109,8 @@ function queryBody() {
   // a row you are still filling in is not an error, so it sits the query out
   // until it says something
   body.clauses = conds.map(c => ({...c, off: !condReady(c)}));
+  body.sorts = sorts.filter(s => s.field);
+  body.source_fields = srcFields;
   body.qtype = semantic ? "knn" : p;
   if (a.fields) body.fields = $("q-qf").value;
   if (a.field) body.field = $("q-field").value;
