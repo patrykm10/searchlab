@@ -22,15 +22,14 @@ def html():
     return TEMPLATE.read_text()
 
 
-@pytest.fixture(scope="module")
-def help_entries(html):
-    """Pull PARAM_HELP out of the template and parse it.
+def js_object(html, name):
+    """Pull a JS object literal out of the template and parse it.
 
-    The literal is JSON apart from the bare `es:` / `solr:` keys and the
-    trailing commas JS allows, so quote the one and drop the other.
+    These literals are JSON apart from the bare `es:` / `solr:` keys and
+    the trailing commas JS allows, so quote the one and drop the other.
     """
-    start = html.index("const PARAM_HELP = {")
-    body = html[start + len("const PARAM_HELP = "):]
+    start = html.index(f"const {name} = {{")
+    body = html[start + len(f"const {name} = "):]
     depth, end = 0, None
     for i, ch in enumerate(body):
         if ch == "{":
@@ -40,11 +39,26 @@ def help_entries(html):
             if depth == 0:
                 end = i + 1
                 break
-    assert end, "could not find the end of the PARAM_HELP literal"
+    assert end, f"could not find the end of the {name} literal"
     literal = body[:end]
-    literal = re.sub(r"^(\s*)(es|solr):", r'\1"\2":', literal, flags=re.M)
+    literal = re.sub(r"([{,]\s*)(es|solr):", r'\1"\2":', literal)
     literal = re.sub(r",(\s*[}\]])", r"\1", literal)
     return json.loads(literal)
+
+
+@pytest.fixture(scope="module")
+def help_entries(html):
+    return js_object(html, "PARAM_HELP")
+
+
+@pytest.fixture(scope="module")
+def doc_links(html):
+    return js_object(html, "PARAM_DOCS")
+
+
+@pytest.fixture(scope="module")
+def doc_roots(html):
+    return js_object(html, "DOC_ROOT")
 
 
 def test_every_entry_is_reachable_from_a_label(html, help_entries):
@@ -102,6 +116,62 @@ def test_solr_only_and_es_only_params_are_not_given_both(help_entries):
         assert "solr" not in help_entries[key], key
     for key in ["q-sort", "q-fl", "q-facet", "q-facet-limit"]:
         assert "es" not in help_entries[key], key
+
+
+def test_doc_links_point_at_the_official_documentation(doc_roots):
+    """Anything else is someone's blog post, which ages differently from
+    the engine."""
+    assert doc_roots["es"] == "https://docs.opensearch.org/latest/"
+    assert doc_roots["solr"] == "https://solr.apache.org/guide/solr/latest/"
+    for root in doc_roots.values():
+        assert root.startswith("https://") and root.endswith("/")
+
+
+def test_every_documented_parameter_has_help(doc_links, help_entries):
+    """A link with no explanation next to it is a link nobody hovers."""
+    assert not [k for k in doc_links if k not in help_entries]
+
+
+def test_every_parameter_links_to_its_own_engine_docs(doc_links, help_entries):
+    """The rate control is the one thing here that is not an engine
+    parameter, so it is the one thing with nowhere to link."""
+    missing = [f"{key}/{engine}"
+               for key, variants in help_entries.items()
+               for engine in variants
+               if key != "q-load-rps" and engine not in doc_links.get(key, {})]
+    assert not missing, f"no doc link for: {missing}"
+    assert "q-load-rps" not in doc_links
+
+
+def test_doc_paths_are_relative_to_the_root(doc_links):
+    """Paths get concatenated onto DOC_ROOT, so an absolute one would
+    quietly produce a broken URL rather than failing loudly."""
+    for key, variants in doc_links.items():
+        for engine, path in variants.items():
+            assert not path.startswith(("http", "/")), f"{key}/{engine}: {path}"
+            # Solr's guide is generated HTML pages; OpenSearch's is directories
+            if engine == "solr":
+                assert path.endswith(".html"), f"{key}: {path}"
+            else:
+                assert path.endswith("/"), f"{key}: {path}"
+
+
+def test_clicking_a_label_opens_its_docs_without_breaking_checkboxes(html):
+    """Two of these labels wrap their own checkbox — hijacking the click
+    there would stop the box toggling."""
+    handler = html[html.index('label.addEventListener("click"'):]
+    handler = handler[:handler.index("});")]
+    assert 'ev.target.tagName === "INPUT"' in handler
+    assert "ev.preventDefault()" in handler
+    assert 'window.open(url, "_blank", "noopener")' in handler
+
+
+def test_the_card_survives_the_trip_to_its_own_link(html):
+    """The link lives in the card, so leaving the label cannot dismiss it
+    immediately or the link is unreachable."""
+    assert "scheduleHideParamHelp" in html
+    assert 'helpCard.addEventListener("mouseenter"' in html
+    assert 'label.addEventListener("mouseleave", scheduleHideParamHelp)' in html
 
 
 def test_help_is_wired_for_mouse_and_keyboard(html):

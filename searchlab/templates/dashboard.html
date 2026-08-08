@@ -183,17 +183,14 @@ canvas { width: 100%; height: 150px; display: block;
    0), because a select otherwise refuses to go below its longest option and
    covers its neighbour instead. */
 .cond { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-  margin-bottom: 10px; padding-left: 11px;
-  border-left: 2px solid var(--faint); }
-/* a clause that wraps onto a second line still has to read as one clause */
-.cond:focus-within { border-left-color: var(--cobalt); }
+  margin-bottom: 12px; }
 .cond > * { min-width: 0; }
 .cond select, .cond input { width: auto; }
 .cond > select { flex: 1 1 175px; }
 .cond > input { flex: 1 1 165px; }
-.cond > .occur { flex: 0 1 145px; }
+.cond > .occur { flex: 0 1 195px; }   /* fits "must match (scored)" */
 .cond > select[data-k="field"], .cond > select[data-k="sub_field"] { flex: 2 1 200px; }
-.cond > select[data-k="op"] { flex: 0 1 145px; }
+.cond > select[data-k="op"] { flex: 0 1 165px; }  /* fits "contains phrase" */
 .cond > select[data-k="type"] { flex: 1 1 230px; min-width: 220px; }
 .cond > select[data-k="sub_type"] { flex: 1 1 205px; }
 .cond > input[data-k="size"] { flex: 0 1 90px; }
@@ -355,10 +352,16 @@ canvas { width: 100%; height: 150px; display: block;
 .qsplit select, .qsplit3 select,
 .qsplit input, .qsplit3 input { width: 100%; max-width: 100%; }
 
-/* a label that explains itself on hover */
+/* a label that explains itself on hover, and links out on click */
 .hashelp { cursor: help; text-decoration: underline dotted var(--faint);
   text-underline-offset: 3px; }
 .hashelp:hover { color: var(--cobalt); text-decoration-color: var(--cobalt); }
+/* pseudo-element rather than a child node: setLabel() rewrites these
+   labels' textContent when the engine changes, which would eat a span */
+.hashelp.hasdoc { cursor: pointer; }
+.hashelp.hasdoc::after { content: "\2197"; font-size: 9px; margin-left: 3px;
+  vertical-align: 1px; color: var(--faint); }
+.hashelp.hasdoc:hover::after { color: var(--cobalt); }
 #phelp[hidden] { display: none; }
 #phelp { position: fixed; z-index: 40; width: 330px; max-width: calc(100vw - 24px);
   background: #fff; border: 1.5px solid var(--ink); padding: 11px 13px;
@@ -372,6 +375,12 @@ canvas { width: 100%; height: 150px; display: block;
 #phelp .cross { margin-top: 8px; padding-top: 7px;
   border-top: 1px solid var(--line); font-family: var(--mono);
   font-size: 11.5px; line-height: 1.45; color: var(--cobalt); }
+#phelp .doclink { display: inline-block; margin-top: 9px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+  color: var(--ink); text-decoration: none;
+  border-bottom: 1.5px solid var(--line); padding-bottom: 1px; }
+#phelp .doclink::after { content: " \2197"; font-size: 9px; }
+#phelp .doclink:hover { color: var(--cobalt); border-bottom-color: var(--cobalt); }
 
 /* named blocks, so the form reads as four decisions rather than 14 knobs */
 .qgroup { border-top: 1px solid var(--line); padding-top: 16px; margin-bottom: 26px; }
@@ -1005,7 +1014,7 @@ section.collapsed h2 { margin-bottom: 0; }
          actually be sorted. ES also sorts on several keys, which the single
          text box could not say. -->
     <div class="qrow esonly" id="q-sort-row" style="display:none">
-      <label>Sort</label>
+      <label data-help="q-sorts">Sort</label>
       <div id="q-sorts"></div>
       <div class="frow" style="margin-top:8px">
         <button class="btn preset" id="btn-addsort">Add sort key</button>
@@ -1028,7 +1037,7 @@ section.collapsed h2 { margin-bottom: 0; }
    </div>
 
    <div class="qgroup">
-    <h3 class="qglabel"><b id="q-g-agg-name">Aggregations</b>
+    <h3 class="qglabel"><b id="q-g-agg-name" data-help="q-aggs">Aggregations</b>
       <span id="q-g-agg-desc">counted over everything that matched, not just
         the page of hits returned</span></h3>
 
@@ -1870,6 +1879,16 @@ const PARAM_HELP = {
     es: ["Which fields come back on each hit. With none chosen the whole stored document comes back, which is usually far more than the page needs.",
          "Solr: fl"],
   },
+  "q-sorts": {
+    es: ["Sort keys applied in order: the first decides, the next breaks its ties, and so on down. Setting any of them replaces relevance ordering entirely, so score stops affecting the order at all. The picker only offers fields that can be sorted — analysed text has no doc values and fails at query time rather than sorting badly.",
+         "Solr: sort, as one comma-separated string"],
+  },
+  "q-aggs": {
+    es: ["Aggregations run over everything that matched, not the page of hits you asked for. Bucket types group documents and can hold a metric inside them; metric types compute one number. Nesting the second inside the first is how you get the average price per category in a single request.",
+         "Solr: facets, and the JSON Facet API for the nested case"],
+    solr: ["Facets count the values of a field across everything that matched, not just the rows returned. They are what turns a result list into something navigable — categories with counts, price bands, brands.",
+           "OS/ES: aggregations, which also nest metrics inside buckets"],
+  },
   "q-facet": {
     solr: ["Counts the values of this field across everything that matched, not just the rows returned. An analysed text field has no docValues and cannot be faceted — face the string copy of it instead.",
            "OS/ES: a terms aggregation"],
@@ -1895,6 +1914,51 @@ const PARAM_HELP = {
     solr: ["Requests per second, fired open-loop: the generator does not wait for a response before sending the next one. A server that slows down therefore builds a queue, instead of quietly receiving less traffic and looking healthier than it is."],
   },
 };
+
+/* Where the official word on each parameter lives. Kept apart from the
+   prose because it varies on one axis only — which engine is running —
+   and because a dead link is worse than no link, so it is worth being
+   able to see the whole list at once. */
+
+const DOC_ROOT = {
+  es: "https://docs.opensearch.org/latest/",
+  solr: "https://solr.apache.org/guide/solr/latest/",
+};
+
+const PARAM_DOCS = {
+  "q-q":       {es: "query-dsl/", solr: "query-guide/query-syntax-and-parsers.html"},
+  "q-parser":  {es: "query-dsl/full-text/index/", solr: "query-guide/query-syntax-and-parsers.html"},
+  "q-qf":      {es: "query-dsl/full-text/multi-match/", solr: "query-guide/edismax-query-parser.html"},
+  "q-field":   {es: "query-dsl/full-text/match/"},
+  "q-vecfield": {es: "search-plugins/knn/", solr: "query-guide/dense-vector-search.html"},
+  "q-mmtype":  {es: "query-dsl/full-text/multi-match/"},
+  "q-operator": {es: "query-dsl/full-text/match/", solr: "query-guide/standard-query-parser.html"},
+  "q-msm":     {es: "query-dsl/minimum-should-match/", solr: "query-guide/edismax-query-parser.html"},
+  "q-fuzziness": {es: "query-dsl/full-text/match/"},
+  "q-tiebreak": {es: "query-dsl/full-text/multi-match/"},
+  "q-slop":    {es: "query-dsl/full-text/match-phrase/"},
+  "q-fq":      {es: "query-dsl/full-text/query-string/", solr: "query-guide/common-query-parameters.html"},
+  "q-conds":   {es: "query-dsl/compound/bool/"},
+  "q-rows":    {es: "search-plugins/searching-data/paginate/", solr: "query-guide/common-query-parameters.html"},
+  "q-from":    {es: "search-plugins/searching-data/paginate/"},
+  "q-sort":    {solr: "query-guide/common-query-parameters.html"},
+  "q-sorts":   {es: "search-plugins/searching-data/sort/"},
+  "q-fl":      {solr: "query-guide/common-query-parameters.html"},
+  "q-src":     {es: "api-reference/search/"},
+  "q-highlight": {es: "search-plugins/searching-data/highlight/"},
+  "q-minscore": {es: "api-reference/search/"},
+  "q-aggs":    {es: "aggregations/", solr: "query-guide/faceting.html"},
+  "q-facet":   {solr: "query-guide/faceting.html"},
+  "q-facet-limit": {solr: "query-guide/faceting.html"},
+  "q-explain": {es: "api-reference/profile/", solr: "query-guide/common-query-parameters.html"},
+  "q-tth":     {es: "api-reference/search/"},
+};
+
+function docFor(key) {
+  const engine = isES() ? "es" : "solr";
+  const path = (PARAM_DOCS[key] || {})[engine];
+  return path ? DOC_ROOT[engine] + path : null;
+}
 
 /* One card, moved around and refilled. Built with textContent rather than
    innerHTML because the text is prose with punctuation in it. */
@@ -1942,12 +2006,36 @@ function showParamHelp(anchor, key) {
     cross.textContent = h[1];
     helpCard.append(cross);
   }
+  const url = docFor(key);
+  if (url) {
+    const link = document.createElement("a");
+    link.className = "doclink";
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = isES() ? "OpenSearch documentation"
+                              : "Solr reference guide";
+    helpCard.append(link);
+  }
   helpCard.hidden = false;
   helpFor = {anchor, key};
   placeParamHelp(anchor, key);
 }
 
-function hideParamHelp() { helpCard.hidden = true; helpFor = null; }
+/* A card you cannot reach is a link you cannot click, so leaving the label
+   starts a short countdown that entering the card cancels. */
+let helpHideTimer = null;
+function scheduleHideParamHelp() {
+  clearTimeout(helpHideTimer);
+  helpHideTimer = setTimeout(hideParamHelp, 220);
+}
+function hideParamHelp() {
+  clearTimeout(helpHideTimer);
+  helpCard.hidden = true;
+  helpFor = null;
+}
+helpCard.addEventListener("mouseenter", () => clearTimeout(helpHideTimer));
+helpCard.addEventListener("mouseleave", hideParamHelp);
 
 /* Hover for the mouse, focus for the keyboard: tabbing onto a control
    should explain it the same way pointing at its label does. */
@@ -1957,12 +2045,27 @@ function wireParamHelp() {
                || document.querySelector(`[data-help="${key}"]`);
     if (!label) continue;
     label.classList.add("hashelp");
-    label.addEventListener("mouseenter", () => showParamHelp(label, key));
-    label.addEventListener("mouseleave", hideParamHelp);
+    label.addEventListener("mouseenter", () => {
+      clearTimeout(helpHideTimer);
+      showParamHelp(label, key);
+    });
+    label.addEventListener("mouseleave", scheduleHideParamHelp);
+    // clicking the label goes straight to the official page for it
+    if (PARAM_DOCS[key]) {
+      label.classList.add("hasdoc");
+      label.addEventListener("click", ev => {
+        // the checkbox labels wrap their input; let that keep toggling
+        if (ev.target.tagName === "INPUT") return;
+        const url = docFor(key);
+        if (!url) return;
+        ev.preventDefault();
+        window.open(url, "_blank", "noopener");
+      });
+    }
     const ctl = document.getElementById(key);
     if (ctl) {
       ctl.addEventListener("focus", () => showParamHelp(label, key));
-      ctl.addEventListener("blur", hideParamHelp);
+      ctl.addEventListener("blur", scheduleHideParamHelp);
     }
   }
   addEventListener("keydown", e => { if (e.key === "Escape") hideParamHelp(); });
