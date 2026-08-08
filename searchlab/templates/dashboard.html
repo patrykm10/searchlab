@@ -176,16 +176,54 @@ canvas { width: 100%; height: 150px; display: block;
 .xbtn:disabled { color: var(--line); cursor: default; }
 .topo-controls { margin-top: 16px; display: flex; align-items: baseline; gap: 12px;
   flex-wrap: wrap; }
+/* One row per bool clause, and one per aggregation. Both have a variable
+   number of controls — the operator decides whether there is one value box
+   or two, the agg type decides whether a nested metric appears — so they
+   wrap rather than sit in fixed tracks. Every control may shrink (min-width:
+   0), because a select otherwise refuses to go below its longest option and
+   covers its neighbour instead. */
+.cond { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-bottom: 10px; padding-left: 11px;
+  border-left: 2px solid var(--faint); }
+/* a clause that wraps onto a second line still has to read as one clause */
+.cond:focus-within { border-left-color: var(--cobalt); }
+.cond > * { min-width: 0; }
+.cond select, .cond input { width: auto; }
+.cond > select { flex: 1 1 175px; }
+.cond > input { flex: 1 1 165px; }
+.cond > .occur { flex: 0 1 145px; }
+.cond > select[data-k="field"], .cond > select[data-k="sub_field"] { flex: 2 1 200px; }
+.cond > select[data-k="op"] { flex: 0 1 145px; }
+.cond > select[data-k="type"] { flex: 1 1 230px; min-width: 220px; }
+.cond > select[data-k="sub_type"] { flex: 1 1 205px; }
+.cond > input[data-k="size"] { flex: 0 1 90px; }
+.cond .vals { display: flex; gap: 6px; flex: 2 1 200px; }
+.cond .vals input { min-width: 0; flex: 1 1 0; }
+.cond .del { background: none; border: none; cursor: pointer; font-size: 18px;
+  line-height: 1; color: var(--faint); padding: 0 4px; flex: none;
+  margin-left: auto; }
+.cond .del:hover { color: var(--cobalt); }
+/* the occurrence is what the row is really about, so it reads as a label */
+.cond .occur { font-family: var(--mono); font-size: 11px; }
 /* live DSL preview: the builder's controls, as the body they produce */
-.qdsl { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px;
-  background: var(--sunk, #fafafa); }
+.qdsl { border: 1px solid var(--line); border-radius: 6px;
+  background: var(--sunk, #fafafa); min-height: 0;
+  display: flex; flex-direction: column; }
 .qdsl > summary { cursor: pointer; padding: 10px 14px; font-family: var(--mono);
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
-  color: var(--faint); }
+  color: var(--faint); flex: none;
+  display: flex; align-items: baseline; gap: 10px; }
+.qdsl > summary::-webkit-details-marker { display: none; }
+.qdsl > summary::before { content: "\25BE"; font-size: 9px; }
+.qdsl:not([open]) > summary::before { content: "\25B8"; }
 .qdsl > summary:hover { color: var(--cobalt); }
+/* the copy button lives in the summary, so it must not toggle the details */
+.qdsl > summary .btn { margin-left: auto; font-size: 11px;
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--faint); }
+.qdsl > summary .btn:hover { color: var(--cobalt); }
 .qdsl pre { margin: 0; padding: 0 14px 14px; font-family: var(--mono);
-  font-size: 12px; line-height: 1.55; color: var(--ink); overflow-x: auto;
-  white-space: pre; }
+  font-size: 12px; line-height: 1.55; color: var(--ink); overflow: auto;
+  white-space: pre; min-height: 0; }
 .qdsl .desc { padding: 0 14px 12px; margin: 0; color: var(--warn, #b4541a); }
 /* per-replica segment detail, expanded under its topology row */
 .segbtn { background: none; border: none; padding: 0; cursor: pointer;
@@ -286,15 +324,46 @@ canvas { width: 100%; height: 150px; display: block;
   font: inherit; color: inherit; text-align: left; }
 #coll-list button:hover { color: var(--cobalt); }
 
-/* ---------- query builder ---------- */
-.qform { max-width: 900px; margin-bottom: 22px; }
+/* ---------- query builder ----------
+   The builder and the DSL it produces sit side by side where there is room,
+   so the JSON moves while you are still looking at the control you moved.
+   Under 1080px they stack, which is the old single-column form. */
+.qlayout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 34px; }
+.qform { flex: 1 1 560px; min-width: 0; max-width: 900px; margin-bottom: 22px; }
+.qside { flex: 1 1 330px; min-width: 0; }
+/* 560 + 34 gap + 330 + the wrap's 44px of padding: the width at which the
+   two columns stop wrapping, so sticky starts exactly when they are beside
+   each other and never on the stacked layout */
+@media (min-width: 970px) {
+  .qside { position: sticky; top: 74px; max-height: calc(100vh - 96px);
+    display: flex; flex-direction: column; }
+}
 .qrow { margin-bottom: 16px; }
 .qrow > label { display: block; margin-bottom: 6px; }
 .qrow input[type="text"], .qrow textarea { width: 100%; }
-.qsplit { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-.qsplit3 { display: grid; grid-template-columns: 110px 1fr 1fr; gap: 22px; }
-.qsplit label, .qsplit3 label { display: block; margin-bottom: 6px; }
-.qsplit3 input[type="number"] { width: 100%; }
+/* Tracks size themselves to the controls that are actually visible: these
+   rows hide the parameters the chosen query type does not take, and a fixed
+   template would leave the survivors sitting in someone else's column. */
+/* auto-fill rather than auto-fit: when a row is down to one visible control
+   — "size", once sort and _source have moved to their own builders — it
+   should keep a sensible width, not stretch a number box across the form */
+.qsplit, .qsplit3 { display: grid; gap: 16px 22px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.qsplit > *, .qsplit3 > * { min-width: 0; }
+.qsplit label, .qsplit3 label { display: block; margin-bottom: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qsplit select, .qsplit3 select,
+.qsplit input, .qsplit3 input { width: 100%; max-width: 100%; }
+
+/* named blocks, so the form reads as four decisions rather than 14 knobs */
+.qgroup { border-top: 1px solid var(--line); padding-top: 16px; margin-bottom: 26px; }
+.qgroup:first-child { border-top: none; padding-top: 0; }
+.qglabel { font-family: var(--mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink);
+  margin-bottom: 14px; display: flex; align-items: baseline; gap: 10px;
+  flex-wrap: wrap; }
+.qglabel span { font-family: var(--sans); font-size: 12px; font-weight: 400;
+  letter-spacing: 0; text-transform: none; color: var(--faint); }
 textarea { font-family: var(--mono); font-size: 13px; color: var(--ink);
   background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
   padding: 7px 9px; outline: none; resize: vertical; }
@@ -754,7 +823,11 @@ section.collapsed h2 { margin-bottom: 0; }
   <div class="desc">Build and run a single query against the selected
     collection — the exploring half, next to the load testing.</div>
 
+  <div class="qlayout">
   <div class="qform">
+   <div class="qgroup">
+    <h3 class="qglabel">Match <span>what counts as a hit, and how it
+      scores</span></h3>
     <div class="qrow">
       <label for="q-q">Query</label>
       <input type="text" id="q-q" value="*:*">
@@ -846,10 +919,34 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
     </div>
 
+   </div>
+
+   <div class="qgroup">
+    <h3 class="qglabel">Filter <span>narrowing the set, without touching the
+      score</span></h3>
+
+    <!-- ES/OS: conditions as menus rather than typed Lucene. Each row is one
+         clause in the bool query, and the occurrence picker is the point —
+         it is where "counts toward the score" and "merely filters" differ. -->
+    <div class="qrow esonly" id="q-cond-row" style="display:none">
+      <label>Conditions</label>
+      <div id="q-conds"></div>
+      <div class="frow" style="margin-top:8px">
+        <button class="btn preset" id="btn-addcond">Add condition</button>
+        <span class="desc" style="margin:0">each one becomes a clause in
+          <code>bool</code> — the box on the left decides whether it scores</span>
+      </div>
+    </div>
+
     <div class="qrow">
       <label for="q-fq">Filters (fq) — one per line</label>
       <textarea id="q-fq" rows="2" placeholder="price_f:[10 TO 500]"></textarea>
     </div>
+   </div>
+
+   <div class="qgroup">
+    <h3 class="qglabel">Results <span>how many come back, in what order, and
+      carrying which fields</span></h3>
 
     <div class="qrow qsplit3">
       <div>
@@ -885,8 +982,52 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
     </div>
 
-    <div class="qrow">
-      <label for="q-facet">Facets</label>
+    <!-- ES/OS: sorting on an analysed text field fails the same way
+         aggregating on one does, so the picker only offers fields that can
+         actually be sorted. ES also sorts on several keys, which the single
+         text box could not say. -->
+    <div class="qrow esonly" id="q-sort-row" style="display:none">
+      <label>Sort</label>
+      <div id="q-sorts"></div>
+      <div class="frow" style="margin-top:8px">
+        <button class="btn preset" id="btn-addsort">Add sort key</button>
+        <span class="desc" style="margin:0">ties are broken by the next key
+          down — with none of them set, hits come back by score</span>
+      </div>
+    </div>
+
+    <div class="qrow esonly" id="q-src-row" style="display:none">
+      <label for="q-src">_source — fields to return</label>
+      <div class="frow" style="margin-bottom:8px">
+        <select id="q-src"><option value="">choose a field…</option></select>
+        <button class="btn preset" id="btn-addsrc">Add field</button>
+        <span class="desc" style="margin:0">with none chosen the whole
+          document comes back</span>
+      </div>
+      <div id="q-src-chips"></div>
+    </div>
+
+   </div>
+
+   <div class="qgroup">
+    <h3 class="qglabel"><b id="q-g-agg-name">Aggregations</b>
+      <span id="q-g-agg-desc">counted over everything that matched, not just
+        the page of hits returned</span></h3>
+
+    <!-- ES/OS: aggregations, not just terms facets. The split between
+         bucket aggs (which group, and can hold more inside) and metric aggs
+         (which compute one number) is the thing worth seeing. -->
+    <div class="qrow esonly" id="q-agg-row" style="display:none">
+      <div id="q-aggs"></div>
+      <div class="frow" style="margin-top:8px">
+        <button class="btn preset" id="btn-addagg">Add aggregation</button>
+        <span class="desc" style="margin:0">nesting a metric inside a bucket
+          gives you the average price <i>per category</i>, in one pass</span>
+      </div>
+    </div>
+
+    <div class="qrow" id="q-facet-row">
+      <label for="q-facet">Field to count values of</label>
       <div class="frow" style="margin-bottom:8px">
         <select id="q-facet"><option value="">choose a field…</option></select>
         <button class="btn preset" id="btn-addfacet">Add facet</button>
@@ -896,6 +1037,7 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
       <div id="q-facet-chips"></div>
     </div>
+   </div>
 
     <div class="frow" style="margin-top:18px">
       <button class="btn primary" id="btn-runquery">Run query</button>
@@ -913,13 +1055,6 @@ section.collapsed h2 { margin-bottom: 0; }
       <span class="desc" id="q-summary" style="margin:0 0 0 auto"></span>
     </div>
 
-    <!-- the whole point: every control above is a key in this body -->
-    <details class="qdsl esonly" id="q-dsl-wrap" style="display:none" open>
-      <summary>Query DSL — what the controls above build</summary>
-      <pre id="q-dsl"></pre>
-      <div class="desc" id="q-dsl-err" style="display:none"></div>
-    </details>
-
     <div class="frow" style="margin-top:6px; padding-top:14px;
                              border-top:1px solid var(--line)">
       <button class="btn" id="btn-queryload">Run this as a load test</button>
@@ -930,6 +1065,21 @@ section.collapsed h2 { margin-bottom: 0; }
         instead of the built-in mix</span>
     </div>
     <div class="desc" id="q-load-note" style="margin-top:6px"></div>
+  </div>
+
+  <!-- the whole point: every control on the left is a key in this body, and
+       it belongs beside them rather than under a screenful of form, so the
+       JSON moves while you are still looking at the control you moved -->
+  <aside class="qside esonly" id="q-side" style="display:none">
+    <details class="qdsl" id="q-dsl-wrap" open>
+      <summary>Query DSL — what the controls build
+        <button class="btn preset" id="btn-copydsl"
+                title="Copy this body, ready to paste into Dev Tools">copy</button>
+      </summary>
+      <pre id="q-dsl"></pre>
+      <div class="desc" id="q-dsl-err" style="display:none"></div>
+    </details>
+  </aside>
   </div>
 
   <div id="q-facets"></div>
@@ -1566,6 +1716,7 @@ function renderTraffic() {
 
 let fieldsFor = null;
 let esFormReady = false;
+let allFields = [];     // {name, type, text} — drives the condition pickers
 
 // Solr and ES/OS do not just spell things differently — they offer
 // different clauses. The form follows whichever engine is running.
@@ -1592,7 +1743,7 @@ const ES_QTYPES = [
 const SOLR_LABELS = {"q-fq": "Filters (fq) — one per line", "q-rows": "Rows",
                      "q-fl": "Fields to return (fl)",
                      "q-qf": "Fields to search (qf)", "q-parser": "Parser"};
-const ES_LABELS = {"q-fq": "Filters — one per line, each a bool filter clause",
+const ES_LABELS = {"q-fq": "Raw filters — Lucene syntax, for what the menus cannot say",
                    "q-rows": "size", "q-fl": "_source — fields to return",
                    "q-qf": "fields — with boosts, e.g. title_t^3",
                    "q-parser": "Query type"};
@@ -1623,7 +1774,18 @@ function applyEngineToQueryForm() {
   }
   for (const el of document.querySelectorAll(".esonly"))
     el.style.display = es ? "" : "none";
-  $("q-dsl-wrap").style.display = es ? "" : "none";
+  // the text boxes these replaced would be two ways to say the same thing
+  $("q-sort").parentElement.style.display = es ? "none" : "";
+  $("q-fl").parentElement.style.display = es ? "none" : "";
+  // the terms-only facet picker is subsumed by the aggregation builder
+  $("q-facet-row").style.display = es ? "none" : "";
+  $("q-side").style.display = es ? "" : "none";
+  // the same group holds both, and they are not the same idea: Solr's are
+  // field counts, ES/OS can nest a metric inside every bucket
+  $("q-g-agg-name").textContent = es ? "Aggregations" : "Facets";
+  $("q-g-agg-desc").textContent = es
+    ? "bucket types group documents and can hold a metric inside; metric types compute one number"
+    : "counts per value, over everything that matched rather than the page returned";
   onParserChange();
 }
 
@@ -1687,6 +1849,13 @@ async function loadFields(collection) {
   try {
     const out = await post("/api/fields", { collection });
     if (!out.ok) return;
+    allFields = out.fields || [];
+    // every field can be returned, unlike sorting or faceting
+    $("q-src").innerHTML = `<option value="">choose a field…</option>` +
+      allFields.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
+    renderConds();          // the field pickers follow the new collection
+    renderSorts();
+    renderAggs();
     // facets only make sense on exact-match fields; analyzed text would
     // bucket by individual token, which is rarely what anyone wants
     const facetable = out.fields.filter(f => !f.text);
@@ -1785,6 +1954,317 @@ $("btn-embed").addEventListener("click", async () => {
 });
 
 /* chosen facet fields, as removable chips */
+/* ---------- conditions (the bool query, as menus) ----------
+   One row per clause. The occurrence picker is the part worth having: it is
+   the difference between a condition that shapes the ranking and one that
+   only narrows the set, which is the thing Solr's fq hides behind a single
+   text box. */
+
+const conds = [];
+
+const OCCURS = [
+  ["filter", "must match", "Has to match, but does not affect the score — so the engine can cache it and reuse it. The everyday choice, and Solr's fq."],
+  ["must", "must match (scored)", "Has to match, and how well it matches counts toward the score."],
+  ["should", "nice to have", "Optional. Matching it pushes the document up the ranking; not matching it costs nothing — unless there is nothing else, in which case one should must match."],
+  ["must_not", "must not match", "Excludes the document. Not scored, like filter."],
+];
+
+// Which operators make sense for a field, by mapping type. An analysed text
+// field cannot be matched exactly, and a keyword cannot be matched loosely —
+// offering both everywhere is how people end up with a query that silently
+// returns nothing.
+const OPS_TEXT = [
+  ["contains", "contains", "Analyse the value the same way the field was analysed, then match the resulting terms. The right choice for prose."],
+  ["phrase", "contains phrase", "The words must appear in this order."],
+  ["exists", "has any value", "The field is present and not null."],
+];
+const OPS_EXACT = [
+  ["is", "is exactly", "Match the value byte for byte, with no analysis. Right for keyword fields; on an analysed text field it almost never matches."],
+  ["any_of", "is any of", "Match any value in the list — one terms clause rather than a pile of ORs."],
+  ["prefix", "starts with", "Match values beginning with this. Cheap on keyword fields, expensive on high-cardinality ones."],
+  ["wildcard", "matches pattern", "Use * and ?. Leading wildcards force a scan of every term, so they are slow."],
+  ["exists", "has any value", "The field is present and not null."],
+];
+const OPS_NUMERIC = [
+  ["range", "between", "A range clause. Leave either end blank for open-ended."],
+  ["is", "is exactly", "An exact value."],
+  ["any_of", "is any of", "Match any value in the list."],
+  ["exists", "has any value", "The field is present and not null."],
+];
+
+const NUMERIC_TYPES = ["long", "integer", "short", "byte", "double", "float",
+                       "half_float", "scaled_float", "date"];
+
+function fieldType(name) {
+  const f = allFields.find(f => f.name === name);
+  return f || null;
+}
+
+function opsFor(name) {
+  const f = fieldType(name);
+  if (!f) return OPS_EXACT;
+  if (f.text) return OPS_TEXT;
+  return NUMERIC_TYPES.includes(f.type) ? OPS_NUMERIC : OPS_EXACT;
+}
+
+function condValueInputs(c, i) {
+  if (c.op === "exists") return `<span class="desc" style="margin:0">no value needed</span>`;
+  if (c.op === "range") return `<span class="vals">
+      <input type="text" data-i="${i}" data-k="gte" placeholder="from"
+             value="${esc(c.gte || "")}">
+      <input type="text" data-i="${i}" data-k="lte" placeholder="to"
+             value="${esc(c.lte || "")}"></span>`;
+  if (c.op === "any_of") return `<input type="text" data-i="${i}" data-k="values"
+      placeholder="one, two, three" value="${esc(c.values || "")}">`;
+  return `<input type="text" data-i="${i}" data-k="value" placeholder="value"
+      value="${esc(c.value || "")}">`;
+}
+
+function condReady(c) {
+  if (!c.field) return false;
+  if (c.op === "exists") return true;
+  if (c.op === "range") return !!((c.gte || "").trim() || (c.lte || "").trim());
+  if (c.op === "any_of") return !!(c.values || "").trim();
+  return !!(c.value || "").trim();
+}
+
+function renderConds() {
+  const host = $("q-conds");
+  if (!host) return;
+  const names = allFields.map(f => f.name);
+  host.innerHTML = conds.map((c, i) => {
+    const ops = opsFor(c.field);
+    if (!ops.some(o => o[0] === c.op)) c.op = ops[0][0];
+    const opt = (v, label, tip, cur) =>
+      `<option value="${esc(v)}" title="${esc(tip)}"${v === cur ? " selected" : ""}>${esc(label)}</option>`;
+    return `<div class="cond">
+      <select class="occur" data-i="${i}" data-k="occur">
+        ${OCCURS.map(([v, l, t]) => opt(v, l, t, c.occur)).join("")}</select>
+      <select data-i="${i}" data-k="field">
+        <option value="">choose a field…</option>
+        ${names.map(n => `<option${n === c.field ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <select data-i="${i}" data-k="op">
+        ${ops.map(([v, l, t]) => opt(v, l, t, c.op)).join("")}</select>
+      ${condValueInputs(c, i)}
+      <button class="del" data-del="${i}" title="Remove this condition">&times;</button>
+    </div>`;
+  }).join("");
+
+  for (const el of host.querySelectorAll("[data-k]")) {
+    const handler = () => {
+      const c = conds[Number(el.dataset.i)];
+      c[el.dataset.k] = el.value;
+      // changing the field can invalidate the operator, and changing the
+      // operator changes which value inputs belong there
+      if (el.dataset.k === "field" || el.dataset.k === "op") renderConds();
+      scheduleDsl();
+    };
+    el.addEventListener("change", handler);
+    if (el.tagName === "INPUT") el.addEventListener("input", () => {
+      conds[Number(el.dataset.i)][el.dataset.k] = el.value;
+      scheduleDsl();
+    });
+  }
+  for (const b of host.querySelectorAll("[data-del]")) {
+    b.addEventListener("click", () => {
+      conds.splice(Number(b.dataset.del), 1);
+      renderConds();
+      scheduleDsl();
+    });
+  }
+  scheduleDsl();
+}
+
+$("btn-addcond").addEventListener("click", () => {
+  const first = allFields[0];
+  conds.push({occur: "filter", field: first ? first.name : "",
+              op: first ? opsFor(first.name)[0][0] : "is", value: ""});
+  renderConds();
+});
+
+/* ---------- sort keys and _source ----------
+   Both were text boxes. Sorting on an analysed text field fails exactly the
+   way aggregating on one does, so the picker offers only fields that can be
+   sorted — and ES sorts on several keys, which one box could not say. */
+
+const sorts = [];
+const srcFields = [];
+
+function sortableFields() {
+  // same rule as facets: analysed text has no doc values to sort on
+  return allFields.filter(f => !f.text).map(f => f.name);
+}
+
+function renderSorts() {
+  const host = $("q-sorts");
+  if (!host) return;
+  const names = sortableFields();
+  host.innerHTML = sorts.map((s, i) => `<div class="cond">
+      <select data-i="${i}" data-k="field">
+        <option value="">choose a field…</option>
+        ${names.map(n => `<option${n === s.field ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <select data-i="${i}" data-k="order">
+        <option value="asc"${s.order === "asc" ? " selected" : ""}>ascending</option>
+        <option value="desc"${s.order === "desc" ? " selected" : ""}>descending</option>
+      </select>
+      <button class="del" data-del="${i}" title="Remove this sort key">&times;</button>
+    </div>`).join("");
+  for (const el of host.querySelectorAll("[data-k]")) {
+    el.addEventListener("change", () => {
+      sorts[Number(el.dataset.i)][el.dataset.k] = el.value;
+      scheduleDsl();
+    });
+  }
+  for (const b of host.querySelectorAll("[data-del]")) {
+    b.addEventListener("click", () => {
+      sorts.splice(Number(b.dataset.del), 1);
+      renderSorts();
+      scheduleDsl();
+    });
+  }
+  scheduleDsl();
+}
+
+function renderSrcChips() {
+  $("q-src-chips").innerHTML = srcFields.map((f, i) =>
+    `<span class="fchip">${esc(f)}<button data-i="${i}" title="Remove">&times;</button></span>`
+  ).join("");
+  for (const b of $("q-src-chips").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      srcFields.splice(Number(b.dataset.i), 1);
+      renderSrcChips();
+    });
+  }
+  scheduleDsl();
+}
+
+$("btn-addsort").addEventListener("click", () => {
+  const names = sortableFields();
+  sorts.push({field: names[0] || "", order: "desc"});
+  renderSorts();
+});
+
+$("btn-addsrc").addEventListener("click", () => {
+  const f = $("q-src").value;
+  if (f && !srcFields.includes(f)) { srcFields.push(f); renderSrcChips(); }
+  $("q-src").value = "";
+});
+
+/* ---------- aggregations ----------
+   Bucket aggs group documents and can hold a metric inside them; metric
+   aggs compute one number over whatever they sit in. That split is the
+   whole mental model, so the builder puts it in the type list. */
+
+const aggs = [];
+
+const BUCKET_AGGS = [
+  ["terms", "terms — top values", "The values that occur most, with a count each. The everyday facet."],
+  ["range", "range — custom bands", "Buckets you define yourself. Bounds are half-open: from is included, to is not, so adjacent bands do not double-count."],
+  ["histogram", "histogram — fixed steps", "Even numeric buckets of a chosen width."],
+  ["date_histogram", "date_histogram — over time", "Buckets by calendar unit, so a month is a real month rather than 30 days."],
+];
+const METRIC_AGGS = [
+  ["stats", "stats — min/max/avg/sum", "All of them in one pass, which is cheaper than asking separately."],
+  ["avg", "avg — mean", "The mean of a numeric field."],
+  ["min", "min", "The smallest value."],
+  ["max", "max", "The largest value."],
+  ["sum", "sum", "The total."],
+  ["value_count", "value_count — how many values", "How many values were counted, which is not the document count when a field repeats."],
+  ["cardinality", "cardinality — distinct count", "Approximate number of distinct values. Approximate on purpose: exact distinct counts do not scale across shards."],
+  ["percentiles", "percentiles — p50/p95/p99", "The distribution rather than the average, which is what a latency figure actually needs."],
+];
+
+function aggFieldsFor(type) {
+  // every agg here needs doc values, so analysed text is out either way
+  return allFields.filter(f => !f.text).map(f => f.name);
+}
+
+function aggParamInput(a, i) {
+  if (a.type === "terms")
+    return `<input type="number" data-i="${i}" data-k="size" min="1" max="200"
+      placeholder="10" value="${esc(a.size || "")}" title="How many buckets to return.">`;
+  if (a.type === "range")
+    return `<input type="text" data-i="${i}" data-k="ranges"
+      placeholder="0-100, 100-500, 500-" value="${esc(a.ranges || "")}"
+      title="Bands, comma separated. Leave an end open with a trailing or leading dash.">`;
+  if (a.type === "histogram")
+    return `<input type="text" data-i="${i}" data-k="interval" placeholder="100"
+      value="${esc(a.interval || "")}" title="The width of each bucket.">`;
+  if (a.type === "date_histogram")
+    return `<select data-i="${i}" data-k="interval">
+      ${["minute","hour","day","week","month","quarter","year"].map(u =>
+        `<option${u === (a.interval || "day") ? " selected" : ""}>${u}</option>`).join("")}</select>`;
+  return `<span class="desc" style="margin:0">one value</span>`;
+}
+
+function isBucketAgg(type) { return BUCKET_AGGS.some(([v]) => v === type); }
+
+function renderAggs() {
+  const host = $("q-aggs");
+  if (!host) return;
+  host.innerHTML = aggs.map((a, i) => {
+    const names = aggFieldsFor(a.type);
+    const opt = (v, l, t, cur) =>
+      `<option value="${esc(v)}" title="${esc(t)}"${v === cur ? " selected" : ""}>${esc(l)}</option>`;
+    const sub = isBucketAgg(a.type) ? `
+      <select data-i="${i}" data-k="sub_type" title="A metric computed inside each bucket — average price per category, say.">
+        <option value="">no nested metric</option>
+        ${METRIC_AGGS.map(([v, l, t]) => opt(v, l, t, a.sub_type)).join("")}</select>
+      ${a.sub_type ? `<select data-i="${i}" data-k="sub_field">
+        <option value="">field…</option>
+        ${names.map(n => `<option${n === a.sub_field ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>` : ""}`
+      : "";
+    return `<div class="cond">
+      <select data-i="${i}" data-k="type">
+        <optgroup label="bucket — groups documents">
+          ${BUCKET_AGGS.map(([v, l, t]) => opt(v, l, t, a.type)).join("")}</optgroup>
+        <optgroup label="metric — one number">
+          ${METRIC_AGGS.map(([v, l, t]) => opt(v, l, t, a.type)).join("")}</optgroup>
+      </select>
+      <select data-i="${i}" data-k="field">
+        <option value="">choose a field…</option>
+        ${names.map(n => `<option${n === a.field ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      ${aggParamInput(a, i)}
+      ${sub}
+      <button class="del" data-del="${i}" title="Remove this aggregation">&times;</button>
+    </div>`;
+  }).join("");
+
+  for (const el of host.querySelectorAll("[data-k]")) {
+    const set = () => { aggs[Number(el.dataset.i)][el.dataset.k] = el.value; };
+    el.addEventListener("change", () => {
+      set();
+      // changing the type changes which parameters belong on the row
+      if (["type", "sub_type"].includes(el.dataset.k)) renderAggs();
+      scheduleDsl();
+    });
+    if (el.tagName === "INPUT")
+      el.addEventListener("input", () => { set(); scheduleDsl(); });
+  }
+  for (const b of host.querySelectorAll("[data-del]")) {
+    b.addEventListener("click", () => {
+      aggs.splice(Number(b.dataset.del), 1);
+      renderAggs();
+      scheduleDsl();
+    });
+  }
+  scheduleDsl();
+}
+
+function aggReady(a) {
+  if (!a.field) return false;
+  if (a.type === "range") return !!(a.ranges || "").trim();
+  if (a.type === "histogram") return !!(a.interval || "").trim();
+  if (a.sub_type && !a.sub_field) return false;
+  return true;
+}
+
+$("btn-addagg").addEventListener("click", () => {
+  const names = aggFieldsFor("terms");
+  aggs.push({type: "terms", field: names[0] || "", size: ""});
+  renderAggs();
+});
+
 const facetFields = [];
 
 function renderFacetChips() {
@@ -1848,6 +2328,15 @@ function queryBody() {
   // the parameters this clause understands go in — a hidden control must
   // not quietly break the query it is no longer part of.
   const a = esApplies();
+  // a row you are still filling in is not an error, so it sits the query out
+  // until it says something
+  body.clauses = conds.map(c => ({...c, off: !condReady(c)}));
+  body.sorts = sorts.filter(s => s.field);
+  body.source_fields = srcFields;
+  body.aggs = aggs.map(a => ({...a, off: !aggReady(a)}));
+  // the terms-only facet picker is hidden on ES, so it must not also
+  // contribute a duplicate aggregation
+  body.facet_fields = [];
   body.qtype = semantic ? "knn" : p;
   if (a.fields) body.fields = $("q-qf").value;
   if (a.field) body.field = $("q-field").value;
@@ -1894,6 +2383,25 @@ async function refreshDsl() {
   } catch (e) { /* keep whatever is on screen */ }
 }
 
+// the preview is only half useful if you cannot take it to Dev Tools
+$("btn-copydsl").addEventListener("click", async (ev) => {
+  ev.preventDefault();          // it sits inside <summary>; don't collapse
+  const btn = ev.currentTarget;
+  try {
+    await navigator.clipboard.writeText($("q-dsl").textContent);
+    btn.textContent = "copied";
+  } catch (e) {
+    // no clipboard permission — select the body instead, so the keyboard
+    // shortcut still gets it
+    const sel = window.getSelection(), range = document.createRange();
+    range.selectNodeContents($("q-dsl"));
+    sel.removeAllRanges();
+    sel.addRange(range);
+    btn.textContent = "selected — copy it";
+  }
+  setTimeout(() => { btn.textContent = "copy"; }, 1400);
+});
+
 $("btn-queryload").addEventListener("click", async () => {
   const body = queryBody();
   const out = await post("/api/load/start",
@@ -1923,16 +2431,33 @@ function renderQueryResult(out) {
   $("q-summary").textContent =
     `${Number(out.num_found).toLocaleString()} hits · ${out.qtime} ms`;
 
-  // facet counts — clicking one adds it as a filter and re-runs, which is
-  // both the natural way to explore and how faceting is meant to be used
+  // Bucket counts stay clickable — that is how faceting is meant to be used.
+  // Metric aggregations have no buckets to click, so they are rendered as
+  // the numbers they are rather than left out of the page entirely.
+  const num = v => v == null ? "—"
+    : (Math.abs(v) >= 1000 || Number.isInteger(v))
+      ? Number(v).toLocaleString(undefined, {maximumFractionDigits: 2})
+      : Number(v).toFixed(2);
+  const agg = out.aggs || {};
   $("q-facets").innerHTML = Object.entries(out.facets || {}).map(([f, buckets]) => {
     if (!buckets.length) return "";
+    const metrics = ((agg[f] || {}).buckets || []);
     return `<div class="fgroup"><div class="fname">${esc(f)}</div>` +
-      buckets.map(b =>
-        `<button class="fbucket" data-field="${esc(f)}" data-value="${esc(b.value)}"
+      buckets.map((b, i) => {
+        const m = (metrics[i] || {}).metrics || {};
+        const extra = Object.entries(m).map(([k, v]) =>
+          ` · ${esc(k)} ${typeof v === "object" ? "" : num(v)}`).join("");
+        return `<button class="fbucket" data-field="${esc(f)}" data-value="${esc(b.value)}"
           title="Filter by ${esc(f)}:${esc(b.value)}">${esc(b.value)}
-          <b>${b.count.toLocaleString()}</b></button>`
-      ).join("") + `</div>`;
+          <b>${b.count.toLocaleString()}</b>${extra}</button>`;
+      }).join("") + `</div>`;
+  }).join("") +
+  Object.entries(agg).filter(([, a]) => a.kind !== "buckets").map(([name, a]) => {
+    const pairs = a.kind === "value" ? {[name]: a.value} : (a.values || {});
+    return `<div class="fgroup"><div class="fname">${esc(name)}</div>` +
+      Object.entries(pairs).map(([k, v]) =>
+        `<span class="fbucket" style="cursor:default">${esc(k)}
+          <b>${num(v)}</b></span>`).join("") + `</div>`;
   }).join("");
   for (const b of $("q-facets").querySelectorAll(".fbucket")) {
     b.addEventListener("click", () => {

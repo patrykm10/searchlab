@@ -871,3 +871,232 @@ class _LongEmbedder:
 
     def embed_one(self, text):
         return [0.0123456] * 384
+
+
+# ------------------------------------------------ conditions (bool query) ---
+
+def test_conditions_land_in_the_occurrence_they_were_given():
+    """must and should are scored; filter and must_not are not. That is the
+    distinction the condition builder exists to make visible."""
+    body = query_os.build_body({"q": "shoes", "qtype": "match",
+                                "field": "title", "clauses": [
+        {"occur": "filter", "field": "price", "op": "range", "gte": 10},
+        {"occur": "must_not", "field": "cat", "op": "is", "value": "toys"},
+        {"occur": "should", "field": "title", "op": "phrase", "value": "on sale"},
+    ]})
+    b = body["query"]["bool"]
+    assert b["filter"] == [{"range": {"price": {"gte": 10}}}]
+    assert b["must_not"] == [{"term": {"cat": {"value": "toys"}}}]
+    assert b["should"] == [{"match_phrase": {"title": "on sale"}}]
+    assert b["must"] == [{"match": {"title": "shoes"}}]
+
+
+@pytest.mark.parametrize("cond,expected", [
+    ({"field": "cat", "op": "is", "value": "toys"},
+     {"term": {"cat": {"value": "toys"}}}),
+    ({"field": "cat", "op": "any_of", "values": "a, b"},
+     {"terms": {"cat": ["a", "b"]}}),
+    ({"field": "body", "op": "contains", "value": "quiet"},
+     {"match": {"body": "quiet"}}),
+    ({"field": "body", "op": "phrase", "value": "very quiet"},
+     {"match_phrase": {"body": "very quiet"}}),
+    ({"field": "cat", "op": "prefix", "value": "to"},
+     {"prefix": {"cat": {"value": "to"}}}),
+    ({"field": "cat", "op": "wildcard", "value": "to*s"},
+     {"wildcard": {"cat": {"value": "to*s"}}}),
+    ({"field": "body", "op": "exists"}, {"exists": {"field": "body"}}),
+])
+def test_each_operator_becomes_its_own_dsl_clause(cond, expected):
+    body = query_os.build_body({"clauses": [dict(cond, occur="filter")]})
+    assert body["query"]["bool"]["filter"] == [expected]
+
+
+def test_numbers_stay_numbers_so_a_range_is_not_a_string_comparison():
+    body = query_os.build_body({"clauses": [
+        {"occur": "filter", "field": "price", "op": "range",
+         "gte": "10", "lte": "99.5"}]})
+    assert body["query"]["bool"]["filter"] == [
+        {"range": {"price": {"gte": 10, "lte": 99.5}}}]
+
+
+def test_a_bare_match_all_is_left_out_when_conditions_say_what_to_match():
+    """`must: [match_all]` next to real conditions is noise in a preview
+    whose job is to be read."""
+    body = query_os.build_body({"q": "", "clauses": [
+        {"occur": "filter", "field": "cat", "op": "is", "value": "toys"}]})
+    assert "must" not in body["query"]["bool"]
+    assert body["query"]["bool"]["filter"] == [{"term": {"cat": {"value": "toys"}}}]
+
+
+def test_should_alone_has_to_match_something():
+    """A should beside a must only boosts. On its own it would match every
+    document, which is never what someone building one condition meant."""
+    alone = query_os.build_body({"q": "", "clauses": [
+        {"occur": "should", "field": "cat", "op": "is", "value": "toys"}]})
+    assert alone["query"]["bool"]["minimum_should_match"] == 1
+
+    beside = query_os.build_body({"q": "shoes", "qtype": "match",
+                                  "field": "title", "clauses": [
+        {"occur": "should", "field": "cat", "op": "is", "value": "toys"}]})
+    assert "minimum_should_match" not in beside["query"]["bool"]
+
+
+def test_conditions_are_ordered_the_way_the_bool_query_is_explained():
+    body = query_os.build_body({"q": "shoes", "qtype": "match",
+                                "field": "title", "clauses": [
+        {"occur": "must_not", "field": "a", "op": "exists"},
+        {"occur": "should", "field": "b", "op": "exists"},
+        {"occur": "filter", "field": "c", "op": "exists"},
+    ]})
+    assert list(body["query"]["bool"]) == ["must", "filter", "should", "must_not"]
+
+
+def test_a_condition_still_being_filled_in_sits_the_query_out():
+    """The builder marks an incomplete row rather than sending a broken one,
+    so typing into a fresh row does not blank the preview."""
+    body = query_os.build_body({"q": "shoes", "qtype": "match",
+                                "field": "title", "clauses": [
+        {"occur": "filter", "field": "cat", "op": "is", "value": "", "off": True}]})
+    assert "bool" not in body["query"]          # nothing left to wrap
+    assert body["query"] == {"match": {"title": "shoes"}}
+
+
+@pytest.mark.parametrize("cond,msg", [
+    ({"occur": "filter", "op": "is", "value": "x"}, "needs a field"),
+    ({"occur": "filter", "field": "a", "op": "is"}, "needs a value"),
+    ({"occur": "filter", "field": "a", "op": "range"}, "needs at least one bound"),
+    ({"occur": "filter", "field": "a", "op": "any_of", "values": " , "},
+     "needs at least one value"),
+    ({"occur": "nowhere", "field": "a", "op": "exists"}, "Condition must be one of"),
+    ({"occur": "filter", "field": "a", "op": "nonsense"}, "operator must be one of"),
+])
+def test_an_incomplete_condition_names_what_is_missing(cond, msg):
+    with pytest.raises(ValueError, match=msg):
+        query_os.build_body({"clauses": [cond]})
+
+
+def test_raw_fq_lines_still_work_alongside_the_menus():
+    """The escape hatch stays: the menus cannot express everything Lucene can."""
+    body = query_os.build_body({"fq": ["price:[1 TO 5]"], "clauses": [
+        {"occur": "filter", "field": "cat", "op": "is", "value": "toys"}]})
+    assert body["query"]["bool"]["filter"] == [
+        {"term": {"cat": {"value": "toys"}}},
+        {"query_string": {"query": "price:[1 TO 5]"}},
+    ]
+
+
+# --------------------------------------------------- sort and _source ------
+
+def test_several_sort_keys_because_es_breaks_ties_with_the_next_one():
+    body = query_os.build_body({"sorts": [
+        {"field": "price", "order": "desc"}, {"field": "name", "order": "asc"}]})
+    assert body["sort"] == [{"price": {"order": "desc"}},
+                            {"name": {"order": "asc"}}]
+
+
+def test_the_solr_sort_spelling_still_parses_including_several_keys():
+    body = query_os.build_body({"sort": "price desc, name asc"})
+    assert body["sort"] == [{"price": {"order": "desc"}},
+                            {"name": {"order": "asc"}}]
+
+
+def test_a_half_chosen_sort_key_is_skipped_rather_than_sent_empty():
+    body = query_os.build_body({"sorts": [{"field": "", "order": "asc"},
+                                          {"field": "price", "order": "asc"}]})
+    assert body["sort"] == [{"price": {"order": "asc"}}]
+
+
+def test_a_bad_sort_order_is_named():
+    with pytest.raises(ValueError, match="asc or desc"):
+        query_os.build_body({"sorts": [{"field": "price", "order": "sideways"}]})
+
+
+def test_source_fields_come_from_the_picker_or_the_old_comma_string():
+    assert query_os.build_body(
+        {"source_fields": ["id", "title"]})["_source"] == ["id", "title"]
+    assert query_os.build_body(
+        {"fl": "id, title"})["_source"] == ["id", "title"]
+    # nothing chosen means the whole document, so no _source key at all
+    assert "_source" not in query_os.build_body({"source_fields": []})
+
+
+# -------------------------------------------------------- aggregations ----
+
+def test_a_metric_can_nest_inside_a_bucket():
+    """Average price per category is the thing aggregations are for, and it
+    is the one shape a terms-only facet picker cannot express."""
+    body = query_os.build_body({"aggs": [
+        {"type": "terms", "field": "cat", "size": 5,
+         "sub_type": "avg", "sub_field": "price"}]})
+    agg = body["aggs"]["terms_cat"]
+    assert agg["terms"] == {"field": "cat", "size": 5}
+    assert agg["aggs"] == {"avg_price": {"avg": {"field": "price"}}}
+
+
+def test_nothing_can_nest_inside_a_metric():
+    """A metric is one number, not a group — so there is nothing to nest in."""
+    with pytest.raises(ValueError, match="nothing can nest inside it"):
+        query_os.build_body({"aggs": [
+            {"type": "avg", "field": "price",
+             "sub_type": "max", "sub_field": "price"}]})
+
+
+def test_range_bounds_are_half_open_so_bands_do_not_double_count():
+    body = query_os.build_body({"aggs": [
+        {"type": "range", "field": "price", "ranges": "0-100, 100-500, 500-"}]})
+    assert body["aggs"]["range_price"]["range"]["ranges"] == [
+        {"from": 0, "to": 100}, {"from": 100, "to": 500}, {"from": 500}]
+
+
+def test_a_date_histogram_uses_calendar_intervals():
+    """calendar_interval understands a month as a real month; fixed_interval
+    cannot say that."""
+    body = query_os.build_body({"aggs": [
+        {"type": "date_histogram", "field": "created", "interval": "month"}]})
+    assert body["aggs"]["date_histogram_created"]["date_histogram"] == {
+        "field": "created", "calendar_interval": "month"}
+
+
+@pytest.mark.parametrize("spec,msg", [
+    ({"type": "terms"}, "needs a field"),
+    ({"type": "nonsense", "field": "a"}, "Aggregation must be one of"),
+    ({"type": "histogram", "field": "a"}, "positive interval"),
+    ({"type": "range", "field": "a", "ranges": "100"}, "needs a dash"),
+    ({"type": "terms", "field": "a", "sub_type": "nope", "sub_field": "b"},
+     "nested aggregation must be one of"),
+    ({"type": "terms", "field": "a", "sub_type": "avg"}, "nested avg needs a field"),
+])
+def test_a_broken_aggregation_names_what_is_wrong(spec, msg):
+    with pytest.raises(ValueError, match=msg):
+        query_os.build_body({"aggs": [spec]})
+
+
+def test_the_older_facet_spelling_still_produces_a_terms_agg():
+    body = query_os.build_body({"facet_fields": ["cat"], "facet_limit": 3})
+    assert body["aggs"] == {"cat": {"terms": {"field": "cat", "size": 3}}}
+
+
+def test_metric_results_are_read_as_values_not_hunted_for_buckets():
+    facets, aggs = query_os._read_aggs({
+        "stats_price": {"count": 3, "min": 1.0, "max": 9.0, "avg": 5.0, "sum": 15.0},
+        "distinct_brand": {"value": 42},
+        "p_latency": {"values": {"95.0": 210.5}},
+    })
+    assert facets == {}                      # nothing to click
+    assert aggs["distinct_brand"] == {"kind": "value", "value": 42}
+    assert aggs["p_latency"]["values"] == {"95.0": 210.5}
+    assert aggs["stats_price"]["values"]["avg"] == 5.0
+
+
+def test_bucket_results_carry_whatever_was_nested_in_them():
+    facets, aggs = query_os._read_aggs({"by_cat": {"buckets": [
+        {"key": "toys", "doc_count": 7, "avg_price": {"value": 12.5}}]}})
+    # the clickable strip keeps its old shape
+    assert facets["by_cat"] == [{"value": "toys", "count": 7}]
+    assert aggs["by_cat"]["buckets"][0]["metrics"] == {"avg_price": 12.5}
+
+
+def test_range_buckets_are_named_by_their_bounds():
+    facets, _ = query_os._read_aggs({"bands": {"buckets": [
+        {"from": 0.0, "to": 100.0, "doc_count": 4}]}})
+    assert facets["bands"][0]["value"] == "0.0–100.0"

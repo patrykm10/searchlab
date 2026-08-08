@@ -77,6 +77,95 @@ def _filters(body: dict) -> list[dict]:
     return out
 
 
+# Where a condition sits in the bool query. This is the distinction the
+# builder exists to make visible: `must` and `should` are scored, `filter`
+# and `must_not` are not — which is why a filter can be cached and reused
+# and a must cannot.
+OCCURS = ("must", "filter", "should", "must_not")
+
+# What a condition can ask, and the DSL clause it becomes. Whether a given
+# operator suits a given field is a mapping question the UI answers; here
+# they are all buildable, because a keyword operator on a text field is a
+# lesson worth being able to run.
+OPS = ("is", "any_of", "contains", "phrase", "prefix", "wildcard",
+       "range", "exists")
+
+
+def _scalar(value):
+    """Numbers as numbers, so a range on a numeric field is not a string."""
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    text = str(value).strip()
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def _clause(cond: dict) -> dict:
+    """One structured condition, as its DSL clause."""
+    field = (cond.get("field") or "").strip()
+    if not field:
+        raise ValueError("Every condition needs a field.")
+    op = (cond.get("op") or "is").strip()
+    if op not in OPS:
+        raise ValueError(f"Condition operator must be one of {', '.join(OPS)}.")
+
+    if op == "exists":
+        return {"exists": {"field": field}}
+
+    if op == "range":
+        bounds = {}
+        for key in ("gte", "lte", "gt", "lt"):
+            raw = cond.get(key)
+            if raw not in (None, ""):
+                bounds[key] = _scalar(raw)
+        if not bounds:
+            raise ValueError(f"The range on “{field}” needs at least one bound.")
+        return {"range": {field: bounds}}
+
+    if op == "any_of":
+        raw = cond.get("values")
+        if isinstance(raw, str):
+            raw = [v for v in raw.replace(",", "\n").split("\n")]
+        values = [_scalar(v) for v in (raw or []) if str(v).strip()]
+        if not values:
+            raise ValueError(f"“Any of” on “{field}” needs at least one value.")
+        return {"terms": {field: values}}
+
+    value = cond.get("value")
+    if value in (None, ""):
+        raise ValueError(f"The condition on “{field}” needs a value.")
+
+    if op == "is":
+        # term does no analysis, which is exactly why it belongs on keyword
+        return {"term": {field: {"value": _scalar(value)}}}
+    if op == "contains":
+        return {"match": {field: str(value)}}
+    if op == "phrase":
+        return {"match_phrase": {field: str(value)}}
+    if op == "prefix":
+        return {"prefix": {field: {"value": str(value)}}}
+    return {"wildcard": {field: {"value": str(value)}}}
+
+
+def _bool_parts(body: dict) -> dict[str, list]:
+    """Structured conditions, grouped by where they sit in the bool query."""
+    parts: dict[str, list] = {}
+    for cond in body.get("clauses") or []:
+        if not isinstance(cond, dict) or cond.get("off"):
+            continue
+        occur = (cond.get("occur") or "filter").strip()
+        if occur not in OCCURS:
+            raise ValueError(f"Condition must be one of {', '.join(OCCURS)}.")
+        parts.setdefault(occur, []).append(_clause(cond))
+    return parts
+
+
 def _num(body: dict, key: str, label: str, lo: float, hi: float,
          default=None, cast=float):
     """Read an optional numeric field, or explain what is wrong with it."""
@@ -218,6 +307,157 @@ def _put(target: dict, key: str, value) -> None:
         target[key] = value
 
 
+# Aggregations split into two kinds, and the split is the thing worth
+# learning: bucket aggs group documents and can hold further aggs inside
+# them; metric aggs compute one answer over whatever bucket they sit in.
+BUCKET_AGGS = ("terms", "range", "histogram", "date_histogram")
+METRIC_AGGS = ("stats", "cardinality", "percentiles",
+               "min", "max", "avg", "sum", "value_count")
+AGG_TYPES = BUCKET_AGGS + METRIC_AGGS
+
+
+def _ranges(raw) -> list[dict]:
+    """"0-100, 100-500, 500-" as range buckets.
+
+    The bounds are half-open — from is included, to is not — so adjacent
+    buckets written this way do not double-count the boundary value.
+    """
+    if isinstance(raw, list):
+        return raw
+    out = []
+    for chunk in str(raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" not in chunk:
+            raise ValueError(
+                f"Range “{chunk}” needs a dash, as in 0-100, 100-500, 500-.")
+        low, _, high = chunk.partition("-")
+        bucket = {}
+        if low.strip():
+            bucket["from"] = _scalar(low)
+        if high.strip():
+            bucket["to"] = _scalar(high)
+        if not bucket:
+            raise ValueError(f"Range “{chunk}” needs at least one bound.")
+        out.append(bucket)
+    if not out:
+        raise ValueError("A range aggregation needs at least one bucket.")
+    return out
+
+
+def _agg_clause(spec: dict) -> dict:
+    """One aggregation, as its DSL body (without a name)."""
+    atype = (spec.get("type") or "terms").strip()
+    if atype not in AGG_TYPES:
+        raise ValueError(f"Aggregation must be one of {', '.join(AGG_TYPES)}.")
+    field = (spec.get("field") or "").strip()
+    if not field:
+        raise ValueError(f"The {atype} aggregation needs a field.")
+
+    if atype == "terms":
+        inner: dict = {"terms": {"field": field,
+                                 "size": int(spec.get("size") or 10)}}
+    elif atype == "range":
+        inner = {"range": {"field": field, "ranges": _ranges(spec.get("ranges"))}}
+    elif atype == "histogram":
+        interval = _scalar(spec.get("interval"))
+        if not isinstance(interval, (int, float)) or interval <= 0:
+            raise ValueError("A histogram needs a positive interval.")
+        inner = {"histogram": {"field": field, "interval": interval}}
+    elif atype == "date_histogram":
+        # calendar_interval understands "month" meaning actual months, which
+        # fixed_interval cannot express
+        inner = {"date_histogram": {
+            "field": field,
+            "calendar_interval": (spec.get("interval") or "day").strip()}}
+    else:
+        inner = {atype: {"field": field}}
+
+    sub_type = (spec.get("sub_type") or "").strip()
+    if sub_type:
+        if atype not in BUCKET_AGGS:
+            raise ValueError(
+                f"“{atype}” computes a single value, so nothing can nest "
+                f"inside it. Only {', '.join(BUCKET_AGGS)} form buckets.")
+        if sub_type not in METRIC_AGGS:
+            raise ValueError(
+                f"The nested aggregation must be one of "
+                f"{', '.join(METRIC_AGGS)}.")
+        sub_field = (spec.get("sub_field") or "").strip()
+        if not sub_field:
+            raise ValueError(f"The nested {sub_type} needs a field.")
+        inner["aggs"] = {f"{sub_type}_{sub_field}":
+                         {sub_type: {"field": sub_field}}}
+    return inner
+
+
+def _agg_name(spec: dict) -> str:
+    name = (spec.get("name") or "").strip()
+    if name:
+        return name
+    return f"{(spec.get('type') or 'terms').strip()}_" \
+           f"{(spec.get('field') or '').strip()}"
+
+
+def _aggs(body: dict) -> dict:
+    """Structured aggregations, plus the older facet_fields spelling."""
+    out: dict = {}
+    for spec in body.get("aggs") or []:
+        if not isinstance(spec, dict) or spec.get("off"):
+            continue
+        out[_agg_name(spec)] = _agg_clause(spec)
+
+    facets = [f for f in (body.get("facet_fields") or []) if f]
+    if facets:
+        limit = int(body.get("facet_limit") or 10)
+        for field in facets:
+            out.setdefault(field, {"terms": {"field": field, "size": limit}})
+    return out
+
+
+def _sorts(body: dict) -> list:
+    """Sort keys, structured or in Solr's "field desc" spelling.
+
+    ES sorts on several keys, each its own object — so this is a list, not
+    the single key the text box could express.
+    """
+    out = []
+    for entry in body.get("sorts") or []:
+        if not isinstance(entry, dict):
+            continue
+        field = (entry.get("field") or "").strip()
+        if not field:
+            continue
+        order = (entry.get("order") or "asc").strip().lower()
+        if order not in ("asc", "desc"):
+            raise ValueError("Sort order must be asc or desc.")
+        out.append({field: {"order": order}})
+    if out:
+        return out
+
+    raw = (body.get("sort") or "").strip()
+    if not raw:
+        return []
+    # Solr's spelling, one key per comma: "price desc, name asc"
+    for chunk in raw.split(","):
+        parts = chunk.split()
+        if not parts:
+            continue
+        out.append({parts[0]: {"order": parts[1]}} if len(parts) > 1
+                   else parts[0])
+    return out
+
+
+def _source_fields(body: dict) -> list[str]:
+    """Which fields come back. A list either way; the UI sends one already."""
+    raw = body.get("source_fields")
+    if isinstance(raw, list):
+        return [str(f).strip() for f in raw if str(f).strip()]
+    fl = (body.get("fl") or "").strip()
+    return [f.strip() for f in fl.split(",") if f.strip()] if fl else []
+
+
 def _highlight(body: dict) -> dict | None:
     raw = (body.get("highlight") or "").strip()
     if not raw:
@@ -235,23 +475,36 @@ def build_body(body: dict, embedder=None) -> dict:
     _put(out, "from", _num(body, "from", "From", 0, MAX_FROM, cast=int))
 
     inner = _inner_query(body, qtype, size, embedder)
-    filters = _filters(body)
-    out["query"] = {"bool": {"must": [inner], "filter": filters}} if filters else inner
+    parts = _bool_parts(body)
+    filters = _filters(body)          # the raw fq escape hatch, still honoured
+    if filters:
+        parts.setdefault("filter", []).extend(filters)
 
-    sort = (body.get("sort") or "").strip()
-    if sort:
-        # accept Solr's "field desc" spelling and translate it
-        parts = sort.split()
-        out["sort"] = [{parts[0]: {"order": parts[1]}} if len(parts) > 1
-                       else parts[0]]
-    fl = (body.get("fl") or "").strip()
+    if not parts:
+        out["query"] = inner
+    else:
+        # a bare match_all next to real conditions is noise: the conditions
+        # already say what to match, so it is left out of the preview
+        if inner != {"match_all": {}}:
+            parts.setdefault("must", []).insert(0, inner)
+        # ordered so the body reads the way the bool query is explained:
+        # what must match, what merely filters, what boosts, what excludes
+        out["query"] = {"bool": {k: parts[k] for k in OCCURS if parts.get(k)}}
+        # a should clause alongside a must is pure boosting and matches
+        # nothing on its own; alone, at least one of them has to match
+        if parts.get("should") and not (parts.get("must") or parts.get("filter")):
+            out["query"]["bool"]["minimum_should_match"] = 1
+
+    sorts = _sorts(body)
+    if sorts:
+        out["sort"] = sorts
+    fl = _source_fields(body)
     if fl:
-        out["_source"] = [f.strip() for f in fl.split(",") if f.strip()]
+        out["_source"] = fl
 
-    facets = [f for f in (body.get("facet_fields") or []) if f]
-    if facets:
-        limit = int(body.get("facet_limit") or 10)
-        out["aggs"] = {f: {"terms": {"field": f, "size": limit}} for f in facets}
+    aggs = _aggs(body)
+    if aggs:
+        out["aggs"] = aggs
 
     _put(out, "highlight", _highlight(body))
     _put(out, "min_score", _num(body, "min_score", "Minimum score", 0, 1e6))
@@ -304,6 +557,56 @@ def _shorten_vectors(node) -> None:
     elif isinstance(node, list):
         for item in node:
             _shorten_vectors(item)
+
+
+def _nested_metrics(bucket: dict) -> dict:
+    """Whatever a bucket agg had nested inside it, per bucket."""
+    out = {}
+    for key, value in bucket.items():
+        if key in ("key", "key_as_string", "doc_count", "from", "to"):
+            continue
+        if isinstance(value, dict):
+            if "value" in value:
+                out[key] = value["value"]
+            elif "values" in value:          # percentiles
+                out[key] = value["values"]
+            else:                            # stats and friends
+                out[key] = {k: v for k, v in value.items()
+                            if isinstance(v, (int, float))}
+    return out
+
+
+def _read_aggs(raw: dict) -> tuple[dict, dict]:
+    """Normalize aggregation results into buckets and single values.
+
+    Returns (facets, aggs). `facets` keeps the old bucket-only shape the
+    clickable facet strip already renders; `aggs` carries everything,
+    including metrics, which have no buckets to click.
+    """
+    facets: dict = {}
+    aggs: dict = {}
+    for name, agg in raw.items():
+        if "buckets" in agg:
+            buckets = []
+            for b in agg["buckets"]:
+                key = b.get("key_as_string", b.get("key"))
+                if key is None and ("from" in b or "to" in b):
+                    # range buckets are named by their bounds
+                    key = f"{b.get('from', '')}–{b.get('to', '')}"
+                buckets.append({"value": key, "count": b.get("doc_count"),
+                                "metrics": _nested_metrics(b)})
+            facets[name] = [{"value": b["value"], "count": b["count"]}
+                            for b in buckets]
+            aggs[name] = {"kind": "buckets", "buckets": buckets}
+        elif "value" in agg:
+            aggs[name] = {"kind": "value", "value": agg["value"]}
+        elif "values" in agg:
+            aggs[name] = {"kind": "values", "values": agg["values"]}
+        else:
+            aggs[name] = {"kind": "values",
+                          "values": {k: v for k, v in agg.items()
+                                     if isinstance(v, (int, float))}}
+    return facets, aggs
 
 
 def _deepest_reason(node: dict) -> str:
@@ -405,10 +708,7 @@ def run_query(spec: ClusterSpec, index: str, body: dict,
     total = hits.get("total")
     num_found = total.get("value") if isinstance(total, dict) else total
 
-    facets = {}
-    for field, agg in (data.get("aggregations") or {}).items():
-        facets[field] = [{"value": b.get("key"), "count": b.get("doc_count")}
-                         for b in agg.get("buckets", [])]
+    facets, aggs = _read_aggs(data.get("aggregations") or {})
 
     docs = []
     for h in hits.get("hits", []):
@@ -426,6 +726,7 @@ def run_query(spec: ClusterSpec, index: str, body: dict,
         "qtime": data.get("took"),
         "docs": docs,
         "facets": facets,
+        "aggs": aggs,
         "raw": data,
     }
     profile = data.get("profile")
