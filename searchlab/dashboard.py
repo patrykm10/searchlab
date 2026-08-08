@@ -61,26 +61,84 @@ class _DemoState:
     """Synthesized signals with enough structure to look real: heap sawtooth
     per node, GC pause accumulation, cache hit-ratio drift, latency spikes."""
 
+    WINDOW_S = 300      # matches the dashboard's chart window
+    STEP_S = 2          # matches POLL_MS
+
     def __init__(self, spec: ClusterSpec):
         self.spec = spec
-        self.t0 = time.time()
+        # Start pre-warmed: the chart window is built client-side from polls, so a
+        # cold demo would draw empty panels for five minutes before it looked like
+        # anything. Backdating t0 plus the `history` backfill below means the very
+        # first frame is already a full recording. (Time-lost-to-GC and index-segment
+        # history aren't backfilled: gc% is a delta between consecutive live polls,
+        # and demo cores don't populate `segments` at all — both pre-date this change.)
+        self.t0 = time.time() - self.WINDOW_S
         self.rng = random.Random(1)
-        self.gc = [{"count": 0, "time": 0} for _ in range(spec.solr_nodes)]
-        self.adds = 0
-        self.commits = 0
-        self.merges = [0, 0]
+        # Counters start where the backdated window leaves them, otherwise the
+        # node table would read "gc 0" beside five minutes of sawtooth.
+        cycles = int(self.WINDOW_S / 25)          # one young collection per node cycle
+        self.gc = [{"count": cycles, "time": cycles * self.rng.randint(24, 40)}
+                   for _ in range(spec.solr_nodes)]
+        self.adds = int(self.WINDOW_S * 50)       # ~target rps of indexing
+        self.commits = int(self.WINDOW_S / 15)
+        self.merges = [int(self.WINDOW_S * 0.02), int(self.WINDOW_S * 0.004)]
 
-    def snapshot(self) -> dict:
+    # -- shared shapes, so the backfilled past and the live present agree --------
+
+    @staticmethod
+    def _heap_mb(t: float, i: int) -> float:
+        """Sawtooth: linear growth, reset (young GC) every ~25s, phased per node."""
+        return 180 + ((t + i * 9) % 25) * 26
+
+    @staticmethod
+    def _p99_ms(t: float, i: int) -> float:
+        spike = 260 if (t + i * 13) % 90 < 3 else 0
+        return 34 + 10 * math.sin(t / 17 + i) + spike
+
+    @staticmethod
+    def _rate(t: float) -> float:
+        return 46 + 6 * math.sin(t / 31)
+
+    @staticmethod
+    def _lt_at(t: float) -> tuple[float, float] | None:
+        """Client-observed p50/p99 for the synthetic load test, or None if idle."""
+        # Runs long enough to still be "in progress" after the backdated start:
+        # a fresh demo now opens at t = WINDOW_S, so a 240s window would already
+        # have closed on the very first frame.
+        if not (20 <= t <= 620):
+            return None
+        el = t - 20
+        p50 = 11 + 2 * math.sin(el / 9)
+        p99 = 30 + 8 * math.sin(el / 13) + (220 if (el % 90) < 4 else 0)
+        return p50, p99
+
+    def history(self) -> list[dict]:
+        """Replay the window that ended `now`, so the first frame is already full."""
+        now = time.time()
+        out = []
+        for t in range(0, int(self.WINDOW_S) + 1, int(self.STEP_S)):
+            lt = self._lt_at(t)
+            out.append({
+                "t": now - (self.WINDOW_S - t),
+                "p99": {f"solr{i + 1}": round(self._p99_ms(t, i), 1)
+                        for i in range(self.spec.solr_nodes)},
+                "heap": {f"solr{i + 1}": round(self._heap_mb(t, i), 1)
+                         for i in range(self.spec.solr_nodes)},
+                "rate": round(self._rate(t) * self.spec.solr_nodes, 1),
+                "ltp50": round(lt[0], 1) if lt else None,
+                "ltp99": round(lt[1], 1) if lt else None,
+            })
+        return out
+
+    def snapshot(self, with_history: bool = False) -> dict:
         t = time.time() - self.t0
         nodes = {}
         for i in range(self.spec.solr_nodes):
-            # Heap sawtooth: linear growth, reset (young GC) every ~25s per node phase.
             phase = (t + i * 9) % 25
-            heap_used = 180 + phase * 26 + self.rng.uniform(-8, 8)
+            heap_used = self._heap_mb(t, i) + self.rng.uniform(-8, 8)
             if phase < 0.6:
                 self.gc[i]["count"] += 1
                 self.gc[i]["time"] += self.rng.randint(12, 60)
-            spike = 260 if (t + i * 13) % 90 < 3 else 0  # periodic p99 spike
             hit = 0.62 + 0.3 * min(t / 240, 1) + self.rng.uniform(-0.02, 0.02)
             self.adds += self.rng.randint(30, 90)
             if int(t) % 15 == 0:
@@ -116,31 +174,29 @@ class _DemoState:
                             "merges_minor": self.merges[0],
                             "merges_major": self.merges[1],
                         },
-                        "select_p99_ms": round(
-                            34 + 10 * math.sin(t / 17 + i) + self.rng.uniform(0, 6) + spike, 1
-                        ),
-                        "select_rate_1m": round(46 + 6 * math.sin(t / 31) + self.rng.uniform(-2, 2), 1),
+                        "select_p99_ms": round(self._p99_ms(t, i) + self.rng.uniform(0, 6), 1),
+                        "select_rate_1m": round(self._rate(t) + self.rng.uniform(-2, 2), 1),
                     }
                 },
             }
         lt = None
-        if 20 <= t <= 260:
+        pair = self._lt_at(t)
+        if pair:
             el = t - 20
             ramp = min(el / 15, 1)
             lt = {
                 "ts": time.time(),
                 "elapsed_s": round(el, 1),
-                "duration_s": 240,
+                "duration_s": 600,
                 "target_rps": 50,
                 "recent_rps": round(50 * ramp + self.rng.uniform(-1.5, 1.5), 1),
-                "recent_p50_ms": round(11 + 2 * math.sin(el / 9) + self.rng.uniform(0, 1.5), 1),
-                "recent_p99_ms": round(30 + 8 * math.sin(el / 13) + self.rng.uniform(0, 4)
-                                       + (220 if (el % 90) < 4 else 0), 1),
+                "recent_p50_ms": round(pair[0] + self.rng.uniform(0, 1.5), 1),
+                "recent_p99_ms": round(pair[1] + self.rng.uniform(0, 4), 1),
                 "errors": int(el // 85),
                 "dropped": 0,
                 "requests": int(50 * max(el - 7.5, 0)),
             }
-        return {
+        snap = {
             "ts": time.time(),
             "spec": self.spec.__dict__,
             "nodes": nodes,
@@ -148,6 +204,9 @@ class _DemoState:
                         "collections": {"products": {"shards": self.spec.solr_nodes, "health": "GREEN"}}},
             "loadtest": lt,
         }
+        if with_history:   # each client asks once, on its first poll
+            snap["history"] = self.history()
+        return snap
 
 
 def _load_page() -> bytes:
@@ -182,8 +241,10 @@ def make_handler(spec: ClusterSpec, demo: bool,
             if path in ("/", "/index.html"):
                 self._send(200, page, "text/html; charset=utf-8")
             elif path == "/api/snapshot":
+                want_history = "history=1" in urlparse(self.path).query
                 with lock:
-                    snap = demo_state.snapshot() if demo_state else _live_snapshot(spec)
+                    snap = (demo_state.snapshot(want_history) if demo_state
+                            else _live_snapshot(spec))
                     snap["insights"] = insights.analyze(snap)
                     # derive cause-and-effect events, then hand back the
                     # linked chains rather than four unrelated signals

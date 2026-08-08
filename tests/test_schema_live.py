@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 from aiohttp import web
@@ -75,13 +76,31 @@ async def test_load_writes_live_file(mock_solr, tmp_path):
 
 
 def test_demo_snapshot_loadtest_lifecycle():
+    # The demo starts pre-warmed (t0 backdated by WINDOW_S), so a test is already
+    # running on the very first frame rather than after a cold twenty seconds.
     demo = _DemoState(ClusterSpec())
-    demo.t0 -= 60  # jump into the demo test window (starts at t=20)
-    snap = demo.snapshot()
-    lt = snap["loadtest"]
+    lt = demo.snapshot()["loadtest"]
     assert lt is not None and lt["target_rps"] == 50 and lt["recent_p99_ms"] > 0
-    demo.t0 += 60  # back to t≈0: before the window, no test
+
+    demo.t0 = time.time()            # t≈0: before the window opens
     assert demo.snapshot()["loadtest"] is None
+
+    demo.t0 = time.time() - 700      # t≈700: after it closes
+    assert demo.snapshot()["loadtest"] is None
+
+
+def test_demo_history_backfills_one_window():
+    demo = _DemoState(ClusterSpec(solr_nodes=2))
+    assert "history" not in demo.snapshot()          # only when asked for
+    rows = demo.snapshot(with_history=True)["history"]
+
+    assert len(rows) == demo.WINDOW_S // demo.STEP_S + 1
+    assert rows[-1]["t"] - rows[0]["t"] == pytest.approx(demo.WINDOW_S, abs=1)
+    assert set(rows[0]["p99"]) == {"solr1", "solr2"} == set(rows[0]["heap"])
+    # the backfill must carry the same shapes the live snapshot draws
+    assert max(max(r["p99"].values()) for r in rows) > 200    # spikes are present
+    heaps = [r["heap"]["solr1"] for r in rows]
+    assert min(heaps) < 200 and max(heaps) > 700              # a full sawtooth
 
 
 # -------------------------------------------------------------- histogram ---

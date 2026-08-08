@@ -42,6 +42,18 @@ header {
 .dot { width: 8px; height: 8px; background: var(--faint); display: inline-block; }
 .chip.live .dot { background: var(--cobalt); }
 .chip.live { color: var(--cobalt); }
+.themebtn { background: none; border: 1.5px solid var(--line); border-radius: 0;
+  width: 28px; height: 28px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; color: var(--muted); flex: none; }
+.themebtn:hover { border-color: var(--cobalt); color: var(--cobalt); }
+.themebtn svg { width: 15px; height: 15px; }
+.themebtn .i-moon { display: none; }
+:root[data-theme="dark"] .themebtn .i-sun { display: none; }
+:root[data-theme="dark"] .themebtn .i-moon { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .themebtn .i-sun { display: none; }
+  :root:not([data-theme="light"]) .themebtn .i-moon { display: block; }
+}
 
 /* ---------- sections ---------- */
 section { padding: 34px 0 38px; border-bottom: 1.5px solid var(--line); }
@@ -548,6 +560,14 @@ section.collapsed h2 { margin-bottom: 0; }
     <span class="wordmark">searchlab</span>
     <span class="hmeta" id="hmeta">—</span>
     <span class="chip" id="chip"><span class="dot"></span><span id="chiplabel">connecting</span></span>
+    <button class="themebtn" id="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme">
+      <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
+      </svg>
+      <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
+      </svg>
+    </button>
   </div>
 </header>
 
@@ -1094,10 +1114,16 @@ section.collapsed h2 { margin-bottom: 0; }
 "use strict";
 const KEEP_S = 3600, POLL_MS = 2000;
 let windowS = 300;   // selectable: 300 / 900 / 3600
-const INKS = ["#14161a", "#2743c7", "#5b6068", "#9aa0a8"];
+// Canvas fillStyle/strokeStyle need resolved colors, not var(...) — read
+// the current theme's tokens instead of keeping a second, parallel palette
+// that would silently drift from the CSS one.
+const cssRoot = getComputedStyle(document.documentElement);
+const cv = name => cssRoot.getPropertyValue(name).trim();
+const INKS = () => [cv("--ink"), cv("--cobalt"), cv("--muted"), cv("--faint")];
 const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [], gc: {}, seg: {} };
 const prevGC = {};      // node -> [ts, cumulative gc ms] for rate deltas
 let lastSnap = null;    // latest snapshot, reused by the topology renderer
+let historySeeded = false;
 let maintBusy = false;  // a maintenance job is running, set by the snapshot poll
 const chartMeta = {};   // canvas id -> data for hover hit-testing
 let lastOk = 0, logCursor = 0, demo = false, dragging = false, rpsDebounce = null;
@@ -1122,7 +1148,7 @@ function setupCanvas(c) {
 function drawChart(canvas, seriesMap, colors, unit) {
   const [g, W, H] = setupCanvas(canvas), now = Date.now() / 1000;
   g.clearRect(0, 0, W, H);
-  g.strokeStyle = "rgba(20,22,26,.06)"; g.lineWidth = 1;
+  g.strokeStyle = cv("--line"); g.lineWidth = 1;
   const gridStep = windowS >= 3600 ? 600 : windowS >= 900 ? 120 : 30;
   for (let x = W; x > 0; x -= W / (windowS / gridStep)) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
   for (const f of [.25, .5, .75]) { g.beginPath(); g.moveTo(0, H * f); g.lineTo(W, H * f); g.stroke(); }
@@ -1150,7 +1176,7 @@ function drawChart(canvas, seriesMap, colors, unit) {
     g.beginPath(); g.arc(x, y, 2.5, 0, 7); g.fill();
   });
 
-  g.fillStyle = "#9aa0a8";
+  g.fillStyle = cv("--faint");
   g.font = "10px ui-monospace, monospace";
   g.fillText(vmax.toFixed(0) + " " + unit, 5, 12);
   g.fillText(windowLabel(), 5, H - 6);
@@ -2777,8 +2803,22 @@ $("btn-addreplica").addEventListener("click", async () => {
 
 /* ---------- render ---------- */
 
+// A demo cluster can ship one window of prior samples so the strip charts
+// are full on the very first frame instead of filling in over five minutes.
+// Live clusters never send `history`, so this is a no-op for them.
+function seedHistory(rows) {
+  for (const r of rows) {
+    for (const [n, v] of Object.entries(r.p99 || {})) push(hist.p99[n] ??= [], r.t, v);
+    for (const [n, v] of Object.entries(r.heap || {})) push(hist.heap[n] ??= [], r.t, v);
+    if (r.rate != null) push(hist.rate, r.t, r.rate);
+    if (r.ltp50 != null) push(hist.ltp50, r.t, r.ltp50);
+    if (r.ltp99 != null) push(hist.ltp99, r.t, r.ltp99);
+  }
+}
+
 function render(snap) {
   const t = snap.ts;
+  if (snap.history && !historySeeded) { seedHistory(snap.history); historySeeded = true; }
   const prevEngine = lastSnap && lastSnap.spec && lastSnap.spec.engine;
   lastSnap = snap;
   // the form can only be shaped once the snapshot says which engine is
@@ -2879,18 +2919,19 @@ function render(snap) {
       hist.ltp50.length = 0; hist.ltp99.length = 0;
     }
   }
-  drawChart($("c-lt"), { p50: hist.ltp50, p99: hist.ltp99 }, ["#9aa0a8", "#2743c7"], "ms");
-  legend($("lg-lt"), hist.ltp99.length ? ["p50", "p99"] : [], ["#9aa0a8", "#2743c7"]);
+  const inks = INKS(), ltInks = [cv("--faint"), cv("--cobalt")], rateInks = [cv("--cobalt")];
+  drawChart($("c-lt"), { p50: hist.ltp50, p99: hist.ltp99 }, ltInks, "ms");
+  legend($("lg-lt"), hist.ltp99.length ? ["p50", "p99"] : [], ltInks);
 
-  drawChart($("c-p99"), hist.p99, INKS, "ms");
-  drawChart($("c-heap"), hist.heap, INKS, "MB");
-  drawChart($("c-rate"), { all: hist.rate }, ["#2743c7"], "r/s");
-  drawChart($("c-gc"), hist.gc, INKS, "%");
-  drawChart($("c-seg"), hist.seg, INKS, "seg");
-  legend($("lg-p99"), Object.keys(hist.p99), INKS);
-  legend($("lg-heap"), Object.keys(hist.heap), INKS);
-  legend($("lg-gc"), Object.keys(hist.gc), INKS);
-  legend($("lg-seg"), Object.keys(hist.seg), INKS);
+  drawChart($("c-p99"), hist.p99, inks, "ms");
+  drawChart($("c-heap"), hist.heap, inks, "MB");
+  drawChart($("c-rate"), { all: hist.rate }, rateInks, "r/s");
+  drawChart($("c-gc"), hist.gc, inks, "%");
+  drawChart($("c-seg"), hist.seg, inks, "seg");
+  legend($("lg-p99"), Object.keys(hist.p99), inks);
+  legend($("lg-heap"), Object.keys(hist.heap), inks);
+  legend($("lg-gc"), Object.keys(hist.gc), inks);
+  legend($("lg-seg"), Object.keys(hist.seg), inks);
   $("v-p99").textContent = fmt(worstP99, 1) + " ms worst";
   $("v-heap").textContent = fmt(sumHeap) + " MB total";
   $("v-rate").textContent = fmt(sumRate, 1) + " req/s";
@@ -2925,7 +2966,9 @@ function render(snap) {
 
 async function poll() {
   try {
-    const r = await fetch("/api/snapshot"); if (!r.ok) throw 0;
+    // ask for the backfill window only on the client's first successful poll
+    const r = await fetch("/api/snapshot" + (historySeeded ? "" : "?history=1"));
+    if (!r.ok) throw 0;
     render(await r.json());
     lastOk = Date.now();
     $("chip").className = "chip live"; $("chiplabel").textContent = "Live";
@@ -3048,6 +3091,32 @@ async function pollLogs() {
       catch (e) { /* private mode etc. — state just won't persist */ }
     });
   }
+})();
+
+// ---- theme: OS preference by default, sticky once chosen ----
+(function () {
+  const root = document.documentElement;
+  const saved = localStorage.getItem("searchlab-theme");
+  // ?theme=dark|light wins, for screenshots and embeds
+  const qTheme = new URLSearchParams(location.search).get("theme");
+  if (qTheme === "dark" || qTheme === "light") root.setAttribute("data-theme", qTheme);
+  else if (saved) root.setAttribute("data-theme", saved);
+
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    const dark = root.getAttribute("data-theme")
+      ? root.getAttribute("data-theme") === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    localStorage.setItem("searchlab-theme", next);
+    // the charts read resolved colors at draw time, not live var(...), so a
+    // toggle needs an explicit repaint or the old palette lingers until the
+    // next poll
+    if (lastSnap) render(lastSnap);
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (!localStorage.getItem("searchlab-theme") && lastSnap) render(lastSnap);
+  });
 })();
 
 // the model picker sits in Controls, so populate it up front rather than
