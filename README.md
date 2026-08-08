@@ -1,12 +1,25 @@
 # searchlab
 
-Disposable search clusters — **SolrCloud, Elasticsearch, or OpenSearch** — with synthetic data of controllable shape and open-loop load tests. Built for two jobs: **learning search-engine internals** and **reproducing production performance issues** on demand. (Yes, it outgrew its name. Names are forever; scope isn't.)
+Disposable search clusters — **SolrCloud, Elasticsearch, or OpenSearch** — with synthetic data of controllable shape, open-loop load tests, and a control panel that drives the whole thing from a browser. Built for two jobs: **learning search-engine internals** and **reproducing production performance issues** on demand.
+
+Two ways in. The CLI, for scripting, CI gates and sweeps:
 
 ```
 pip install -e .
+searchlab quickstart              # up + collection + gen + index + load
+```
+
+…or the control panel, where you can ramp load, tune a live cluster, force merges, build queries and watch a failure unfold without touching a terminal:
+
+```
+searchlab up --engine opensearch --nodes 2
+searchlab dashboard               # http://localhost:8990
+```
+
+Step by step, when you want control over each stage:
+
+```
 searchlab doctor            # preflight: docker, ports, disk
-searchlab quickstart        # or: quickstart --engine opensearch | elasticsearch
-                          # or step by step:
 searchlab up --solr-version 9.6 --nodes 2 --heap 1g
 searchlab create-collection products --shards 2 --replicas 1
 searchlab gen --profile profiles/default.yaml --count 10000 --out data.jsonl
@@ -25,7 +38,11 @@ searchlab up --engine elasticsearch --version 8.14.3 --nodes 2
 searchlab up --engine opensearch --version 2.15.0 --nodes 2
 ```
 
-One CLI, one dashboard, one report format. Everything downstream — `gen`, `index`, `load` (with `queries/es-default.yaml` DSL templates and `{RAND_WORD}` substitution anywhere in the body), `chaos`, `metrics`, `metrics-diff`, `compare`, `dashboard`, `quickstart` — works across all three engines; the cluster remembers its engine in `.searchlab/spec.json`. Solr-only for now: `--monitoring` (Prometheus stack), `schema`, `replay`, `gclog`, and server-side p99/rate on the dashboard (ES/OS stats expose totals, not percentiles — heap, GC, caches, docs, and merges all stream normally).
+One CLI, one control panel, one report format. Everything downstream — `gen`, `index`, `load` (with `queries/es-default.yaml` DSL templates and `{RAND_WORD}` substitution anywhere in the body), `chaos`, `metrics`, `metrics-diff`, `compare`, `dashboard`, `quickstart` — works across all three engines; the cluster remembers its engine in `.searchlab/spec.json`.
+
+The control panel adapts to whichever engine is running: live tuning knobs, segment detail, shard topology, splitting, semantic search and the query builder all have working equivalents on both sides, and where the two engines genuinely differ the UI says so rather than relabelling a Solr control (see [Solr and OpenSearch are not the same shape](#solr-and-opensearch-are-not-the-same-shape)).
+
+Still Solr-only: `--monitoring` (the Prometheus stack), the `explain` CLI command, and server-side p99/rate on the dashboard — ES/OS node stats expose totals rather than percentiles, so heap, GC, caches, docs, thread pools, circuit breakers and merges all stream normally but the p99 trace comes from the client side. (The dashboard's **explain** checkbox does work on ES/OS, via the Profile API.)
 
 `schema` and `replay` are engine-aware too: on ES/OS clusters, `schema` applies index mappings derived from the same profile (per-field `es:` overrides, e.g. `doc_values: false` for fielddata-pressure repros), and `replay` parses search slow logs — both the classic bracketed format and JSON-lines — and replays the recorded query bodies.
 
@@ -52,7 +69,7 @@ searchlab is **open-loop**: requests fire on a fixed wall-clock schedule derived
 | `chaos run scenario.yaml` | Timed fault steps only (see `examples/chaos-node-loss.yaml`) |
 | `drill drill.yaml` | Full orchestrated drill: load + chaos + metrics, one annotated report |
 | `sweep sweep.yaml` | One workload x a config matrix, fresh cluster per cell, comparison table |
-| `dashboard` | Live strip-chart UI: load test, p99, heap sawtooth, rate, caches, merges (`--demo` to preview) |
+| `dashboard` | The control panel: drive the cluster, tune it live, build queries, read the incident timeline (`--demo` to preview) |
 | `schema` | Explicit schema fields derived from a data profile (`--dry-run` to inspect) |
 | `quickstart` | Zero-to-load-test in one command: up + collection + gen + index + load |
 | `replay` | Replay real Solr request logs at original, scaled, or fixed pacing |
@@ -78,16 +95,59 @@ searchlab chaos unpause solr2
 searchlab status                  # replica states, recovery
 ```
 
-## Dashboard
+## Control panel
 
 ```
-searchlab dashboard            # http://localhost:8990, polls the live cluster
+searchlab dashboard            # http://localhost:8990, drives the live cluster
 searchlab dashboard --demo     # synthesized signals, preview without a cluster
 ```
 
-A single self-contained page (no CDN, no build step) styled as a strip-chart recorder on millimeter graph paper: pen traces for p99 latency (red), per-node heap sawtooth (blue), and query rate (green) over a 5-minute window, plus node nameplates with heap gauges and GC counters, cache hit-ratio meters, and update/merge counters.
+A single self-contained page (no CDN, no build step) that both *shows* the cluster and *drives* it. Everything the CLI can do to a running cluster is a button here — the point being that you can demonstrate a merge storm or a commit-visibility surprise to someone who has never opened a terminal.
 
-**Live load-test streaming:** while `searchlab load` runs, it writes rolling stats to `.searchlab/live-load.json` and the dashboard's top panel comes alive automatically — client-observed p50/p99 traces, target vs achieved RPS, progress, errors, dropped. The client-side p99 next to the server-side `/select` p99 is the whole story of a saturation event on one screen: queueing shows up in the client trace before the server metric moves.
+**Drive it:** ramp RPS live with a slider while a load test runs, index N documents of chosen complexity, force a commit or a merge, expunge deletes, reload, purge, create and delete collections, add and remove replicas by type, split a shard.
+
+**Tune it while it runs:** knobs for soft/hard commit interval, filter and result cache size, RAM buffer, merge policy (segments per tier, max merged segment, deletes allowed), and merge scheduler threads. Turning one writes through the Config API on Solr, or index settings on ES/OS — no restart, no editing `solrconfig.xml`, and each knob links to the endpoint that proves its live value.
+
+**Read it in plain language:** an insights panel that says *why* something is wrong rather than only that it is — "heap above 80% on solr2, which is why p99 is climbing" — with the alert history foldable so it stops disappearing before you finish reading.
+
+**Incident timeline:** the differentiator. Rather than a wall of independent alerts, it links events into a causal chain across a time window — GC pause → ZooKeeper session lost → replica down → thread pool saturated → queries failing — so a drop gets a story instead of a metric. It distinguishes server-rejected from client-dropped, which matters: a load test can report tens of thousands of client drops while the server reports zero errors, and the difference tells you whether the cluster refused the work or was merely slow.
+
+**Look inside Lucene:** per-shard segment detail — sizes, deleted-document share, and where each segment came from (a flush or a merge on Solr; committed and searchable state on ES/OS, which is a different and equally instructive fact), plus maxDoc, searchers opened, warmup time and sort statistics.
+
+**Live log panel:** the engine's own logs, tailed into the page and lexed, so you can watch what the cluster says about itself as you press the buttons.
+
+**Live load-test streaming:** while `searchlab load` runs, it writes rolling stats to `.searchlab/live-load.json` and the top panel comes alive automatically — client-observed p50/p99 traces, target vs achieved RPS, progress, errors, dropped. The client-side p99 next to the server-side `/select` p99 is the whole story of a saturation event on one screen: queueing shows up in the client trace before the server metric moves.
+
+Under all that, the original strip-chart recorder on millimeter graph paper: pen traces for p99 latency (red), per-node heap sawtooth (blue), and query rate (green), with hover readouts and a selectable window.
+
+## Query builder
+
+The exploring half, next to the load testing. Build one query from menus and watch it run — then hand the same query to the load generator with **Run this as a load test**, so the thing you just tuned becomes the workload instead of the built-in mix.
+
+On ES/OS the builder speaks the query DSL rather than Solr's params, and **renders the JSON body live as you build it** — every control is visibly a key in the request:
+
+- **Query types** — `query_string`, `multi_match`, `match`, `match_phrase`, `term`, and `knn`, each carrying the parameters it actually accepts: multi_match's `type` (best_fields / most_fields / cross_fields / phrase / phrase_prefix / bool_prefix), `operator`, `minimum_should_match`, `fuzziness`, `tie_breaker`, `slop`, plus `from`, `highlight`, `min_score` and `track_total_hits`.
+- **Conditions** — rows of dropdowns, each one a clause in `bool`. `is` / `is any of` / `contains` / `contains phrase` / `starts with` / `matches pattern` / `between` / `has any value` become `term` / `terms` / `match` / `match_phrase` / `prefix` / `wildcard` / `range` / `exists`. The **occurrence** picker is the point: `must` and `should` are scored, `filter` and `must_not` are not — the same condition in three positions gives three different answers, and you can watch the hit count and the scores move as you switch.
+- **Aggregations** — bucket types (`terms`, `range`, `histogram`, `date_histogram`) that group documents and can hold a metric inside them, and metric types (`stats`, `avg`, `min`, `max`, `sum`, `value_count`, `cardinality`, `percentiles`) that compute one number. Average price per category is two dropdowns.
+- **Sort and `_source`** — pickers rather than typed strings, offering only fields that can actually be sorted, because sorting on an analysed text field fails exactly the way aggregating on one does.
+
+Parameters are gated to the clauses that accept them, so a control that is hidden is also absent from the request; where the engine would reject a combination outright — fuzziness on a phrase type — it is refused up front with the reason instead of arriving as a shard failure. Faceted buckets stay clickable to drill in, and a raw filter box remains as the escape hatch for what the menus cannot say.
+
+Solr keeps its own parsers, wording, and text boxes.
+
+## Solr and OpenSearch are not the same shape
+
+Most of the lab is one idea pointed at two APIs. A few things genuinely differ, and the UI names the difference rather than hiding it — which is most of the value if you are learning the second engine:
+
+| | Solr | OpenSearch / Elasticsearch |
+|---|---|---|
+| Segment provenance | flush or merge | `committed` and `searchable`, which move independently |
+| Replica placement | add one at a time, by type | set `number_of_replicas`; the cluster decides where copies live |
+| Replica identity | named replicas | no names — a shard has a primary and N copies |
+| Splitting | one shard, in place, writes keep flowing | the whole index into a **new** index; the source goes read-only first and stays that way |
+| Hard commit | one call | `_refresh` **and** `_flush` — refresh alone is a soft commit |
+| Adding vectors later | just add the field | `index.knn` is static, so the index must be closed, reconfigured and reopened |
+| Deep pagination | cursorMark, stateless | the scroll API pins a server-side view that must be released |
 
 ## Metrics before/after
 
@@ -181,7 +241,11 @@ searchlab explain --collection products "q=title_t:Merging&fq=category_s:x"
 
 ## Vector search
 
-The full loop works for dense vectors on all three engines:
+**From the control panel**, for an index you already have: load an embedding model (MiniLM, BGE small/base, or Nomic — `pip install 'searchlab[embed]'`), pick a text field, and press **Embed documents**. It reads every document back, embeds the field, and writes the vector on — which is also exactly what a real re-embedding migration looks like, so it is worth watching and timing. After that, **semantic** mode in the query builder searches by meaning.
+
+Two things it tells you rather than hides. Re-embedding with a differently sized model is refused up front, because a mapped vector dimension cannot be changed. And on OpenSearch, an index that was not built for vectors has to be closed, reconfigured and reopened to enable `index.knn` — briefly unavailable, which is reported because on a real cluster it is an outage to plan for. (Lab-created indexes already set it, so they skip that.)
+
+**From the CLI**, the full loop for dense vectors on all three engines:
 
 ```
 searchlab up --heap 2g
