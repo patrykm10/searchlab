@@ -937,7 +937,20 @@ section.collapsed h2 { margin-bottom: 0; }
       <div id="q-src-chips"></div>
     </div>
 
-    <div class="qrow">
+    <!-- ES/OS: aggregations, not just terms facets. The split between
+         bucket aggs (which group, and can hold more inside) and metric aggs
+         (which compute one number) is the thing worth seeing. -->
+    <div class="qrow esonly" id="q-agg-row" style="display:none">
+      <label>Aggregations</label>
+      <div id="q-aggs"></div>
+      <div class="frow" style="margin-top:8px">
+        <button class="btn preset" id="btn-addagg">Add aggregation</button>
+        <span class="desc" style="margin:0">bucket types group documents and
+          can hold a metric inside; metric types compute one number</span>
+      </div>
+    </div>
+
+    <div class="qrow" id="q-facet-row">
       <label for="q-facet">Facets</label>
       <div class="frow" style="margin-bottom:8px">
         <select id="q-facet"><option value="">choose a field…</option></select>
@@ -1679,6 +1692,8 @@ function applyEngineToQueryForm() {
   // the text boxes these replaced would be two ways to say the same thing
   $("q-sort").parentElement.style.display = es ? "none" : "";
   $("q-fl").parentElement.style.display = es ? "none" : "";
+  // the terms-only facet picker is subsumed by the aggregation builder
+  $("q-facet-row").style.display = es ? "none" : "";
   $("q-dsl-wrap").style.display = es ? "" : "none";
   onParserChange();
 }
@@ -1749,6 +1764,7 @@ async function loadFields(collection) {
       allFields.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
     renderConds();          // the field pickers follow the new collection
     renderSorts();
+    renderAggs();
     // facets only make sense on exact-match fields; analyzed text would
     // bucket by individual token, which is rarely what anyone wants
     const facetable = out.fields.filter(f => !f.text);
@@ -2043,6 +2059,122 @@ $("btn-addsrc").addEventListener("click", () => {
   $("q-src").value = "";
 });
 
+/* ---------- aggregations ----------
+   Bucket aggs group documents and can hold a metric inside them; metric
+   aggs compute one number over whatever they sit in. That split is the
+   whole mental model, so the builder puts it in the type list. */
+
+const aggs = [];
+
+const BUCKET_AGGS = [
+  ["terms", "terms — top values", "The values that occur most, with a count each. The everyday facet."],
+  ["range", "range — custom bands", "Buckets you define yourself. Bounds are half-open: from is included, to is not, so adjacent bands do not double-count."],
+  ["histogram", "histogram — fixed steps", "Even numeric buckets of a chosen width."],
+  ["date_histogram", "date_histogram — over time", "Buckets by calendar unit, so a month is a real month rather than 30 days."],
+];
+const METRIC_AGGS = [
+  ["stats", "stats — min/max/avg/sum", "All of them in one pass, which is cheaper than asking separately."],
+  ["avg", "avg — mean", "The mean of a numeric field."],
+  ["min", "min", "The smallest value."],
+  ["max", "max", "The largest value."],
+  ["sum", "sum", "The total."],
+  ["value_count", "value_count — how many values", "How many values were counted, which is not the document count when a field repeats."],
+  ["cardinality", "cardinality — distinct count", "Approximate number of distinct values. Approximate on purpose: exact distinct counts do not scale across shards."],
+  ["percentiles", "percentiles — p50/p95/p99", "The distribution rather than the average, which is what a latency figure actually needs."],
+];
+
+function aggFieldsFor(type) {
+  // every agg here needs doc values, so analysed text is out either way
+  return allFields.filter(f => !f.text).map(f => f.name);
+}
+
+function aggParamInput(a, i) {
+  if (a.type === "terms")
+    return `<input type="number" data-i="${i}" data-k="size" min="1" max="200"
+      placeholder="10" value="${esc(a.size || "")}" title="How many buckets to return.">`;
+  if (a.type === "range")
+    return `<input type="text" data-i="${i}" data-k="ranges"
+      placeholder="0-100, 100-500, 500-" value="${esc(a.ranges || "")}"
+      title="Bands, comma separated. Leave an end open with a trailing or leading dash.">`;
+  if (a.type === "histogram")
+    return `<input type="text" data-i="${i}" data-k="interval" placeholder="100"
+      value="${esc(a.interval || "")}" title="The width of each bucket.">`;
+  if (a.type === "date_histogram")
+    return `<select data-i="${i}" data-k="interval">
+      ${["minute","hour","day","week","month","quarter","year"].map(u =>
+        `<option${u === (a.interval || "day") ? " selected" : ""}>${u}</option>`).join("")}</select>`;
+  return `<span class="desc" style="margin:0">one value</span>`;
+}
+
+function isBucketAgg(type) { return BUCKET_AGGS.some(([v]) => v === type); }
+
+function renderAggs() {
+  const host = $("q-aggs");
+  if (!host) return;
+  host.innerHTML = aggs.map((a, i) => {
+    const names = aggFieldsFor(a.type);
+    const opt = (v, l, t, cur) =>
+      `<option value="${esc(v)}" title="${esc(t)}"${v === cur ? " selected" : ""}>${esc(l)}</option>`;
+    const sub = isBucketAgg(a.type) ? `
+      <select data-i="${i}" data-k="sub_type" title="A metric computed inside each bucket — average price per category, say.">
+        <option value="">no nested metric</option>
+        ${METRIC_AGGS.map(([v, l, t]) => opt(v, l, t, a.sub_type)).join("")}</select>
+      ${a.sub_type ? `<select data-i="${i}" data-k="sub_field">
+        <option value="">field…</option>
+        ${names.map(n => `<option${n === a.sub_field ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>` : ""}`
+      : "";
+    return `<div class="cond" style="grid-template-columns:190px 1fr 150px ${
+        isBucketAgg(a.type) ? (a.sub_type ? "170px 1fr" : "170px") : ""} auto">
+      <select data-i="${i}" data-k="type">
+        <optgroup label="bucket — groups documents">
+          ${BUCKET_AGGS.map(([v, l, t]) => opt(v, l, t, a.type)).join("")}</optgroup>
+        <optgroup label="metric — one number">
+          ${METRIC_AGGS.map(([v, l, t]) => opt(v, l, t, a.type)).join("")}</optgroup>
+      </select>
+      <select data-i="${i}" data-k="field">
+        <option value="">choose a field…</option>
+        ${names.map(n => `<option${n === a.field ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      ${aggParamInput(a, i)}
+      ${sub}
+      <button class="del" data-del="${i}" title="Remove this aggregation">&times;</button>
+    </div>`;
+  }).join("");
+
+  for (const el of host.querySelectorAll("[data-k]")) {
+    const set = () => { aggs[Number(el.dataset.i)][el.dataset.k] = el.value; };
+    el.addEventListener("change", () => {
+      set();
+      // changing the type changes which parameters belong on the row
+      if (["type", "sub_type"].includes(el.dataset.k)) renderAggs();
+      scheduleDsl();
+    });
+    if (el.tagName === "INPUT")
+      el.addEventListener("input", () => { set(); scheduleDsl(); });
+  }
+  for (const b of host.querySelectorAll("[data-del]")) {
+    b.addEventListener("click", () => {
+      aggs.splice(Number(b.dataset.del), 1);
+      renderAggs();
+      scheduleDsl();
+    });
+  }
+  scheduleDsl();
+}
+
+function aggReady(a) {
+  if (!a.field) return false;
+  if (a.type === "range") return !!(a.ranges || "").trim();
+  if (a.type === "histogram") return !!(a.interval || "").trim();
+  if (a.sub_type && !a.sub_field) return false;
+  return true;
+}
+
+$("btn-addagg").addEventListener("click", () => {
+  const names = aggFieldsFor("terms");
+  aggs.push({type: "terms", field: names[0] || "", size: ""});
+  renderAggs();
+});
+
 const facetFields = [];
 
 function renderFacetChips() {
@@ -2111,6 +2243,10 @@ function queryBody() {
   body.clauses = conds.map(c => ({...c, off: !condReady(c)}));
   body.sorts = sorts.filter(s => s.field);
   body.source_fields = srcFields;
+  body.aggs = aggs.map(a => ({...a, off: !aggReady(a)}));
+  // the terms-only facet picker is hidden on ES, so it must not also
+  // contribute a duplicate aggregation
+  body.facet_fields = [];
   body.qtype = semantic ? "knn" : p;
   if (a.fields) body.fields = $("q-qf").value;
   if (a.field) body.field = $("q-field").value;
@@ -2186,16 +2322,33 @@ function renderQueryResult(out) {
   $("q-summary").textContent =
     `${Number(out.num_found).toLocaleString()} hits · ${out.qtime} ms`;
 
-  // facet counts — clicking one adds it as a filter and re-runs, which is
-  // both the natural way to explore and how faceting is meant to be used
+  // Bucket counts stay clickable — that is how faceting is meant to be used.
+  // Metric aggregations have no buckets to click, so they are rendered as
+  // the numbers they are rather than left out of the page entirely.
+  const num = v => v == null ? "—"
+    : (Math.abs(v) >= 1000 || Number.isInteger(v))
+      ? Number(v).toLocaleString(undefined, {maximumFractionDigits: 2})
+      : Number(v).toFixed(2);
+  const agg = out.aggs || {};
   $("q-facets").innerHTML = Object.entries(out.facets || {}).map(([f, buckets]) => {
     if (!buckets.length) return "";
+    const metrics = ((agg[f] || {}).buckets || []);
     return `<div class="fgroup"><div class="fname">${esc(f)}</div>` +
-      buckets.map(b =>
-        `<button class="fbucket" data-field="${esc(f)}" data-value="${esc(b.value)}"
+      buckets.map((b, i) => {
+        const m = (metrics[i] || {}).metrics || {};
+        const extra = Object.entries(m).map(([k, v]) =>
+          ` · ${esc(k)} ${typeof v === "object" ? "" : num(v)}`).join("");
+        return `<button class="fbucket" data-field="${esc(f)}" data-value="${esc(b.value)}"
           title="Filter by ${esc(f)}:${esc(b.value)}">${esc(b.value)}
-          <b>${b.count.toLocaleString()}</b></button>`
-      ).join("") + `</div>`;
+          <b>${b.count.toLocaleString()}</b>${extra}</button>`;
+      }).join("") + `</div>`;
+  }).join("") +
+  Object.entries(agg).filter(([, a]) => a.kind !== "buckets").map(([name, a]) => {
+    const pairs = a.kind === "value" ? {[name]: a.value} : (a.values || {});
+    return `<div class="fgroup"><div class="fname">${esc(name)}</div>` +
+      Object.entries(pairs).map(([k, v]) =>
+        `<span class="fbucket" style="cursor:default">${esc(k)}
+          <b>${num(v)}</b></span>`).join("") + `</div>`;
   }).join("");
   for (const b of $("q-facets").querySelectorAll(".fbucket")) {
     b.addEventListener("click", () => {

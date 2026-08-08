@@ -1018,3 +1018,85 @@ def test_source_fields_come_from_the_picker_or_the_old_comma_string():
         {"fl": "id, title"})["_source"] == ["id", "title"]
     # nothing chosen means the whole document, so no _source key at all
     assert "_source" not in query_os.build_body({"source_fields": []})
+
+
+# -------------------------------------------------------- aggregations ----
+
+def test_a_metric_can_nest_inside_a_bucket():
+    """Average price per category is the thing aggregations are for, and it
+    is the one shape a terms-only facet picker cannot express."""
+    body = query_os.build_body({"aggs": [
+        {"type": "terms", "field": "cat", "size": 5,
+         "sub_type": "avg", "sub_field": "price"}]})
+    agg = body["aggs"]["terms_cat"]
+    assert agg["terms"] == {"field": "cat", "size": 5}
+    assert agg["aggs"] == {"avg_price": {"avg": {"field": "price"}}}
+
+
+def test_nothing_can_nest_inside_a_metric():
+    """A metric is one number, not a group — so there is nothing to nest in."""
+    with pytest.raises(ValueError, match="nothing can nest inside it"):
+        query_os.build_body({"aggs": [
+            {"type": "avg", "field": "price",
+             "sub_type": "max", "sub_field": "price"}]})
+
+
+def test_range_bounds_are_half_open_so_bands_do_not_double_count():
+    body = query_os.build_body({"aggs": [
+        {"type": "range", "field": "price", "ranges": "0-100, 100-500, 500-"}]})
+    assert body["aggs"]["range_price"]["range"]["ranges"] == [
+        {"from": 0, "to": 100}, {"from": 100, "to": 500}, {"from": 500}]
+
+
+def test_a_date_histogram_uses_calendar_intervals():
+    """calendar_interval understands a month as a real month; fixed_interval
+    cannot say that."""
+    body = query_os.build_body({"aggs": [
+        {"type": "date_histogram", "field": "created", "interval": "month"}]})
+    assert body["aggs"]["date_histogram_created"]["date_histogram"] == {
+        "field": "created", "calendar_interval": "month"}
+
+
+@pytest.mark.parametrize("spec,msg", [
+    ({"type": "terms"}, "needs a field"),
+    ({"type": "nonsense", "field": "a"}, "Aggregation must be one of"),
+    ({"type": "histogram", "field": "a"}, "positive interval"),
+    ({"type": "range", "field": "a", "ranges": "100"}, "needs a dash"),
+    ({"type": "terms", "field": "a", "sub_type": "nope", "sub_field": "b"},
+     "nested aggregation must be one of"),
+    ({"type": "terms", "field": "a", "sub_type": "avg"}, "nested avg needs a field"),
+])
+def test_a_broken_aggregation_names_what_is_wrong(spec, msg):
+    with pytest.raises(ValueError, match=msg):
+        query_os.build_body({"aggs": [spec]})
+
+
+def test_the_older_facet_spelling_still_produces_a_terms_agg():
+    body = query_os.build_body({"facet_fields": ["cat"], "facet_limit": 3})
+    assert body["aggs"] == {"cat": {"terms": {"field": "cat", "size": 3}}}
+
+
+def test_metric_results_are_read_as_values_not_hunted_for_buckets():
+    facets, aggs = query_os._read_aggs({
+        "stats_price": {"count": 3, "min": 1.0, "max": 9.0, "avg": 5.0, "sum": 15.0},
+        "distinct_brand": {"value": 42},
+        "p_latency": {"values": {"95.0": 210.5}},
+    })
+    assert facets == {}                      # nothing to click
+    assert aggs["distinct_brand"] == {"kind": "value", "value": 42}
+    assert aggs["p_latency"]["values"] == {"95.0": 210.5}
+    assert aggs["stats_price"]["values"]["avg"] == 5.0
+
+
+def test_bucket_results_carry_whatever_was_nested_in_them():
+    facets, aggs = query_os._read_aggs({"by_cat": {"buckets": [
+        {"key": "toys", "doc_count": 7, "avg_price": {"value": 12.5}}]}})
+    # the clickable strip keeps its old shape
+    assert facets["by_cat"] == [{"value": "toys", "count": 7}]
+    assert aggs["by_cat"]["buckets"][0]["metrics"] == {"avg_price": 12.5}
+
+
+def test_range_buckets_are_named_by_their_bounds():
+    facets, _ = query_os._read_aggs({"bands": {"buckets": [
+        {"from": 0.0, "to": 100.0, "doc_count": 4}]}})
+    assert facets["bands"][0]["value"] == "0.0–100.0"

@@ -307,6 +307,115 @@ def _put(target: dict, key: str, value) -> None:
         target[key] = value
 
 
+# Aggregations split into two kinds, and the split is the thing worth
+# learning: bucket aggs group documents and can hold further aggs inside
+# them; metric aggs compute one answer over whatever bucket they sit in.
+BUCKET_AGGS = ("terms", "range", "histogram", "date_histogram")
+METRIC_AGGS = ("stats", "cardinality", "percentiles",
+               "min", "max", "avg", "sum", "value_count")
+AGG_TYPES = BUCKET_AGGS + METRIC_AGGS
+
+
+def _ranges(raw) -> list[dict]:
+    """"0-100, 100-500, 500-" as range buckets.
+
+    The bounds are half-open — from is included, to is not — so adjacent
+    buckets written this way do not double-count the boundary value.
+    """
+    if isinstance(raw, list):
+        return raw
+    out = []
+    for chunk in str(raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" not in chunk:
+            raise ValueError(
+                f"Range “{chunk}” needs a dash, as in 0-100, 100-500, 500-.")
+        low, _, high = chunk.partition("-")
+        bucket = {}
+        if low.strip():
+            bucket["from"] = _scalar(low)
+        if high.strip():
+            bucket["to"] = _scalar(high)
+        if not bucket:
+            raise ValueError(f"Range “{chunk}” needs at least one bound.")
+        out.append(bucket)
+    if not out:
+        raise ValueError("A range aggregation needs at least one bucket.")
+    return out
+
+
+def _agg_clause(spec: dict) -> dict:
+    """One aggregation, as its DSL body (without a name)."""
+    atype = (spec.get("type") or "terms").strip()
+    if atype not in AGG_TYPES:
+        raise ValueError(f"Aggregation must be one of {', '.join(AGG_TYPES)}.")
+    field = (spec.get("field") or "").strip()
+    if not field:
+        raise ValueError(f"The {atype} aggregation needs a field.")
+
+    if atype == "terms":
+        inner: dict = {"terms": {"field": field,
+                                 "size": int(spec.get("size") or 10)}}
+    elif atype == "range":
+        inner = {"range": {"field": field, "ranges": _ranges(spec.get("ranges"))}}
+    elif atype == "histogram":
+        interval = _scalar(spec.get("interval"))
+        if not isinstance(interval, (int, float)) or interval <= 0:
+            raise ValueError("A histogram needs a positive interval.")
+        inner = {"histogram": {"field": field, "interval": interval}}
+    elif atype == "date_histogram":
+        # calendar_interval understands "month" meaning actual months, which
+        # fixed_interval cannot express
+        inner = {"date_histogram": {
+            "field": field,
+            "calendar_interval": (spec.get("interval") or "day").strip()}}
+    else:
+        inner = {atype: {"field": field}}
+
+    sub_type = (spec.get("sub_type") or "").strip()
+    if sub_type:
+        if atype not in BUCKET_AGGS:
+            raise ValueError(
+                f"“{atype}” computes a single value, so nothing can nest "
+                f"inside it. Only {', '.join(BUCKET_AGGS)} form buckets.")
+        if sub_type not in METRIC_AGGS:
+            raise ValueError(
+                f"The nested aggregation must be one of "
+                f"{', '.join(METRIC_AGGS)}.")
+        sub_field = (spec.get("sub_field") or "").strip()
+        if not sub_field:
+            raise ValueError(f"The nested {sub_type} needs a field.")
+        inner["aggs"] = {f"{sub_type}_{sub_field}":
+                         {sub_type: {"field": sub_field}}}
+    return inner
+
+
+def _agg_name(spec: dict) -> str:
+    name = (spec.get("name") or "").strip()
+    if name:
+        return name
+    return f"{(spec.get('type') or 'terms').strip()}_" \
+           f"{(spec.get('field') or '').strip()}"
+
+
+def _aggs(body: dict) -> dict:
+    """Structured aggregations, plus the older facet_fields spelling."""
+    out: dict = {}
+    for spec in body.get("aggs") or []:
+        if not isinstance(spec, dict) or spec.get("off"):
+            continue
+        out[_agg_name(spec)] = _agg_clause(spec)
+
+    facets = [f for f in (body.get("facet_fields") or []) if f]
+    if facets:
+        limit = int(body.get("facet_limit") or 10)
+        for field in facets:
+            out.setdefault(field, {"terms": {"field": field, "size": limit}})
+    return out
+
+
 def _sorts(body: dict) -> list:
     """Sort keys, structured or in Solr's "field desc" spelling.
 
@@ -393,10 +502,9 @@ def build_body(body: dict, embedder=None) -> dict:
     if fl:
         out["_source"] = fl
 
-    facets = [f for f in (body.get("facet_fields") or []) if f]
-    if facets:
-        limit = int(body.get("facet_limit") or 10)
-        out["aggs"] = {f: {"terms": {"field": f, "size": limit}} for f in facets}
+    aggs = _aggs(body)
+    if aggs:
+        out["aggs"] = aggs
 
     _put(out, "highlight", _highlight(body))
     _put(out, "min_score", _num(body, "min_score", "Minimum score", 0, 1e6))
@@ -449,6 +557,56 @@ def _shorten_vectors(node) -> None:
     elif isinstance(node, list):
         for item in node:
             _shorten_vectors(item)
+
+
+def _nested_metrics(bucket: dict) -> dict:
+    """Whatever a bucket agg had nested inside it, per bucket."""
+    out = {}
+    for key, value in bucket.items():
+        if key in ("key", "key_as_string", "doc_count", "from", "to"):
+            continue
+        if isinstance(value, dict):
+            if "value" in value:
+                out[key] = value["value"]
+            elif "values" in value:          # percentiles
+                out[key] = value["values"]
+            else:                            # stats and friends
+                out[key] = {k: v for k, v in value.items()
+                            if isinstance(v, (int, float))}
+    return out
+
+
+def _read_aggs(raw: dict) -> tuple[dict, dict]:
+    """Normalize aggregation results into buckets and single values.
+
+    Returns (facets, aggs). `facets` keeps the old bucket-only shape the
+    clickable facet strip already renders; `aggs` carries everything,
+    including metrics, which have no buckets to click.
+    """
+    facets: dict = {}
+    aggs: dict = {}
+    for name, agg in raw.items():
+        if "buckets" in agg:
+            buckets = []
+            for b in agg["buckets"]:
+                key = b.get("key_as_string", b.get("key"))
+                if key is None and ("from" in b or "to" in b):
+                    # range buckets are named by their bounds
+                    key = f"{b.get('from', '')}–{b.get('to', '')}"
+                buckets.append({"value": key, "count": b.get("doc_count"),
+                                "metrics": _nested_metrics(b)})
+            facets[name] = [{"value": b["value"], "count": b["count"]}
+                            for b in buckets]
+            aggs[name] = {"kind": "buckets", "buckets": buckets}
+        elif "value" in agg:
+            aggs[name] = {"kind": "value", "value": agg["value"]}
+        elif "values" in agg:
+            aggs[name] = {"kind": "values", "values": agg["values"]}
+        else:
+            aggs[name] = {"kind": "values",
+                          "values": {k: v for k, v in agg.items()
+                                     if isinstance(v, (int, float))}}
+    return facets, aggs
 
 
 def _deepest_reason(node: dict) -> str:
@@ -550,10 +708,7 @@ def run_query(spec: ClusterSpec, index: str, body: dict,
     total = hits.get("total")
     num_found = total.get("value") if isinstance(total, dict) else total
 
-    facets = {}
-    for field, agg in (data.get("aggregations") or {}).items():
-        facets[field] = [{"value": b.get("key"), "count": b.get("doc_count")}
-                         for b in agg.get("buckets", [])]
+    facets, aggs = _read_aggs(data.get("aggregations") or {})
 
     docs = []
     for h in hits.get("hits", []):
@@ -571,6 +726,7 @@ def run_query(spec: ClusterSpec, index: str, body: dict,
         "qtime": data.get("took"),
         "docs": docs,
         "facets": facets,
+        "aggs": aggs,
         "raw": data,
     }
     profile = data.get("profile")
