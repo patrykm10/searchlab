@@ -355,6 +355,24 @@ canvas { width: 100%; height: 150px; display: block;
 .qsplit select, .qsplit3 select,
 .qsplit input, .qsplit3 input { width: 100%; max-width: 100%; }
 
+/* a label that explains itself on hover */
+.hashelp { cursor: help; text-decoration: underline dotted var(--faint);
+  text-underline-offset: 3px; }
+.hashelp:hover { color: var(--cobalt); text-decoration-color: var(--cobalt); }
+#phelp[hidden] { display: none; }
+#phelp { position: fixed; z-index: 40; width: 330px; max-width: calc(100vw - 24px);
+  background: #fff; border: 1.5px solid var(--ink); padding: 11px 13px;
+  box-shadow: 3px 3px 0 var(--cobalt-soft); }
+#phelp b { display: block; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint);
+  margin-bottom: 6px; }
+#phelp p { font-size: 13px; line-height: 1.5; color: var(--ink); }
+/* the other engine's spelling for the same idea — the translation this lab
+   exists to teach, so it gets its own line rather than a clause */
+#phelp .cross { margin-top: 8px; padding-top: 7px;
+  border-top: 1px solid var(--line); font-family: var(--mono);
+  font-size: 11.5px; line-height: 1.45; color: var(--cobalt); }
+
 /* named blocks, so the form reads as four decisions rather than 14 knobs */
 .qgroup { border-top: 1px solid var(--line); padding-top: 16px; margin-bottom: 26px; }
 .qgroup:first-child { border-top: none; padding-top: 0; }
@@ -929,7 +947,7 @@ section.collapsed h2 { margin-bottom: 0; }
          clause in the bool query, and the occurrence picker is the point —
          it is where "counts toward the score" and "merely filters" differ. -->
     <div class="qrow esonly" id="q-cond-row" style="display:none">
-      <label>Conditions</label>
+      <label data-help="q-conds">Conditions</label>
       <div id="q-conds"></div>
       <div class="frow" style="margin-top:8px">
         <button class="btn preset" id="btn-addcond">Add condition</button>
@@ -1041,12 +1059,14 @@ section.collapsed h2 { margin-bottom: 0; }
 
     <div class="frow" style="margin-top:18px">
       <button class="btn primary" id="btn-runquery">Run query</button>
-      <label style="text-transform:none; letter-spacing:0; font-family:var(--sans);
+      <label data-help="q-explain" data-help-title="explain"
+             style="text-transform:none; letter-spacing:0; font-family:var(--sans);
                     font-size:13px; color:var(--ink); cursor:pointer">
         <input type="checkbox" id="q-explain" style="vertical-align:-1px">
         explain — parsed query, timing and scoring
       </label>
-      <label class="esonly" id="q-tth-wrap" style="display:none;
+      <label class="esonly" id="q-tth-wrap" data-help="q-tth"
+             data-help-title="track_total_hits" style="display:none;
                     text-transform:none; letter-spacing:0; font-family:var(--sans);
                     font-size:13px; color:var(--ink); cursor:pointer">
         <input type="checkbox" id="q-tth" style="vertical-align:-1px">
@@ -1058,7 +1078,7 @@ section.collapsed h2 { margin-bottom: 0; }
     <div class="frow" style="margin-top:6px; padding-top:14px;
                              border-top:1px solid var(--line)">
       <button class="btn" id="btn-queryload">Run this as a load test</button>
-      <label for="q-load-rps">at</label>
+      <label for="q-load-rps" data-help-title="Load test rate">at</label>
       <input type="number" id="q-load-rps" value="50" min="1" max="2000"
              style="width:80px">
       <span class="desc" style="margin:0">req/s — fires this exact query
@@ -1750,8 +1770,213 @@ const ES_LABELS = {"q-fq": "Raw filters — Lucene syntax, for what the menus ca
 
 function setLabel(id, text) {
   const el = document.querySelector(`label[for="${id}"]`);
-  if (el) el.textContent = text;
+  if (el) el.textContent = text;   // help hangs off the class, not children
 }
+
+/* ---------- parameter help ----------
+   Every control here is a real engine parameter, and what is worth knowing
+   is rarely what it is called — it is what it changes and when you would
+   reach for it. Each entry is [what it does and when, other engine's name
+   for the same idea]. Solr and OS/ES get separate text where the parameter
+   genuinely differs, rather than one description hedged to cover both. */
+
+const PARAM_HELP = {
+  "q-q": {
+    es: ["The text to search for. Everything else here decides how it is read: the query type picks which clause it becomes, and the conditions below wrap that clause in a bool. Leave it at *:* — which builds a match_all — when the filters or the aggregations are the point.",
+         "Solr: q"],
+    solr: ["The q parameter, read by whichever parser you pick below. *:* matches every document, which is what you want when the filters or facets are doing the real work.",
+           "OS/ES: the query text, whatever clause you build from it"],
+  },
+  "q-parser": {
+    es: ["Which clause the query text becomes — multi_match spreads it over several fields, match takes one, term does no analysis at all and matches the value byte for byte. This is where ES makes the choice Solr makes with a parser.",
+         "Solr: defType"],
+    solr: ["Which parser reads the query box. lucene wants exact syntax and field names; edismax takes plain words and spreads them over the fields in qf. Use edismax for anything a person typed, because a stray colon in lucene syntax is a 400, not a search.",
+           "OS/ES: no parser switch — you pick a query clause instead"],
+  },
+  "q-qf": {
+    es: ["Which fields multi_match searches, and what each is worth. title_t^3 counts a title match three times as heavily as one elsewhere. A boost is a multiplier on the score, never a filter — a field with no boost still matches.",
+         "Solr: qf"],
+    solr: ["Which fields edismax searches, and what each is worth. title_t^3 counts a title match three times as heavily as one elsewhere. Boosts scale the score; they never exclude anything.",
+           "OS/ES: the fields array on multi_match, same ^ syntax"],
+  },
+  "q-field": {
+    es: ["The single field for match, match_phrase and term. These clauses take exactly one — when the words could be in any of several fields, that is what multi_match is for."],
+  },
+  "q-vecfield": {
+    es: ["The field holding the embeddings to search. It has to have been filled in already: the Vector Search section above reads an existing text field, embeds it, and writes the vectors here.",
+         "Solr: the dense vector field on a knn query"],
+    solr: ["The dense vector field to search with knn. Populate it from the Vector Search section above before querying it."],
+  },
+  "q-mmtype": {
+    es: ["How the per-field scores are combined. best_fields takes the single strongest field, which is right when the words belong together in one place; most_fields adds every field's score, for text indexed several ways; cross_fields treats the listed fields as one, for input split across columns like first and last name. Reach past best_fields when the words are spread across fields rather than sitting in one.",
+         "Solr: roughly the dismax/edismax scoring model, with tie as the dial"],
+  },
+  "q-operator": {
+    es: ["Whether every word in the query has to match or only one. AND narrows hard and suits short precise queries; OR is the default and lets one strong word carry a match. If neither is right, minimum_should_match is the dial between them.",
+         "Solr: q.op"],
+    solr: ["Solr's q.op. AND makes every term required, OR makes any one enough. On edismax, mm is the finer-grained control and overrides this.",
+           "OS/ES: the operator key on match and multi_match"],
+  },
+  "q-msm": {
+    es: ["How many of the optional clauses must match — a count (2) or a share (75%). It is the middle ground between OR and AND: loose enough to survive one stray word, strict enough to reject a single-word coincidence. Set it whenever people type multi-word queries.",
+         "Solr: mm — same syntax, same semantics"],
+    solr: ["Solr's mm. How many of the query's terms must match, as a count or a percentage, so a four-word query can tolerate one miss without letting a one-word match through.",
+           "OS/ES: minimum_should_match"],
+  },
+  "q-fuzziness": {
+    es: ["How many single-character edits a term may be off and still match. AUTO scales that with word length — no edits under three letters, one up to five, two beyond — which is almost always the right answer. It buys typo tolerance and costs both speed and precision, and the phrase types reject it outright.",
+         "Solr: the ~ operator, e.g. thundr~1"],
+  },
+  "q-tiebreak": {
+    es: ["What the losing fields are worth once best_fields has picked a winner, from 0 to 1. At 0 only the best field scores at all, so a document matching in three fields ranks the same as one matching in the best; raising it lets breadth break ties. 0.2 to 0.3 is the usual starting point.",
+         "Solr: tie"],
+  },
+  "q-slop": {
+    es: ["How far the phrase's words may drift apart and still count as a phrase. 0 means strictly adjacent; 2 tolerates a word in between, or a pair swapped around. Raise it when phrasing varies but order still carries meaning.",
+         "Solr: qs and ps, or the ~N after a quoted phrase"],
+  },
+  "q-fq": {
+    es: ["Lucene syntax, for the things the condition menus cannot say. It becomes a query_string clause under filter, so it narrows the set without contributing to the score — the same job Solr gives fq.",
+         "Solr: fq"],
+    solr: ["fq narrows the result set without touching the score, and each line is cached in the filterCache on its own. That is why a repeated filter is nearly free — and why putting the part that changes every request in here just churns the cache.",
+           "OS/ES: the filter occurrence inside bool"],
+  },
+  "q-rows": {
+    es: ["How many hits come back. It does not change what matched: aggregations still run over the whole result set, so size 0 is the normal way to ask a purely analytical question.",
+         "Solr: rows"],
+    solr: ["How many documents come back in this page. It changes nothing about what matched — numFound and the facet counts are over everything.",
+           "OS/ES: size"],
+  },
+  "q-sort": {
+    solr: ["field direction, comma separated when you want tie-breaks: price_f desc, id asc. Sorting replaces relevance ordering entirely, and the field needs docValues to sort on at all.",
+           "OS/ES: the sort array, one object per key"],
+  },
+  "q-fl": {
+    solr: ["Which stored fields come back on each document. Trimming it is the cheapest latency win available when documents are large, because the cost is in fetching and serialising them, not in matching.",
+           "OS/ES: _source"],
+  },
+  "q-from": {
+    es: ["Skip this many hits before the page you want. from + size cannot exceed index.max_result_window, 10,000 by default, because every shard has to build and return that entire prefix for the coordinator to merge. Deep paging is what search_after exists for.",
+         "Solr: start, with the same ceiling and cursorMark as the answer"],
+  },
+  "q-highlight": {
+    es: ["Return the matching fragments with the matched terms marked, so you can see why a document matched rather than guessing. It re-analyses the field for every hit on the page, so it is not free.",
+         "Solr: hl.fl"],
+  },
+  "q-minscore": {
+    es: ["Drop hits scoring below this. Scores are relative to one query and one index state, not an absolute quality scale, so a cutoff tuned today quietly changes meaning when the query or the data does — useful for exploring, risky in production."],
+  },
+  "q-src": {
+    es: ["Which fields come back on each hit. With none chosen the whole stored document comes back, which is usually far more than the page needs.",
+         "Solr: fl"],
+  },
+  "q-facet": {
+    solr: ["Counts the values of this field across everything that matched, not just the rows returned. An analysed text field has no docValues and cannot be faceted — face the string copy of it instead.",
+           "OS/ES: a terms aggregation"],
+  },
+  "q-facet-limit": {
+    solr: ["How many values come back per field. On a sharded collection a low limit makes counts approximate: a value that is popular overall but top-N on no single shard can be missed entirely.",
+           "OS/ES: the size key on a terms agg, with the same shard caveat"],
+  },
+  "q-conds": {
+    es: ["Each row becomes one clause in the bool query, and the box on the left is the interesting part. must and should are scored; filter and must_not are not — they only narrow, which makes them cacheable and cheaper. Same condition, four quite different meanings."],
+  },
+  "q-explain": {
+    es: ["Runs the query with the Profile API and reports the rewritten Lucene query and where the time actually went, per component. The rewritten form is the useful part: it shows the boosts and the clause structure the engine really executed.",
+         "Solr: debugQuery, which gives the parsed query and a score breakdown"],
+    solr: ["Runs the query with debugQuery, which returns the parsed query and a term-by-term breakdown of how each score was arrived at. The parsed form is the useful half — it shows what the parser did with what you typed, boosts and all, which is often not what you meant.",
+           "OS/ES: the Profile API, which reports timing per component too"],
+  },
+  "q-tth": {
+    es: ["By default ES stops counting at 10,000 matches and reports the total as a lower bound. Turning this on makes it count every match exactly, which costs real time on a large index and is worth it only when the number itself matters."],
+  },
+  "q-load-rps": {
+    es: ["Requests per second, fired open-loop: the generator does not wait for a response before sending the next one. That is the point — a server that slows down shows up as a growing queue rather than as a client that politely sends less. Closed-loop tools hide exactly the failure you are trying to see."],
+    solr: ["Requests per second, fired open-loop: the generator does not wait for a response before sending the next one. A server that slows down therefore builds a queue, instead of quietly receiving less traffic and looking healthier than it is."],
+  },
+};
+
+/* One card, moved around and refilled. Built with textContent rather than
+   innerHTML because the text is prose with punctuation in it. */
+const helpCard = Object.assign(document.createElement("div"),
+                               {id: "phelp", hidden: true});
+document.body.appendChild(helpCard);
+
+function paramHelp(key) {
+  const h = PARAM_HELP[key];
+  if (!h) return null;
+  return h[isES() ? "es" : "solr"] || null;
+}
+
+let helpFor = null;      // what the card is currently describing
+
+function placeParamHelp(anchor, key) {
+  // Clear of the control, not on top of it: anchoring to the label alone
+  // drops the card straight over the thing you are reading about.
+  const ctl = document.getElementById(key);
+  const box = (ctl && ctl.offsetParent) ? ctl : anchor;
+  const r = box.getBoundingClientRect();
+  // whichever of the two sits higher: a label beside its control is
+  // baseline-aligned, so it starts a few pixels below the box it names
+  const top = Math.min(anchor.getBoundingClientRect().top, r.top);
+  const w = helpCard.offsetWidth, ht = helpCard.offsetHeight;
+  let x = r.left, y = r.bottom + 7;
+  if (x + w > window.innerWidth - 12) x = window.innerWidth - w - 12;
+  if (y + ht > window.innerHeight - 12) y = top - ht - 7;   // flip above
+  helpCard.style.left = Math.max(12, x) + "px";
+  helpCard.style.top = Math.max(12, y) + "px";
+}
+
+function showParamHelp(anchor, key) {
+  const h = paramHelp(key);
+  if (!h) return;
+  helpCard.textContent = "";
+  const title = document.createElement("b");
+  title.textContent = anchor.dataset.helpTitle || anchor.textContent.trim();
+  const body = document.createElement("p");
+  body.textContent = h[0];
+  helpCard.append(title, body);
+  if (h[1]) {
+    const cross = document.createElement("div");
+    cross.className = "cross";
+    cross.textContent = h[1];
+    helpCard.append(cross);
+  }
+  helpCard.hidden = false;
+  helpFor = {anchor, key};
+  placeParamHelp(anchor, key);
+}
+
+function hideParamHelp() { helpCard.hidden = true; helpFor = null; }
+
+/* Hover for the mouse, focus for the keyboard: tabbing onto a control
+   should explain it the same way pointing at its label does. */
+function wireParamHelp() {
+  for (const key of Object.keys(PARAM_HELP)) {
+    const label = document.querySelector(`label[for="${key}"]`)
+               || document.querySelector(`[data-help="${key}"]`);
+    if (!label) continue;
+    label.classList.add("hashelp");
+    label.addEventListener("mouseenter", () => showParamHelp(label, key));
+    label.addEventListener("mouseleave", hideParamHelp);
+    const ctl = document.getElementById(key);
+    if (ctl) {
+      ctl.addEventListener("focus", () => showParamHelp(label, key));
+      ctl.addEventListener("blur", hideParamHelp);
+    }
+  }
+  addEventListener("keydown", e => { if (e.key === "Escape") hideParamHelp(); });
+  // Tabbing onto a control scrolls it into view, so dismissing on scroll
+  // would close the card the same keystroke just opened. Follow the anchor
+  // instead, and only give up once it has left the viewport.
+  addEventListener("scroll", () => {
+    if (!helpFor) return;
+    const r = helpFor.anchor.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) hideParamHelp();
+    else placeParamHelp(helpFor.anchor, helpFor.key);
+  }, true);
+}
+wireParamHelp();
 
 /* Reshape the query form for the running engine. Runs once the first
    snapshot says which one it is, and again if it ever changes. */
