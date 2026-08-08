@@ -1,0 +1,1329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Searchlab: a workshop for search engines</title>
+<meta name="description" content="Start throwaway SolrCloud, Elasticsearch, or OpenSearch clusters on your laptop. Shape the data yourself, put honest load on it, turn the knobs, and see what changed.">
+
+<!--
+  Self-hosting note: this page uses system font stacks so it works offline with
+  zero requests. If you deploy it somewhere with a network, you can opt into the
+  same faces the solrlab dashboard uses by adding this to <head> and swapping
+  --font-display / --font-body below:
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75,600;75,800;100,400&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  Before publishing, replace the two placeholders:
+    GITHUB_URL    -> your repository URL
+    COFFEE_URL    -> your buymeacoffee.com/<handle> URL
+-->
+
+<style>
+/* ============================================================
+   TOKENS
+   Light = the dashboard's millimeter-paper heritage.
+   Dark  = the same instrument, lights off.
+   ============================================================ */
+:root{
+  --ground:#F5F6F4;
+  --surface:#FBFCFA;
+  --surface-2:#FFFFFF;
+  --raise:rgba(20,22,26,.055);
+  --line:#DCDFDB;
+  --line-soft:#E6E8E4;
+  --text:#14161A;
+  --text-strong:#080A0D;
+  --muted:#5B6068;
+  --signal:#2743C7;
+  --signal-ink:#FFFFFF;
+  --trace-lat:#B3362B;
+  --trace-heap:#2743C7;
+  --trace-rate:#2F7D51;
+  --grid:rgba(39,67,199,.07);
+  --grid-major:rgba(39,67,199,.14);
+  --shadow:0 1px 2px rgba(20,22,26,.06), 0 8px 24px -16px rgba(20,22,26,.32);
+  --glow:none;
+
+  --font-display:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+  --font-body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --font-mono:var(--font-display);
+
+  --measure:65ch;
+  --gutter:clamp(20px,5vw,64px);
+  --maxw:1180px;
+  --radius:10px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ground:#0A0D14;
+    --surface:#10141D;
+    --surface-2:#161B26;
+    --raise:rgba(150,170,215,.07);
+    --line:#232A39;
+    --line-soft:#1A202C;
+    --text:#DDE2EC;
+    --text-strong:#F2F5FB;
+    --muted:#868D9C;
+    --signal:#7C9BFF;
+    --signal-ink:#080C18;
+    --trace-lat:#FF6B57;
+    --trace-heap:#7C9BFF;
+    --trace-rate:#4FD48A;
+    --grid:rgba(124,155,255,.07);
+    --grid-major:rgba(124,155,255,.15);
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 20px 50px -30px rgba(0,0,0,.9);
+    --glow:0 0 24px -6px rgba(124,155,255,.40);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0A0D14; --surface:#10141D; --surface-2:#161B26;
+  --raise:rgba(150,170,215,.07); --line:#232A39; --line-soft:#1A202C;
+  --text:#DDE2EC; --text-strong:#F2F5FB; --muted:#868D9C;
+  --signal:#7C9BFF; --signal-ink:#080C18;
+  --trace-lat:#FF6B57; --trace-heap:#7C9BFF; --trace-rate:#4FD48A;
+  --grid:rgba(124,155,255,.07); --grid-major:rgba(124,155,255,.15);
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 20px 50px -30px rgba(0,0,0,.9);
+  --glow:0 0 24px -6px rgba(124,155,255,.40);
+}
+:root[data-theme="light"]{
+  --ground:#F5F6F4; --surface:#FBFCFA; --surface-2:#FFFFFF;
+  --raise:rgba(20,22,26,.055); --line:#DCDFDB; --line-soft:#E6E8E4;
+  --text:#14161A; --text-strong:#080A0D; --muted:#5B6068;
+  --signal:#2743C7; --signal-ink:#FFFFFF;
+  --trace-lat:#B3362B; --trace-heap:#2743C7; --trace-rate:#2F7D51;
+  --grid:rgba(39,67,199,.07); --grid-major:rgba(39,67,199,.14);
+  --shadow:0 1px 2px rgba(20,22,26,.06), 0 8px 24px -16px rgba(20,22,26,.32);
+  --glow:none;
+}
+
+/* ============================================================ RESET */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--text);
+  font-family:var(--font-body);
+  font-size:16px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+img,canvas,svg{display:block;max-width:100%}
+a{color:inherit}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--signal);outline-offset:3px;border-radius:4px}
+
+/* ============================================================ PRIMITIVES */
+.wrap{width:100%;max-width:var(--maxw);margin-inline:auto;padding-inline:var(--gutter)}
+
+.eyebrow{
+  font-family:var(--font-mono);
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+
+h1,h2,h3{
+  font-family:var(--font-display);
+  color:var(--text-strong);
+  text-wrap:balance;
+  margin:0;
+  font-weight:700;
+}
+h1{
+  font-size:clamp(2rem,4.1vw,3.05rem);
+  line-height:1.02;
+  letter-spacing:-.05em;
+  max-width:15ch;
+}
+h2{
+  font-size:clamp(1.55rem,3.2vw,2.35rem);
+  line-height:1.06;
+  letter-spacing:-.038em;
+}
+h3{
+  font-size:1.02rem;
+  line-height:1.3;
+  letter-spacing:-.02em;
+}
+p{margin:0}
+.lede{
+  font-size:clamp(1.02rem,1.55vw,1.18rem);
+  line-height:1.62;
+  color:var(--muted);
+  max-width:var(--measure);
+}
+.prose{color:var(--muted);max-width:var(--measure)}
+strong{color:var(--text-strong);font-weight:600}
+
+.rule{height:1px;background:var(--line-soft);border:0;margin:0}
+
+/* Section rhythm: one selector owns vertical space, so nothing fights. */
+.band{padding-block:clamp(40px,5vw,68px)}
+.band--tight{padding-block:clamp(30px,3.6vw,48px)}
+.band--alt{background:var(--surface);border-block:1px solid var(--line-soft)}
+
+.head{display:flex;flex-direction:column;gap:13px;margin-bottom:clamp(26px,3.4vw,42px)}
+
+/* ============================================================ NAV */
+.nav{
+  position:sticky;top:0;z-index:50;
+  background:color-mix(in srgb, var(--ground) 82%, transparent);
+  backdrop-filter:blur(14px) saturate(150%);
+  -webkit-backdrop-filter:blur(14px) saturate(150%);
+  border-bottom:1px solid transparent;
+  transition:border-color .25s, background .25s;
+}
+.nav.is-stuck{border-bottom-color:var(--line-soft)}
+.nav__in{
+  display:flex;align-items:center;gap:12px;
+  height:62px;
+  width:100%;max-width:var(--maxw);margin-inline:auto;padding-inline:var(--gutter);
+}
+.mark{
+  display:flex;align-items:center;gap:9px;
+  font-family:var(--font-display);
+  font-weight:700;letter-spacing:-.03em;font-size:15px;
+  color:var(--text-strong);text-decoration:none;
+  margin-right:6px;
+}
+.mark__glyph{width:20px;height:20px;flex:none}
+.pill{
+  font-family:var(--font-mono);font-size:10.5px;font-weight:600;
+  letter-spacing:.06em;
+  padding:2px 7px;border-radius:99px;
+  border:1px solid var(--line);color:var(--muted);
+}
+.nav__links{display:flex;gap:4px;margin-left:auto}
+.nav__links a{
+  font-size:13.5px;color:var(--muted);text-decoration:none;
+  padding:7px 11px;border-radius:7px;transition:color .18s,background .18s;
+}
+.nav__links a:hover{color:var(--text-strong);background:var(--raise)}
+.nav__end{display:flex;align-items:center;gap:8px;margin-left:10px}
+@media(max-width:860px){.nav__links{display:none}.nav__end{margin-left:auto}}
+/* keep the bar from overflowing on phones: shed the optional chrome first */
+@media(max-width:560px){
+  .nav__in{gap:8px}
+  .pill{display:none}
+  .nav__end .btn--ghost span{display:none}
+}
+.lbl-short{display:none}
+@media(max-width:430px){
+  .nav__end .btn--ghost{padding-inline:9px}
+  .nav__in{--gutter:16px}
+  .lbl-long{display:none}
+  .lbl-short{display:inline}
+}
+
+.iconbtn{
+  width:34px;height:34px;display:grid;place-items:center;
+  border:1px solid var(--line);border-radius:8px;color:var(--muted);
+  transition:color .18s,border-color .18s;
+}
+.iconbtn:hover{color:var(--text-strong);border-color:var(--muted)}
+.iconbtn svg{width:15px;height:15px}
+
+/* ============================================================ BUTTONS */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--font-mono);font-size:13px;font-weight:600;letter-spacing:-.01em;
+  padding:11px 17px;border-radius:9px;
+  text-decoration:none;white-space:nowrap;
+  border:1px solid transparent;
+  transition:transform .16s cubic-bezier(.2,.8,.3,1), background .18s, border-color .18s, box-shadow .18s;
+}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:15px;height:15px;flex:none}
+.btn--primary{background:var(--signal);color:var(--signal-ink);box-shadow:var(--glow)}
+.btn--primary:hover{filter:brightness(1.07)}
+.btn--ghost{border-color:var(--line);color:var(--text-strong)}
+.btn--ghost:hover{border-color:var(--muted);background:var(--raise)}
+.btn--sm{padding:7px 12px;font-size:12.5px;border-radius:8px}
+
+/* ============================================================ HERO */
+.hero{position:relative;padding-top:clamp(40px,6vw,72px);padding-bottom:clamp(44px,6vw,80px);overflow:hidden}
+.hero__grid{
+  position:absolute;inset:0;pointer-events:none;
+  background:
+    repeating-linear-gradient(0deg,transparent 0 47px,var(--grid) 47px 48px),
+    repeating-linear-gradient(90deg,transparent 0 47px,var(--grid) 47px 48px);
+  mask-image:radial-gradient(115% 78% at 50% 0%, #000 8%, transparent 72%);
+  -webkit-mask-image:radial-gradient(115% 78% at 50% 0%, #000 8%, transparent 72%);
+}
+.hero__in{position:relative;display:grid;gap:clamp(36px,5vw,60px);grid-template-columns:minmax(0,1fr)}
+@media(min-width:1040px){
+  .hero__in{grid-template-columns:minmax(0,0.92fr) minmax(0,1.08fr);align-items:center}
+}
+.hero__copy{display:flex;flex-direction:column;gap:22px;align-items:flex-start}
+
+.badge{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:var(--font-mono);font-size:11px;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
+  border:1px solid var(--line);border-radius:99px;padding:5px 12px 5px 8px;
+  background:var(--surface);
+  white-space:nowrap;
+}
+.badge b{color:var(--text-strong);font-weight:700}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--trace-rate);flex:none}
+@media (prefers-reduced-motion:no-preference){
+  .dot{animation:pulse 2.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+}
+
+h1 .accent{color:var(--signal)}
+
+.cmdbox{
+  width:100%;max-width:460px;
+  border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.cmdbox__row{
+  display:flex;align-items:center;gap:10px;
+  padding:11px 12px 11px 14px;
+  font-family:var(--font-mono);font-size:13.5px;
+}
+.cmdbox__row + .cmdbox__row{border-top:1px solid var(--line-soft)}
+.cmdbox .sigil{color:var(--muted);user-select:none;flex:none}
+.cmdbox code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;color:var(--text-strong);scrollbar-width:none}
+.cmdbox code::-webkit-scrollbar{display:none}
+.copy{
+  flex:none;font-family:var(--font-mono);font-size:11px;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  border:1px solid var(--line);border-radius:6px;padding:4px 8px;
+  transition:color .18s,border-color .18s;
+}
+.copy:hover{color:var(--text-strong);border-color:var(--muted)}
+.copy.ok{color:var(--trace-rate);border-color:var(--trace-rate)}
+
+.ctas{display:flex;flex-wrap:wrap;gap:10px}
+.hero__note{font-family:var(--font-mono);font-size:12px;color:var(--muted);letter-spacing:-.01em}
+
+/* ============================================================ RIG (hero instrument) */
+.rig{
+  border:1px solid var(--line);border-radius:14px;
+  background:var(--surface);box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.rig__bar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;border-bottom:1px solid var(--line-soft);
+  background:var(--surface-2);
+}
+.rig__title{
+  font-family:var(--font-mono);font-size:11px;font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--muted);
+}
+.rig__stat{
+  margin-left:auto;display:flex;gap:16px;
+  font-family:var(--font-mono);font-size:11.5px;color:var(--muted);
+  font-variant-numeric:tabular-nums;
+}
+.rig__stat b{color:var(--text-strong);font-weight:700}
+.rig__canvas{width:100%;height:294px;display:block}
+@media(max-width:620px){.rig__canvas{height:250px}}
+
+.knobs{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  border-top:1px solid var(--line-soft);
+}
+@media(max-width:620px){.knobs{grid-template-columns:1fr}}
+.knob{padding:13px 16px 15px;display:flex;flex-direction:column;gap:7px}
+.knob + .knob{border-left:1px solid var(--line-soft)}
+@media(max-width:620px){.knob + .knob{border-left:0;border-top:1px solid var(--line-soft)}}
+.knob__top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.knob__label{
+  font-family:var(--font-mono);font-size:10px;font-weight:600;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--muted);
+}
+.knob__val{
+  font-family:var(--font-mono);font-size:13px;font-weight:700;
+  color:var(--text-strong);font-variant-numeric:tabular-nums;
+}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:20px;background:transparent;cursor:ew-resize;
+}
+input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:var(--line)}
+input[type=range]::-moz-range-track{height:3px;border-radius:2px;background:var(--line)}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+  background:var(--signal);border:2px solid var(--surface);margin-top:-6px;
+  box-shadow:0 0 0 1px var(--line);
+}
+input[type=range]::-moz-range-thumb{
+  width:15px;height:15px;border-radius:50%;border:2px solid var(--surface);
+  background:var(--signal);box-shadow:0 0 0 1px var(--line);
+}
+.rig__foot{
+  padding:9px 16px;border-top:1px solid var(--line-soft);background:var(--surface-2);
+  font-family:var(--font-mono);font-size:10.5px;letter-spacing:.03em;color:var(--muted);
+  display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
+}
+.legend{display:flex;gap:14px;flex-wrap:wrap}
+.legend i{display:inline-block;width:12px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+
+/* ============================================================ ENGINES */
+.engines{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.engine{
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);
+  padding:18px 18px 20px;display:flex;flex-direction:column;gap:8px;
+}
+.engine__name{font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--text-strong);letter-spacing:-.02em}
+.engine__note{color:var(--muted);font-size:13.5px;line-height:1.5}
+
+/* ============================================================ HONEST LOAD */
+.compare{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:34px}
+.card{
+  border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);box-shadow:var(--shadow);overflow:hidden;
+}
+.card__head{
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  padding:14px 16px 12px;border-bottom:1px solid var(--line-soft);
+}
+.card__kicker{
+  font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);
+}
+.card__title{font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-strong);letter-spacing:-.025em}
+.card__body{padding:16px}
+.card canvas{width:100%;height:132px}
+.verdict{
+  display:flex;align-items:baseline;gap:9px;margin-top:14px;
+  font-family:var(--font-mono);font-size:12.5px;font-variant-numeric:tabular-nums;
+  padding-top:12px;border-top:1px dashed var(--line);
+}
+.verdict span{color:var(--muted)}
+.verdict b{font-size:16px;font-weight:700}
+.verdict .bad{color:var(--trace-lat)}
+.verdict .good{color:var(--trace-rate)}
+.verdict em{font-style:normal;color:var(--muted);font-size:11px;margin-left:auto;text-align:right}
+
+/* ============================================================ BENTO */
+.bento{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
+.tile{
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);
+  padding:20px;display:flex;flex-direction:column;gap:10px;
+  transition:border-color .2s, transform .2s cubic-bezier(.2,.8,.3,1);
+}
+.tile:hover{border-color:var(--muted);transform:translateY(-2px)}
+.tile__verb{
+  font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--signal);
+}
+.tile p{color:var(--muted);font-size:14.5px;line-height:1.55}
+.tile code{
+  font-family:var(--font-mono);font-size:12px;color:var(--text-strong);
+  background:var(--raise);padding:1px 5px;border-radius:4px;
+}
+
+
+/* ============================================================ SCREENSHOT */
+/* The dashboard ships light-only today, so these sit on their own paper frame
+   rather than swapping per theme. Add a dark capture here when it has one. */
+.shot{
+  margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+  background:#F5F6F4;box-shadow:var(--shadow);
+}
+.shot img{width:100%;height:auto;display:block}
+.shot figcaption{
+  padding:11px 16px;border-top:1px solid rgba(20,22,26,.10);
+  background:#FBFCFA;color:#5B6068;
+  font-family:var(--font-mono);font-size:12px;line-height:1.5;
+}
+.shot figcaption strong{color:#14161A;font-weight:600}
+.shot--wide{margin-top:26px}
+
+.notes{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-top:26px}
+.note{display:flex;flex-direction:column;gap:7px}
+.note__k{
+  font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--signal);
+}
+.note p{color:var(--muted);font-size:14px;line-height:1.55}
+
+/* ============================================================ COMMAND INDEX */
+.tablewrap{
+  border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);overflow-x:auto;
+}
+table{border-collapse:collapse;width:100%;min-width:560px}
+th,td{text-align:left;padding:10px 16px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+th{
+  font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);
+  position:sticky;top:0;background:var(--surface-2);
+}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--raise)}
+td.cmd{font-family:var(--font-mono);font-size:13px;color:var(--text-strong);font-weight:600;white-space:nowrap}
+td.desc{color:var(--muted);font-size:14px}
+
+.reveal{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
+.reveal > summary{
+  cursor:pointer;list-style:none;padding:14px 18px;
+  font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--text-strong);
+  display:flex;align-items:center;gap:9px;
+}
+.reveal > summary::-webkit-details-marker{display:none}
+.reveal > summary::before{content:"+";color:var(--signal);font-weight:700}
+.reveal[open] > summary{border-bottom:1px solid var(--line-soft)}
+.reveal[open] > summary::before{content:"\2212"}
+.reveal > summary:hover{background:var(--raise)}
+.reveal .tablewrap{border:0;border-radius:0;background:transparent}
+
+/* ============================================================ FACTS */
+.facts{display:grid;gap:1px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));background:var(--line-soft);
+  border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.fact{background:var(--surface);padding:18px 20px;display:flex;flex-direction:column;gap:4px}
+.fact__n{font-family:var(--font-display);font-size:clamp(1.5rem,3vw,2rem);font-weight:700;
+  color:var(--text-strong);letter-spacing:-.045em;font-variant-numeric:tabular-nums;line-height:1}
+.fact__l{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+
+/* ============================================================ SUPPORT */
+.support{display:grid;gap:18px;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}
+@media(max-width:840px){.support{grid-template-columns:1fr}}
+.oss{display:flex;flex-direction:column;gap:18px}
+.checks{display:flex;flex-direction:column;gap:11px;margin:0;padding:0;list-style:none}
+.checks li{display:flex;gap:11px;align-items:flex-start;color:var(--muted);font-size:14.5px;line-height:1.5}
+.checks svg{width:15px;height:15px;flex:none;margin-top:4px;color:var(--trace-rate)}
+.checks b{color:var(--text-strong);font-weight:600}
+
+.coffee{
+  border:1px solid var(--line);border-radius:14px;background:var(--surface);
+  box-shadow:var(--shadow);padding:24px;display:flex;flex-direction:column;gap:14px;
+  position:relative;overflow:hidden;
+}
+.coffee::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(120% 90% at 100% 0%, color-mix(in srgb,var(--signal) 13%, transparent), transparent 62%);
+}
+.coffee > *{position:relative}
+.coffee h3{font-size:1.15rem}
+.coffee p{color:var(--muted);font-size:14.5px;line-height:1.55}
+.coffee__cta{align-self:flex-start;margin-top:2px}
+.coffee__fine{font-family:var(--font-mono);font-size:11px;color:var(--muted);letter-spacing:-.01em}
+
+/* ============================================================ FOOTER */
+footer{border-top:1px solid var(--line-soft);background:var(--surface)}
+.foot{
+  display:flex;flex-wrap:wrap;gap:16px;align-items:center;
+  padding-block:26px;
+  font-family:var(--font-mono);font-size:12px;color:var(--muted);
+}
+.foot__links{display:flex;gap:16px;margin-left:auto;flex-wrap:wrap}
+.foot a{text-decoration:none;transition:color .18s}
+.foot a:hover{color:var(--text-strong)}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
+<nav class="nav" id="nav">
+  <div class="nav__in">
+    <a class="mark" href="#top">
+      <svg class="mark__glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="21" height="21" rx="4" stroke="currentColor" stroke-width="1.6" opacity=".28"/>
+        <path d="M3.5 15.5 L7 15.5 L9 8.5 L11.5 18 L14 12 L16.5 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="19" cy="12" r="1.8" fill="currentColor"/>
+      </svg>
+      Searchlab
+    </a>
+    <span class="pill">v0.14.0</span>
+    <div class="nav__links">
+      <a href="#instrument">Try it</a>
+      <a href="#honest">Honest load</a>
+      <a href="#do">What it does</a>
+      <a href="#see">Dashboard</a>
+      <a href="#commands">Commands</a>
+    </div>
+    <div class="nav__end">
+      <button class="iconbtn" id="theme" type="button" aria-label="Toggle colour theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
+        </svg>
+      </button>
+      <a class="btn btn--ghost btn--sm" href="GITHUB_URL">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.11.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.35-1.29-1.71-1.29-1.71-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.5 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.4-5.25 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      <a class="btn btn--primary btn--sm" href="COFFEE_URL">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 9h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V9Z"/><path d="M16 10.5h1.8a2.7 2.7 0 0 1 0 5.4H16"/><path d="M7.5 3v2.5M11 3v2.5"/>
+        </svg>
+        <span class="lbl-long">Buy me a coffee</span><span class="lbl-short">Coffee</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════ HERO ═══════════════════════════════ -->
+<header class="hero" id="top">
+  <div class="hero__grid" aria-hidden="true"></div>
+  <div class="wrap hero__in">
+
+    <div class="hero__copy">
+      <span class="badge"><span class="dot"></span> <b>Free &amp; open source</b> · Apache&#8209;2.0</span>
+
+      <h1>Turn the knobs on a&nbsp;<span class="accent">real</span> search cluster.</h1>
+
+      <p class="lede">
+        Searchlab starts a throwaway <strong>SolrCloud</strong>, <strong>Elasticsearch</strong>,
+        or <strong>OpenSearch</strong> cluster on your laptop, fills it with data you've
+        <em>shaped</em> yourself, and puts honest load on it. Change one setting, run it
+        again, see what moved. It's a workshop, not a benchmark.
+      </p>
+
+      <div class="cmdbox">
+        <div class="cmdbox__row">
+          <span class="sigil">$</span>
+          <code id="c1">pip install searchlab</code>
+          <button class="copy" type="button" data-copy="#c1">Copy</button>
+        </div>
+        <div class="cmdbox__row">
+          <span class="sigil">$</span>
+          <code id="c2">searchlab quickstart</code>
+          <button class="copy" type="button" data-copy="#c2">Copy</button>
+        </div>
+      </div>
+
+      <div class="ctas">
+        <a class="btn btn--primary" href="#see">
+          See the dashboard
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn--ghost" href="#instrument">Play with the panel</a>
+      </div>
+
+      <p class="hero__note">You'll need Docker and Python 3.10+. That's it, and nothing leaves your machine.</p>
+    </div>
+
+    <!-- ── the instrument ── -->
+    <div class="rig" id="instrument">
+      <div class="rig__bar">
+        <span class="rig__title">Load panel</span>
+        <div class="rig__stat">
+          <span>p99 <b id="s-p99">&#8230;</b></span>
+          <span>rps <b id="s-rps">&#8230;</b></span>
+          <span>heap <b id="s-heap">&#8230;</b></span>
+        </div>
+      </div>
+
+      <canvas class="rig__canvas" id="rig" role="img"
+        aria-label="Three stacked strip charts showing p99 latency, achieved query rate, and JVM heap, responding to the controls below."></canvas>
+
+      <div class="knobs">
+        <div class="knob">
+          <div class="knob__top">
+            <label class="knob__label" for="k-rps">Target RPS</label>
+            <span class="knob__val" id="v-rps">60</span>
+          </div>
+          <input type="range" id="k-rps" min="10" max="400" step="5" value="60">
+        </div>
+        <div class="knob">
+          <div class="knob__top">
+            <label class="knob__label" for="k-heap">Heap / node</label>
+            <span class="knob__val" id="v-heap">1g</span>
+          </div>
+          <input type="range" id="k-heap" min="0" max="4" step="1" value="2">
+        </div>
+        <div class="knob">
+          <div class="knob__top">
+            <label class="knob__label" for="k-nodes">Nodes</label>
+            <span class="knob__val" id="v-nodes">3</span>
+          </div>
+          <input type="range" id="k-nodes" min="1" max="6" step="1" value="3">
+        </div>
+      </div>
+
+      <div class="rig__foot">
+        <span class="legend">
+          <span><i style="border-color:var(--trace-lat)"></i>p99</span>
+          <span><i style="border-color:var(--trace-rate)"></i>rate</span>
+          <span><i style="border-color:var(--trace-heap)"></i>heap</span>
+        </span>
+        <span style="margin-left:auto">A preview with made-up numbers. The real panel is <code>searchlab dashboard</code></span>
+      </div>
+    </div>
+
+  </div>
+</header>
+
+<!-- ═══════════════════════════════ ENGINES ═══════════════════════════════ -->
+<section class="band band--tight band--alt">
+  <div class="wrap">
+    <div class="head" style="margin-bottom:26px">
+      <span class="eyebrow">Three engines · one CLI</span>
+      <p class="prose" style="max-width:70ch">
+        Generate, index, load, measure, compare, dashboard: all of it works the same way on
+        all three. The cluster remembers which engine it is, so you don't have to. Run the same
+        seed and the same workload against two of them, then diff the reports.
+      </p>
+    </div>
+    <div class="engines">
+      <div class="engine">
+        <span class="engine__name">Apache Solr</span>
+        <span class="engine__note">SolrCloud with ZooKeeper, and the default here. Schema, replicas, GC tuning and monitoring are all set up for you.</span>
+      </div>
+      <div class="engine">
+        <span class="engine__name">Elasticsearch</span>
+        <span class="engine__note">Index mappings come from the same profile. Query DSL templates and slow-log replay work too.</span>
+      </div>
+      <div class="engine">
+        <span class="engine__name">OpenSearch</span>
+        <span class="engine__note">Same again, with kNN indexes switched on so vector work runs straight away.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ HONEST LOAD ═══════════════════════════════ -->
+<section class="band" id="honest">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Why the numbers differ</span>
+      <h2>Most load tools flinch when the server slows down.</h2>
+      <p class="prose">
+        A closed-loop tool waits for each response before sending the next request. So when the
+        server slows down, the tool slows down with it. It sends <em>fewer</em> requests at exactly
+        the moment things are going wrong, and the worst latencies never get measured. That's
+        coordinated omission. It's why a run comes back green while people are waiting seconds.
+      </p>
+      <p class="prose">
+        Searchlab is <strong>open-loop</strong>. Requests go out on a fixed schedule set by your
+        target rate, whatever the server happens to be doing. If it can't keep up, latency climbs
+        and you watch it climb. And if too many requests pile up in flight, they get counted as
+        <strong>dropped</strong> instead of quietly queued.
+      </p>
+    </div>
+
+    <div class="compare">
+      <div class="card">
+        <div class="card__head">
+          <span class="card__kicker">Closed loop</span>
+          <span class="card__title">The comfortable answer</span>
+        </div>
+        <div class="card__body">
+          <canvas id="cl-closed" role="img" aria-label="Request send times thin out during the slow window, so few samples land in the tail."></canvas>
+          <div class="verdict">
+            <span>reported p99</span><b class="good">84 ms</b>
+            <em>only 6 requests sampled<br>during the slow window</em>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__head">
+          <span class="card__kicker">Open loop</span>
+          <span class="card__title">What actually happened</span>
+        </div>
+        <div class="card__body">
+          <canvas id="cl-open" role="img" aria-label="Request send times stay evenly spaced through the slow window, so the tail is fully sampled."></canvas>
+          <div class="verdict">
+            <span>reported p99</span><b class="bad">1 840 ms</b>
+            <em>cadence held<br>through the slow window</em>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ WHAT IT DOES ═══════════════════════════════ -->
+<section class="band band--alt" id="do">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">What you can actually do with it</span>
+      <h2>Ask a question, get an answer the same afternoon.</h2>
+      <p class="prose">
+        All of this works today. Anything you can generate, you can load. Anything you can
+        load, you can measure and compare.
+      </p>
+    </div>
+
+    <div class="bento">
+      <article class="tile">
+        <span class="tile__verb">Shape the data</span>
+        <h3>Performance comes from shape, not row count</h3>
+        <p>Set the cardinality, the skew, how long documents run, how vectors cluster. A field
+        with millions of distinct values behaves nothing like a yes/no flag.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Change one thing</span>
+        <h3>Sweep a matrix, get a table</h3>
+        <p>Try a range of heap sizes, GC flags, versions or engines at once. Every cell gets its
+        own <strong>fresh cluster</strong>, so nothing leaks from one run into the next.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Learn by doing</span>
+        <h3>Lessons that run against your cluster</h3>
+        <p>A lesson asks you to go do something real in another terminal, then waits until it can
+        see the cluster react to it.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Read the query</span>
+        <h3>What you wrote vs. what it ran</h3>
+        <p>See what your text turned into after analysis, where the time actually went, and why
+        the top result beat the others.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Vectors, honestly</span>
+        <h3>Latency without recall is meaningless</h3>
+        <p>Check <strong>recall@k</strong> against the exact answers, worked out on your own
+        machine, then sweep candidate counts to find where the tradeoff sits.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Replay last Tuesday</span>
+        <h3>Your traffic, not a synthetic guess</h3>
+        <p>Give it a real request log and replay it at the original speed, faster, or at a rate
+        you pick. You get the same reports, so you can diff two versions.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ THE DASHBOARD ═══════════════════════════════ -->
+<section class="band" id="see">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">The dashboard</span>
+      <h2>Watch it happen, live.</h2>
+      <p class="prose">
+        One command opens a recorder on your cluster. It refreshes every two seconds and there's
+        nothing else to set up or wire together first. These are real screenshots, not mockups.
+      </p>
+    </div>
+
+    <figure class="shot">
+      <img src="img/dashboard-signals.png" width="2200" height="2023" loading="lazy"
+           alt="The live signals panel: load-test latency as the client sees it, query latency per
+                node as the server sees it, JVM heap sawtooths for three nodes, query rate, time
+                lost to garbage collection, index segments, and a table of node health.">
+      <figcaption>Six signals over the same five minutes, plus every node's heap and GC.</figcaption>
+    </figure>
+
+    <div class="notes">
+      <div class="note">
+        <span class="note__k">It reads the charts for you</span>
+        <p>The line above the panels is written from the numbers underneath it. Here it says there's
+        no meaningful queueing, because the client sees 30ms against 47ms of work on the server.</p>
+      </div>
+      <div class="note">
+        <span class="note__k">One pen per node</span>
+        <p>Every node gets its own trace, so one sick replica stands out instead of disappearing
+        into an average. Those heap sawtooths are garbage collection, drawn as it happens.</p>
+      </div>
+      <div class="note">
+        <span class="note__k">Both sides of the story</span>
+        <p>Latency as your client experiences it sits next to latency as the server reports it.
+        The gap between those two numbers is usually the thing you're looking for.</p>
+      </div>
+    </div>
+
+    <figure class="shot shot--wide">
+      <img src="img/dashboard-query.png" width="2200" height="1235" loading="lazy"
+           alt="The query panel: a query box, parser picker, filter list, rows, sort, fields to
+                return, facets, a run button with an explain checkbox, and a control to fire the
+                same query as a load test.">
+      <figcaption>
+        Build a query, run it once with <strong>explain</strong> to see how it parsed and scored,
+        then fire that exact query as a load test instead of the built-in mix.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ DETERMINISM ═══════════════════════════════ -->
+<section class="band band--tight band--alt">
+  <div class="wrap">
+    <div class="head" style="margin-bottom:28px">
+      <span class="eyebrow">Why you can trust the second run</span>
+      <h2>Same seed, same dataset, same answer.</h2>
+      <p class="prose">
+        Data generation, query substitution and timing are all seeded. Run the same config twice
+        and you get the same documents and the same schedule. That's the only reason comparing
+        two reports means anything.
+      </p>
+    </div>
+    <div class="facts">
+      <div class="fact"><span class="fact__n">25</span><span class="fact__l">commands</span></div>
+      <div class="fact"><span class="fact__n">3</span><span class="fact__l">engines</span></div>
+      <div class="fact"><span class="fact__n">0</span><span class="fact__l">telemetry calls</span></div>
+      <div class="fact"><span class="fact__n">4</span><span class="fact__l">python deps</span></div>
+      <div class="fact"><span class="fact__n">1</span><span class="fact__l">html file per report</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ COMMANDS ═══════════════════════════════ -->
+<section class="band" id="commands">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Reference</span>
+      <h2>The whole surface, on one screen.</h2>
+      <p class="prose">
+        Everything is kept in <code style="font-family:var(--font-mono);font-size:.9em">./.searchlab/</code>,
+        so once you've run <code style="font-family:var(--font-mono);font-size:.9em">up</code>, every
+        other command already knows where your cluster is and what it's running.
+      </p>
+    </div>
+
+    <details class="reveal">
+      <summary>Show all 25 commands</summary>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
+        <tbody>
+          <tr><td class="cmd">doctor</td><td class="desc">Preflight: docker, compose plugin, ports, disk, leftover state</td></tr>
+          <tr><td class="cmd">up / down</td><td class="desc">Render compose and start the cluster; tear it down (<code>--volumes</code> wipes data)</td></tr>
+          <tr><td class="cmd">status</td><td class="desc">Live nodes, replica states, collection health</td></tr>
+          <tr><td class="cmd">create-collection</td><td class="desc">Collections and indices, with shard and replica counts</td></tr>
+          <tr><td class="cmd">gen</td><td class="desc">Generate JSONL documents from a YAML profile, seeded</td></tr>
+          <tr><td class="cmd">schema</td><td class="desc">Explicit fields or index mappings derived from the same profile</td></tr>
+          <tr><td class="cmd">index</td><td class="desc">Async bulk indexing with <code>--threads</code> and <code>--batch</code></td></tr>
+          <tr><td class="cmd">load</td><td class="desc">Open-loop load test with ramping, mixed read/write, HTML or JSON report</td></tr>
+          <tr><td class="cmd">replay</td><td class="desc">Replay real request logs at original, scaled, or fixed pacing</td></tr>
+          <tr><td class="cmd">recall</td><td class="desc">recall@k for approximate kNN against locally computed exact ground truth</td></tr>
+          <tr><td class="cmd">explain</td><td class="desc">Run a query with debug on and translate the output into English</td></tr>
+          <tr><td class="cmd">learn</td><td class="desc">Interactive lessons that run against your live cluster</td></tr>
+          <tr><td class="cmd">dashboard</td><td class="desc">Live strip-chart UI: p99, heap, rate, caches, merges (<code>--demo</code> to preview)</td></tr>
+          <tr><td class="cmd">metrics</td><td class="desc">Heap, GC, cache hit ratios, merge and commit stats per node</td></tr>
+          <tr><td class="cmd">metrics-diff</td><td class="desc">Before/after: GC time burned, cache movement, merges triggered</td></tr>
+          <tr><td class="cmd">gclog</td><td class="desc">GC pause percentiles, throughput lost, Full GC detection</td></tr>
+          <tr><td class="cmd">chaos</td><td class="desc">Stop, freeze, resume, or restart one node while load is running</td></tr>
+          <tr><td class="cmd">drill</td><td class="desc">One YAML: load plus timed node events plus metrics, in a single annotated report</td></tr>
+          <tr><td class="cmd">sweep</td><td class="desc">One workload across a config matrix, fresh cluster per cell, comparison table</td></tr>
+          <tr><td class="cmd">compare</td><td class="desc">Diff two JSON reports across versions, configs, or engines</td></tr>
+          <tr><td class="cmd">report-html</td><td class="desc">Render any JSON report as a dependency-free page with SVG charts</td></tr>
+          <tr><td class="cmd">k8s</td><td class="desc">Export the operator manifest that mirrors your running cluster</td></tr>
+          <tr><td class="cmd">quickstart</td><td class="desc">Zero to load test in one command: up, collection, gen, index, load</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ SUPPORT ═══════════════════════════════ -->
+<section class="band band--alt" id="support">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Free, and staying that way</span>
+      <h2>No tiers, no seats, no cloud upsell.</h2>
+    </div>
+
+    <div class="support">
+      <div class="oss">
+        <ul class="checks">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5 9 17.5 20 6.5"/></svg>
+            <span><b>Apache&#8209;2.0.</b> Use it at work, fork it, ship it inside your own tools. There's no clause waiting to bite you later.</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5 9 17.5 20 6.5"/></svg>
+            <span><b>Runs entirely on your machine.</b> No account, no API key, nothing calling home. Your logs and your data stay on the laptop.</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5 9 17.5 20 6.5"/></svg>
+            <span><b>Four dependencies.</b> click, httpx, jinja2, pyyaml. Reports are single HTML files, with no CDN and no build step.</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5 9 17.5 20 6.5"/></svg>
+            <span><b>Issues and PRs welcome.</b> New data profiles, query templates and lessons are all plain YAML, so that's the easiest place to start.</span>
+          </li>
+        </ul>
+      </div>
+
+      <aside class="coffee">
+        <h3>If it saved you an afternoon</h3>
+        <p>
+          Searchlab is a nights-and-weekends project, and it'll stay free and Apache-licensed
+          either way. But if it saved you from another afternoon of guessing at production,
+          a coffee is a really nice thing to get.
+        </p>
+        <a class="btn btn--primary coffee__cta" href="COFFEE_URL">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 9h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V9Z"/><path d="M16 10.5h1.8a2.7 2.7 0 0 1 0 5.4H16"/><path d="M7.5 3v2.5M11 3v2.5"/>
+          </svg>
+          Buy me a coffee
+        </a>
+        <span class="coffee__fine">One-off. Nothing unlocks, nothing was held back.</span>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ FOOTER ═══════════════════════════════ -->
+<footer>
+  <div class="wrap foot">
+    <span>Searchlab v0.14.0 · Apache-2.0</span>
+    <span class="foot__links">
+      <a href="GITHUB_URL">GitHub</a>
+      <a href="GITHUB_URL/blob/main/README.md">README</a>
+      <a href="GITHUB_URL/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="GITHUB_URL/issues">Issues</a>
+      <a href="COFFEE_URL">Coffee</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ── theme toggle ─────────────────────────────────────────── */
+  var root = document.documentElement;
+  document.getElementById("theme").addEventListener("click", function(){
+    var dark = root.getAttribute("data-theme")
+      ? root.getAttribute("data-theme") === "dark"
+      : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+    paintStatic();
+  });
+
+  /* ── sticky nav hairline ──────────────────────────────────── */
+  var nav = document.getElementById("nav");
+  addEventListener("scroll", function(){
+    nav.classList.toggle("is-stuck", scrollY > 8);
+  }, {passive:true});
+
+  /* ── copy buttons ─────────────────────────────────────────── */
+  document.querySelectorAll(".copy").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var txt = document.querySelector(btn.dataset.copy).textContent;
+      navigator.clipboard.writeText(txt).then(function(){
+        var old = btn.textContent;
+        btn.textContent = "Copied";
+        btn.classList.add("ok");
+        setTimeout(function(){ btn.textContent = old; btn.classList.remove("ok"); }, 1400);
+      });
+    });
+  });
+
+  /* ── canvas helpers ───────────────────────────────────────── */
+  function css(name){ return getComputedStyle(root).getPropertyValue(name).trim(); }
+  function fit(cv){
+    var r = cv.getBoundingClientRect();
+    var d = Math.min(devicePixelRatio || 1, 2);
+    cv.width = Math.max(1, Math.round(r.width * d));
+    cv.height = Math.max(1, Math.round(r.height * d));
+    var ctx = cv.getContext("2d");
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    return {ctx:ctx, w:r.width, h:r.height};
+  }
+  function grid(ctx, x, y, w, h, step){
+    ctx.save();
+    ctx.strokeStyle = css("--grid");
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for(var gx = x; gx <= x + w + 0.5; gx += step){ ctx.moveTo(Math.round(gx)+.5, y); ctx.lineTo(Math.round(gx)+.5, y+h); }
+    for(var gy = y; gy <= y + h + 0.5; gy += step){ ctx.moveTo(x, Math.round(gy)+.5); ctx.lineTo(x+w, Math.round(gy)+.5); }
+    ctx.stroke();
+    ctx.restore();
+  }
+  function label(ctx, text, x, y){
+    ctx.save();
+    ctx.fillStyle = css("--muted");
+    ctx.font = '600 9px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.letterSpacing = "1.4px";
+    ctx.fillText(text.toUpperCase(), x, y);
+    ctx.restore();
+  }
+
+  /* ══════════════ HERO INSTRUMENT ══════════════ */
+  var rig    = document.getElementById("rig");
+  var kRps   = document.getElementById("k-rps");
+  var kHeap  = document.getElementById("k-heap");
+  var kNodes = document.getElementById("k-nodes");
+  var vRps   = document.getElementById("v-rps");
+  var vHeap  = document.getElementById("v-heap");
+  var vNodes = document.getElementById("v-nodes");
+  var sP99   = document.getElementById("s-p99");
+  var sRps   = document.getElementById("s-rps");
+  var sHeap  = document.getElementById("s-heap");
+
+  var HEAPS  = ["256m","512m","1g","2g","4g"];
+  var HEAPMB = [256, 512, 1024, 2048, 4096];
+
+  var N = 150;
+  var lat = new Array(N).fill(20);
+  var rate = new Array(N).fill(60);
+  var heap = new Array(N).fill(40);
+  var heapPos = 0.35, t = 0;
+  var latScale = 120;         // smoothed axis max, so the lane doesn't jump
+  var decay = 0;              // post-GC latency tail
+  var ceiling = 0.80;         // this cycle's collection threshold (varies)
+  var drift = 0;              // slow wander in service time
+
+  function model(){
+    var target = +kRps.value;
+    var mb = HEAPMB[+kHeap.value];
+    var nodes = +kNodes.value;
+    // capacity grows with nodes and (sub-linearly) with heap
+    var cap = nodes * 34 * (0.55 + 0.45 * Math.log2(mb / 256) / 4);
+    var util = target / cap;
+    var base = 16 + 30 * Math.pow(Math.min(util, 1), 2.4);
+    if(util > 1) base += 620 * Math.pow(util - 1, 0.85);
+    // small heaps collect more often and more violently
+    var gcRate = 0.10 + 0.55 * (1 - mb / 4096) * Math.min(util, 1.4);
+    return {target:target, mb:mb, cap:cap, util:util, base:base, gcRate:gcRate};
+  }
+
+  function step(){
+    var m = model();
+    t += 1;
+
+    // ── heap: allocation rate tracks load; each cycle collects at its own threshold
+    var alloc = (0.006 + 0.030 * Math.min(m.util, 1.25)) * (m.mb <= 512 ? 2.1 : 1);
+    heapPos += alloc * (0.85 + Math.random() * 0.3);
+    var gc = false;
+    if(heapPos > ceiling){
+      heapPos = 0.16 + Math.random() * 0.16;
+      ceiling = 0.74 + Math.random() * 0.16;
+      gc = true;
+    }
+
+    // ── latency: slow drift + per-request noise + a decaying tail after a collection
+    drift += (Math.random() - 0.5) * 0.05;
+    drift = Math.max(-0.14, Math.min(0.14, drift * 0.94));
+    if(gc && Math.random() < 0.45 + m.gcRate * 0.5){
+      decay = Math.max(decay, m.base * (0.9 + m.gcRate * 5.5) * (0.5 + Math.random()));
+    }
+    decay *= 0.62;
+    var noise = m.base * 0.10 * (Math.random() + Math.random() - 1);
+    lat.push(Math.max(3, m.base * (1 + drift) + decay + noise)); lat.shift();
+
+    // ── rate: the client holds cadence until the server caps it
+    var achieved = Math.min(m.target, m.cap) * (0.975 + Math.random() * 0.05);
+    rate.push(achieved); rate.shift();
+    heap.push(heapPos * 100); heap.shift();
+
+    // smooth the latency axis toward the window's peak
+    var peak = Math.max.apply(null, lat);
+    latScale += (Math.max(60, peak * 1.22) - latScale) * 0.06;
+
+    var p99 = lat.slice().sort(function(a,b){return a-b;})[Math.floor(N * 0.99) - 1];
+    sP99.textContent = (p99 >= 1000 ? (p99/1000).toFixed(2) + " s" : Math.round(p99) + " ms");
+    sP99.style.color = p99 > 250 ? css("--trace-lat") : "";
+    sRps.textContent = achieved.toFixed(0) + " / " + m.target;
+    sHeap.textContent = Math.round(heapPos * 100) + "%";
+  }
+
+  function trace(ctx, data, x, y, w, h, color, max, fill){
+    var n = data.length, dx = w / (n - 1);
+    ctx.save();
+    if(fill){
+      ctx.beginPath();
+      ctx.moveTo(x, y + h);
+      for(var i = 0; i < n; i++) ctx.lineTo(x + i * dx, y + h - Math.min(1, data[i] / max) * h);
+      ctx.lineTo(x + w, y + h);
+      ctx.closePath();
+      var g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, color + "38");
+      g.addColorStop(1, color + "00");
+      ctx.fillStyle = g; ctx.fill();
+    }
+    ctx.beginPath();
+    for(var j = 0; j < n; j++){
+      var px = x + j * dx, py = y + h - Math.min(1, data[j] / max) * h;
+      j ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.strokeStyle = color; ctx.lineWidth = 1.7;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.stroke();
+    // emphasised endpoint
+    var ey = y + h - Math.min(1, data[n-1] / max) * h;
+    ctx.beginPath(); ctx.arc(x + w, ey, 2.6, 0, 7); ctx.fillStyle = color; ctx.fill();
+    ctx.restore();
+  }
+
+  function drawRig(){
+    if(!rig.getBoundingClientRect().width) return;
+    var f = fit(rig), ctx = f.ctx, W = f.w, H = f.h;
+    var padL = 46, padR = 14, padT = 12, padB = 8;
+    var capH = 13, gap = 10;                       // caption strip above each lane
+    var w = W - padL - padR;
+    // three lanes at 1.5 : 0.75 : 0.75, plus their captions and the gaps between
+    var avail = H - padT - padB - capH * 3 - gap * 2;
+    var unit  = avail / 3;
+    var big   = unit * 1.5, small = unit * 0.75;
+
+    ctx.clearRect(0, 0, W, H);
+
+    var m = model();
+    var latMax = latScale;
+
+    // lane 1: p99
+    var y1 = padT + capH;
+    label(ctx, "p99 latency", 8, y1 - 4);
+    grid(ctx, padL, y1, w, big, 18);
+    trace(ctx, lat, padL, y1, w, big, css("--trace-lat"), latMax, true);
+    ctx.save();
+    ctx.fillStyle = css("--muted");
+    ctx.font = '9px ui-monospace, Menlo, monospace';
+    ctx.fillText(latMax >= 1000 ? (latMax/1000).toFixed(1) + "s" : Math.round(latMax) + "ms", 8, y1 + 8);
+    ctx.fillText("0", 8, y1 + big);
+    ctx.restore();
+
+    // lane 2: rate
+    var y2 = y1 + big + gap + capH;
+    label(ctx, "query rate", 8, y2 - 4);
+    grid(ctx, padL, y2, w, small, 18);
+    // target reference line
+    ctx.save();
+    ctx.setLineDash([3,3]);
+    ctx.strokeStyle = css("--muted");
+    ctx.globalAlpha = .55;
+    var ty = y2 + small - Math.min(1, (+kRps.value) / (+kRps.value * 1.25)) * small;
+    ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + w, ty); ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.fillStyle = css("--muted");
+    ctx.font = '9px ui-monospace, Menlo, monospace';
+    ctx.fillText("target", 8, ty + 3);
+    ctx.restore();
+    trace(ctx, rate, padL, y2, w, small, css("--trace-rate"), (+kRps.value) * 1.25, true);
+
+    // lane 3: heap
+    var y3 = y2 + small + gap + capH;
+    label(ctx, "heap", 8, y3 - 4);
+    grid(ctx, padL, y3, w, small, 18);
+    trace(ctx, heap, padL, y3, w, small, css("--trace-heap"), 100, true);
+
+    // saturation flag
+    if(m.util > 1.02){
+      ctx.save();
+      ctx.fillStyle = css("--trace-lat");
+      ctx.font = '700 9px ui-monospace, Menlo, monospace';
+      ctx.letterSpacing = "1.2px";
+      ctx.textAlign = "right";
+      ctx.fillText("SATURATED", W - padR, y1 + 9);
+      ctx.restore();
+    }
+  }
+
+  function syncKnobs(){
+    vRps.textContent = kRps.value;
+    vHeap.textContent = HEAPS[+kHeap.value];
+    vNodes.textContent = kNodes.value;
+  }
+  [kRps, kHeap, kNodes].forEach(function(k){ k.addEventListener("input", syncKnobs); });
+  syncKnobs();
+
+  /* ══════════════ OPEN vs CLOSED LOOP ══════════════ */
+  function drawLoop(id, closed){
+    var cv = document.getElementById(id);
+    if(!cv.getBoundingClientRect().width) return;
+    var f = fit(cv), ctx = f.ctx, W = f.w, H = f.h;
+    ctx.clearRect(0, 0, W, H);
+
+    var padL = 4, padR = 4, padB = 22, padT = 16;
+    var x0 = padL, w = W - padL - padR;
+    var yBase = H - padB;
+
+    // the slow window
+    var sx = x0 + w * 0.38, sw = w * 0.30;
+    ctx.save();
+    ctx.fillStyle = css("--trace-lat");
+    ctx.globalAlpha = .07;
+    ctx.fillRect(sx, padT - 8, sw, yBase - padT + 8);
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle = css("--trace-lat");
+    ctx.globalAlpha = .35;
+    ctx.setLineDash([3,3]);
+    ctx.beginPath();
+    ctx.moveTo(sx, padT - 8); ctx.lineTo(sx, yBase);
+    ctx.moveTo(sx + sw, padT - 8); ctx.lineTo(sx + sw, yBase);
+    ctx.stroke();
+    ctx.restore();
+
+    // baseline
+    ctx.save();
+    ctx.strokeStyle = css("--line");
+    ctx.beginPath(); ctx.moveTo(x0, yBase + .5); ctx.lineTo(x0 + w, yBase + .5); ctx.stroke();
+    ctx.restore();
+
+    // request ticks
+    var xs = [], x = x0 + 3;
+    var evenGap = w / 46;
+    while(x < x0 + w - 2){
+      xs.push(x);
+      var inSlow = x >= sx && x <= sx + sw;
+      // closed loop: the client waits, so sends spread out inside the slow window
+      x += (closed && inSlow) ? evenGap * 5.2 : evenGap;
+    }
+
+    ctx.save();
+    xs.forEach(function(px){
+      var inSlow = px >= sx && px <= sx + sw;
+      var hgt = inSlow ? (yBase - padT) : (yBase - padT) * 0.22;
+      ctx.strokeStyle = inSlow ? css("--trace-lat") : css("--muted");
+      ctx.globalAlpha = inSlow ? .95 : .5;
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(px, yBase - 1);
+      ctx.lineTo(px, yBase - hgt);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    // axis captions
+    ctx.save();
+    ctx.fillStyle = css("--muted");
+    ctx.font = '600 9px ui-monospace, Menlo, monospace';
+    ctx.letterSpacing = "1.2px";
+    ctx.fillText("REQUESTS SENT", x0, H - 6);
+    ctx.textAlign = "center";
+    ctx.fillStyle = css("--trace-lat");
+    ctx.fillText("SERVER SLOW", sx + sw / 2, padT - 12 + 4);
+    ctx.restore();
+  }
+
+  /* ── paint / loop ─────────────────────────────────────────── */
+  function paintStatic(){
+    drawRig();
+    drawLoop("cl-closed", true);
+    drawLoop("cl-open", false);
+  }
+
+  var running = false;
+  new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ if(e.target === rig) running = e.isIntersecting; });
+  }, {threshold:0.05}).observe(rig);
+
+  var last = 0;
+  function frame(now){
+    if(running && now - last > 90){ last = now; step(); drawRig(); }
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener("resize", paintStatic);
+  if(matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintStatic);
+
+  // seed the traces so the panel is already alive on first paint
+  for(var s = 0; s < N; s++) step();
+  paintStatic();
+  if(!reduce) requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
