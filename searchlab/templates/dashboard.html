@@ -7,14 +7,55 @@
 <style>
 :root {
   --paper: #f5f6f4;
+  --card: #ffffff;      /* every panel, table and floating box */
+  --sunk: #fafafa;       /* recessed surfaces, e.g. the DSL preview */
   --ink: #14161a;
   --muted: #5b6068;
   --faint: #9aa0a8;
   --line: #e0e2df;
   --cobalt: #2743c7;
   --cobalt-soft: rgba(39, 67, 199, 0.10);
+  --ok: #2f7d51;
+  --warn: #c9971c;
+  --crit: #b3362b;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Helvetica, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+/* Same instrument, lights off — the surfaces and ink are the exact values
+   the project's landing page already uses, so a screenshot taken in dark
+   mode looks like the same product wherever it's shown. The accent and
+   status colors are NOT copied from there, though: that palette calibrates
+   colors to pop as thin 1px chart traces against black, one line at a
+   time. Used as the everyday link/border/hover color — the thing every
+   action in Controls is set in — that same brightness reads as neon.
+   Desaturated down for continuous UI use instead. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0a0e15;
+    --card: #161e2a;
+    --sunk: #10161f;
+    --ink: #dce4ee;
+    --muted: #8798ae;
+    --faint: #5f6c80;
+    --line: #232e3d;
+    --cobalt: #7b9bd9;
+    --cobalt-soft: rgba(123, 155, 217, 0.12);
+    --ok: #4bab7c;
+    --warn: #d99a2b;
+    --crit: #d1594a;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0a0e15; --card: #161e2a; --sunk: #10161f;
+  --ink: #dce4ee; --muted: #8798ae; --faint: #5f6c80; --line: #232e3d;
+  --cobalt: #7b9bd9; --cobalt-soft: rgba(123, 155, 217, 0.12);
+  --ok: #4bab7c; --warn: #d99a2b; --crit: #d1594a;
+}
+:root[data-theme="light"] {
+  --paper: #f5f6f4; --card: #ffffff; --sunk: #fafafa;
+  --ink: #14161a; --muted: #5b6068; --faint: #9aa0a8; --line: #e0e2df;
+  --cobalt: #2743c7; --cobalt-soft: rgba(39, 67, 199, 0.10);
+  --ok: #2f7d51; --warn: #c9971c; --crit: #b3362b;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 ::selection { background: var(--cobalt-soft); }
@@ -41,6 +82,20 @@ header {
   display: flex; align-items: center; gap: 7px; }
 .dot { width: 8px; height: 8px; background: var(--faint); display: inline-block; }
 .chip.live .dot { background: var(--cobalt); }
+.themebtn { align-self: center; background: none; border: 1px solid var(--line);
+  color: var(--muted); padding: 5px 7px; cursor: pointer; display: flex;
+  line-height: 0; }
+.themebtn:hover { color: var(--ink); border-color: var(--ink); }
+/* Show the icon for the theme you would switch *to*. */
+.themebtn .i-sun { display: none; }
+@media (prefers-color-scheme: dark) {
+  .themebtn .i-sun { display: block; }
+  .themebtn .i-moon { display: none; }
+}
+:root[data-theme="dark"] .themebtn .i-sun { display: block; }
+:root[data-theme="dark"] .themebtn .i-moon { display: none; }
+:root[data-theme="light"] .themebtn .i-sun { display: none; }
+:root[data-theme="light"] .themebtn .i-moon { display: block; }
 .chip.live { color: var(--cobalt); }
 
 /* ---------- sections ---------- */
@@ -52,7 +107,7 @@ h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.1em;
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0; }
 input[type="text"] {
   font-family: var(--mono); font-size: 13px; color: var(--ink);
-  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 0;
   padding: 7px 9px; outline: none; width: 150px;
 }
 input[type="text"]:focus { border-color: var(--cobalt); }
@@ -82,7 +137,7 @@ label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
   letter-spacing: 0.1em; color: var(--faint); }
 select, input[type="number"] {
   font-family: var(--mono); font-size: 13px; color: var(--ink);
-  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 0;
   padding: 7px 9px; outline: none;
 }
 select:focus, input[type="number"]:focus { border-color: var(--cobalt); }
@@ -127,15 +182,15 @@ input[type="range"]::-moz-range-thumb {
 
 /* action history; the section stays hidden until something has happened */
 #strip { font-family: var(--mono); font-size: 12px; color: var(--muted);
-  background: #fff; border: 1.5px solid var(--line);
+  background: var(--card); border: 1.5px solid var(--line);
   max-height: 190px; overflow-y: auto; }
 #strip:empty { display: none; }
 .act { display: grid; grid-template-columns: 64px 1fr; gap: 12px;
   padding: 7px 14px; border-top: 1px solid var(--line); }
 .act:first-child { border-top: none; }
 .act .when { color: var(--faint); font-variant-numeric: tabular-nums; }
-.act .what::before { content: "\2713\00a0\00a0"; color: #2f7d51; }
-.act.err .what::before { content: "!\00a0\00a0"; color: #b3362b; }
+.act .what::before { content: "\2713\00a0\00a0"; color: var(--ok); }
+.act.err .what::before { content: "!\00a0\00a0"; color: var(--crit); }
 .act.err .what { color: var(--ink); }
 #action-count { float: right; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; color: var(--faint); }
@@ -155,7 +210,7 @@ input[type="range"]::-moz-range-thumb {
   text-transform: none; color: var(--cobalt); margin-left: 6px; }
 #queueing { margin: -8px 0 20px; max-width: 90ch; }
 canvas { width: 100%; height: 150px; display: block;
-  border: 1.5px solid var(--line); background: #fff; }
+  border: 1.5px solid var(--line); background: var(--card); }
 .legend { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .legend span { margin-right: 14px; }
 .legend i { display: inline-block; width: 9px; height: 9px; margin-right: 5px;
@@ -204,7 +259,7 @@ canvas { width: 100%; height: 150px; display: block;
 .cond .occur { font-family: var(--mono); font-size: 11px; }
 /* live DSL preview: the builder's controls, as the body they produce */
 .qdsl { border: 1px solid var(--line); border-radius: 6px;
-  background: var(--sunk, #fafafa); min-height: 0;
+  background: var(--sunk); min-height: 0;
   display: flex; flex-direction: column; }
 .qdsl > summary { cursor: pointer; padding: 10px 14px; font-family: var(--mono);
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
@@ -221,16 +276,16 @@ canvas { width: 100%; height: 150px; display: block;
 .qdsl pre { margin: 0; padding: 0 14px 14px; font-family: var(--mono);
   font-size: 12px; line-height: 1.55; color: var(--ink); overflow: auto;
   white-space: pre; min-height: 0; }
-.qdsl .desc { padding: 0 14px 12px; margin: 0; color: var(--warn, #b4541a); }
+.qdsl .desc { padding: 0 14px 12px; margin: 0; color: var(--warn); }
 /* per-replica segment detail, expanded under its topology row */
 .segbtn { background: none; border: none; padding: 0; cursor: pointer;
   font: inherit; color: var(--ink); border-bottom: 1px dotted var(--line); }
 .segbtn:hover { color: var(--cobalt); border-bottom-color: var(--cobalt); }
-.segwrap { background: #fff; border: 1.5px solid var(--line); padding: 12px 14px;
+.segwrap { background: var(--card); border: 1.5px solid var(--line); padding: 12px 14px;
   margin: 4px 0 10px; }
 .segsum { font-family: var(--mono); font-size: 11px; color: var(--muted);
   margin-bottom: 10px; }
-.segdel { color: #c9971c; }
+.segdel { color: var(--warn); }
 .lustats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px 20px; margin-bottom: 14px; padding-bottom: 12px;
   border-bottom: 1px solid var(--line); }
@@ -255,13 +310,13 @@ canvas { width: 100%; height: 150px; display: block;
 .segtable .segage { color: var(--faint); }
 .state-active { color: var(--cobalt); }
 .state-recovering, .state-down { color: var(--ink); font-weight: 700; }
-.health-GREEN { color: #2f7d51; }
-.health-YELLOW { color: #c9971c; font-weight: 700; }
-.health-RED { color: #b3362b; font-weight: 700; }
+.health-GREEN { color: var(--ok); }
+.health-YELLOW { color: var(--warn); font-weight: 700; }
+.health-RED { color: var(--crit); font-weight: 700; }
 
 /* ---------- logs ---------- */
 #log {
-  background: #fff; border: 1.5px solid var(--line); padding: 10px 14px;
+  background: var(--card); border: 1.5px solid var(--line); padding: 10px 14px;
   font-family: var(--mono); font-size: 11px; line-height: 1.9; color: var(--muted);
   overflow: hidden;
 }
@@ -276,9 +331,9 @@ canvas { width: 100%; height: 150px; display: block;
   cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 /* status dots use traffic-light colors — the one place convention beats the palette */
 .repdot { width: 9px; height: 9px; display: inline-block; cursor: help; }
-.repdot.active { background: #2f7d51; }
-.repdot.recovering { background: #c9971c; }
-.repdot.down, .repdot.recovery_failed { background: #b3362b; }
+.repdot.active { background: var(--ok); }
+.repdot.recovering { background: var(--warn); }
+.repdot.down, .repdot.recovery_failed { background: var(--crit); }
 .repdot.unknown { background: var(--faint); }
 #log .tag { display: inline-block; font-size: 9px; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--cobalt); border: 1px solid var(--cobalt);
@@ -286,7 +341,7 @@ canvas { width: 100%; height: 150px; display: block;
   vertical-align: 1px; }
 /* plain level markers, so untagged lines still line up with tagged ones */
 #log .tag.lvl-info { color: var(--faint); border-color: var(--line); cursor: default; }
-#log .tag.lvl-warn, #log .tag.lvl-error { color: #b3362b; border-color: #b3362b;
+#log .tag.lvl-warn, #log .tag.lvl-error { color: var(--crit); border-color: var(--crit);
   cursor: default; }
 
 /* ---------- chart range + hover ---------- */
@@ -296,7 +351,7 @@ canvas { width: 100%; height: 150px; display: block;
   border-bottom: 1.5px solid transparent; }
 .rangebtn:hover { color: var(--cobalt); }
 .rangebtn.active { color: var(--cobalt); border-bottom-color: var(--cobalt); }
-#tip { position: fixed; display: none; background: #fff; border: 1.5px solid var(--ink);
+#tip { position: fixed; display: none; background: var(--card); border: 1.5px solid var(--ink);
   font-family: var(--mono); font-size: 11px; padding: 8px 10px; pointer-events: none;
   z-index: 50; min-width: 150px; font-variant-numeric: tabular-nums; }
 #tip .twhen { color: var(--faint); font-size: 10px; margin-bottom: 5px; }
@@ -364,7 +419,7 @@ canvas { width: 100%; height: 150px; display: block;
 .hashelp.hasdoc:hover::after { color: var(--cobalt); }
 #phelp[hidden] { display: none; }
 #phelp { position: fixed; z-index: 40; width: 330px; max-width: calc(100vw - 24px);
-  background: #fff; border: 1.5px solid var(--ink); padding: 11px 13px;
+  background: var(--card); border: 1.5px solid var(--ink); padding: 11px 13px;
   box-shadow: 3px 3px 0 var(--cobalt-soft); }
 #phelp b { display: block; font-family: var(--mono); font-size: 10.5px;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint);
@@ -392,7 +447,7 @@ canvas { width: 100%; height: 150px; display: block;
 .qglabel span { font-family: var(--sans); font-size: 12px; font-weight: 400;
   letter-spacing: 0; text-transform: none; color: var(--faint); }
 textarea { font-family: var(--mono); font-size: 13px; color: var(--ink);
-  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 0;
   padding: 7px 9px; outline: none; resize: vertical; }
 textarea:focus { border-color: var(--cobalt); }
 
@@ -418,7 +473,7 @@ textarea:focus { border-color: var(--cobalt); }
 
 /* results: one record per row, long values clamped, click to see the doc */
 #q-results:empty { display: none; }
-#q-results { background: #fff; border: 1.5px solid var(--line); margin-bottom: 18px; }
+#q-results { background: var(--card); border: 1.5px solid var(--line); margin-bottom: 18px; }
 .qdoc { border-top: 1px solid var(--line); padding: 10px 14px; }
 .qdoc:first-child { border-top: none; }
 .qdoc summary { cursor: pointer; list-style: none; display: grid;
@@ -434,7 +489,7 @@ textarea:focus { border-color: var(--cobalt); }
   padding-left: 14px; border-left: 2px solid var(--line); }
 
 /* foldable detail panels: url, timing, parsed query, raw response */
-.qpanel { border: 1.5px solid var(--line); background: #fff; margin-bottom: 10px; }
+.qpanel { border: 1.5px solid var(--line); background: var(--card); margin-bottom: 10px; }
 .qpanel > summary { cursor: pointer; padding: 9px 14px; font-family: var(--mono);
   font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--muted); list-style: none; }
@@ -456,7 +511,7 @@ textarea:focus { border-color: var(--cobalt); }
 
 /* ---------- request traffic ---------- */
 /* white panel, matching the activity log above it */
-#traffic-panel { background: #fff; border: 1.5px solid var(--line);
+#traffic-panel { background: var(--card); border: 1.5px solid var(--line);
   padding: 2px 14px 10px; }
 #traffic { width: 100%; margin-top: 0; }
 #traffic th { padding-top: 10px; }
@@ -472,11 +527,11 @@ textarea:focus { border-color: var(--cobalt); }
 .kind { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
   border: 1px solid currentColor; padding: 0 5px; }
 .kind.query { color: var(--cobalt); }
-.kind.index { color: #2f7d51; }
-.tfail { color: #b3362b; font-weight: 700; }
+.kind.index { color: var(--ok); }
+.tfail { color: var(--crit); font-weight: 700; }
 
 /* ---------- incident timeline ---------- */
-#causal { background: #fff; border: 1.5px solid var(--line); }
+#causal { background: var(--card); border: 1.5px solid var(--line); }
 #causal:empty { display: none; }
 #causal-count { float: right; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; color: var(--faint); }
@@ -495,8 +550,8 @@ textarea:focus { border-color: var(--cobalt); }
   width: 5px; height: 5px; border-radius: 50%; background: var(--cobalt); }
 .step:not(:last-child) .spine::after { content: ""; position: absolute;
   left: 7px; top: 12px; bottom: -6px; width: 1px; background: var(--line); }
-.step.crit .spine::before { background: #b3362b; }
-.step.warn .spine::before { background: #c9971c; }
+.step.crit .spine::before { background: var(--crit); }
+.step.warn .spine::before { background: var(--warn); }
 .step.info .spine::before { background: var(--cobalt); }
 .step .what { font-size: 12.5px; color: var(--ink); font-weight: 600; }
 .step .why { font-size: 11.5px; color: var(--muted); line-height: 1.45;
@@ -506,7 +561,7 @@ textarea:focus { border-color: var(--cobalt); }
 
 /* ---------- health ---------- */
 /* white panel, so findings read as clearly as the activity and traffic logs */
-#health { background: #fff; border: 1.5px solid var(--line); }
+#health { background: var(--card); border: 1.5px solid var(--line); }
 .finding { padding: 13px 16px 14px; border-top: 1px solid var(--line);
   border-left: 3px solid transparent; }
 .finding:first-child { border-top: none; }
@@ -515,10 +570,10 @@ textarea:focus { border-color: var(--cobalt); }
 .finding p { font-size: 13px; color: var(--muted); max-width: 78ch;
   line-height: 1.5; }
 /* same traffic-light convention as the replica dots */
-.finding.crit { border-left-color: #b3362b; }
-.finding.warn { border-left-color: #c9971c; }
+.finding.crit { border-left-color: var(--crit); }
+.finding.warn { border-left-color: var(--warn); }
 .finding.info { border-left-color: var(--cobalt); }
-.finding.ok { border-left-color: #2f7d51; }
+.finding.ok { border-left-color: var(--ok); }
 /* resolved findings stay readable but visibly past-tense */
 .finding.done { opacity: 0.62; }
 .finding.done h5 { font-weight: 600; }
@@ -536,10 +591,10 @@ textarea:focus { border-color: var(--cobalt); }
 .sev { display: inline-block; font-family: var(--mono); font-size: 9px;
   letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid currentColor;
   padding: 0 5px; margin-right: 8px; vertical-align: 2px; }
-.finding.crit .sev { color: #b3362b; }
-.finding.warn .sev { color: #c9971c; }
+.finding.crit .sev { color: var(--crit); }
+.finding.warn .sev { color: var(--warn); }
 .finding.info .sev { color: var(--cobalt); }
-.finding.ok .sev { color: #2f7d51; }
+.finding.ok .sev { color: var(--ok); }
 
 /* ---------- collapsible sections ---------- */
 .sec-toggle { background: none; border: none; cursor: pointer; color: var(--muted);
@@ -575,6 +630,19 @@ section.collapsed h2 { margin-bottom: 0; }
     <span class="wordmark">searchlab</span>
     <span class="hmeta" id="hmeta">—</span>
     <span class="chip" id="chip"><span class="dot"></span><span id="chiplabel">connecting</span></span>
+    <button class="themebtn" id="theme-toggle" type="button"
+            title="Switch between light and dark" aria-label="Switch theme">
+      <svg class="i-sun" viewBox="0 0 24 24" width="15" height="15" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/>
+      </svg>
+      <svg class="i-moon" viewBox="0 0 24 24" width="15" height="15" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round"
+           stroke-linejoin="round">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+    </button>
   </div>
 </header>
 
@@ -1123,7 +1191,11 @@ section.collapsed h2 { margin-bottom: 0; }
 "use strict";
 const KEEP_S = 3600, POLL_MS = 2000;
 let windowS = 300;   // selectable: 300 / 900 / 3600
-const INKS = ["#14161a", "#2743c7", "#5b6068", "#9aa0a8"];
+// Canvas takes colour literals, not var(), so read the theme tokens at draw
+// time — they change under the theme toggle and the OS colour-scheme switch.
+const cv = name => getComputedStyle(document.documentElement)
+  .getPropertyValue(name).trim();
+const INKS = () => [cv("--ink"), cv("--cobalt"), cv("--muted"), cv("--faint")];
 const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [], gc: {}, seg: {} };
 const prevGC = {};      // node -> [ts, cumulative gc ms] for rate deltas
 let lastSnap = null;    // latest snapshot, reused by the topology renderer
@@ -1151,7 +1223,7 @@ function setupCanvas(c) {
 function drawChart(canvas, seriesMap, colors, unit) {
   const [g, W, H] = setupCanvas(canvas), now = Date.now() / 1000;
   g.clearRect(0, 0, W, H);
-  g.strokeStyle = "rgba(20,22,26,.06)"; g.lineWidth = 1;
+  g.strokeStyle = cv("--line"); g.lineWidth = 1;
   const gridStep = windowS >= 3600 ? 600 : windowS >= 900 ? 120 : 30;
   for (let x = W; x > 0; x -= W / (windowS / gridStep)) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
   for (const f of [.25, .5, .75]) { g.beginPath(); g.moveTo(0, H * f); g.lineTo(W, H * f); g.stroke(); }
@@ -1179,7 +1251,7 @@ function drawChart(canvas, seriesMap, colors, unit) {
     g.beginPath(); g.arc(x, y, 2.5, 0, 7); g.fill();
   });
 
-  g.fillStyle = "#9aa0a8";
+  g.fillStyle = cv("--faint");
   g.font = "10px ui-monospace, monospace";
   g.fillText(vmax.toFixed(0) + " " + unit, 5, 12);
   g.fillText(windowLabel(), 5, H - 6);
@@ -3207,18 +3279,20 @@ function render(snap) {
       hist.ltp50.length = 0; hist.ltp99.length = 0;
     }
   }
-  drawChart($("c-lt"), { p50: hist.ltp50, p99: hist.ltp99 }, ["#9aa0a8", "#2743c7"], "ms");
-  legend($("lg-lt"), hist.ltp99.length ? ["p50", "p99"] : [], ["#9aa0a8", "#2743c7"]);
+  const inks = INKS(), ltInks = [cv("--faint"), cv("--cobalt")],
+        rateInks = [cv("--cobalt")];
+  drawChart($("c-lt"), { p50: hist.ltp50, p99: hist.ltp99 }, ltInks, "ms");
+  legend($("lg-lt"), hist.ltp99.length ? ["p50", "p99"] : [], ltInks);
 
-  drawChart($("c-p99"), hist.p99, INKS, "ms");
-  drawChart($("c-heap"), hist.heap, INKS, "MB");
-  drawChart($("c-rate"), { all: hist.rate }, ["#2743c7"], "r/s");
-  drawChart($("c-gc"), hist.gc, INKS, "%");
-  drawChart($("c-seg"), hist.seg, INKS, "seg");
-  legend($("lg-p99"), Object.keys(hist.p99), INKS);
-  legend($("lg-heap"), Object.keys(hist.heap), INKS);
-  legend($("lg-gc"), Object.keys(hist.gc), INKS);
-  legend($("lg-seg"), Object.keys(hist.seg), INKS);
+  drawChart($("c-p99"), hist.p99, inks, "ms");
+  drawChart($("c-heap"), hist.heap, inks, "MB");
+  drawChart($("c-rate"), { all: hist.rate }, rateInks, "r/s");
+  drawChart($("c-gc"), hist.gc, inks, "%");
+  drawChart($("c-seg"), hist.seg, inks, "seg");
+  legend($("lg-p99"), Object.keys(hist.p99), inks);
+  legend($("lg-heap"), Object.keys(hist.heap), inks);
+  legend($("lg-gc"), Object.keys(hist.gc), inks);
+  legend($("lg-seg"), Object.keys(hist.seg), inks);
   $("v-p99").textContent = fmt(worstP99, 1) + " ms worst";
   $("v-heap").textContent = fmt(sumHeap) + " MB total";
   $("v-rate").textContent = fmt(sumRate, 1) + " req/s";
@@ -3376,6 +3450,31 @@ async function pollLogs() {
       catch (e) { /* private mode etc. — state just won't persist */ }
     });
   }
+})();
+
+(function () {
+  const root = document.documentElement;
+  const KEY = "searchlab-theme";
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) { /* private mode */ }
+  const q = new URLSearchParams(location.search).get("theme");
+  if (q === "dark" || q === "light") root.setAttribute("data-theme", q);
+  else if (saved) root.setAttribute("data-theme", saved);
+
+  $("theme-toggle").addEventListener("click", () => {
+    const set = root.getAttribute("data-theme");
+    const dark = set ? set === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) { /* private mode */ }
+    if (lastSnap) render(lastSnap);
+  });
+
+  // Following the OS only applies while the user has not picked a theme.
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (!root.getAttribute("data-theme") && lastSnap) render(lastSnap);
+  });
 })();
 
 // the model picker sits in Controls, so populate it up front rather than
