@@ -55,3 +55,38 @@ async def test_missing_segment_metric_is_none_not_zero(aiohttp_server):
     snap = await asyncio.to_thread(
         snapshot_node_solr, f"http://{server.host}:{server.port}/solr")
     assert snap["cores"]["c.s.r"]["segments"] is None
+
+
+async def test_solr_cpu_is_normalized_to_percent(aiohttp_server):
+    """Solr reports a 0..1 fraction where ES/OS report whole percent, and the
+    dashboard draws one axis for both."""
+    async def metrics(request):
+        return web.json_response({"metrics": {"solr.jvm": {
+            "os.processCpuLoad": 0.42,
+            "os.systemCpuLoad": 0.771,
+            "os.systemLoadAverage": 3.2,
+        }}})
+
+    app = web.Application()
+    app.router.add_get("/solr/admin/metrics", metrics)
+    server = await aiohttp_server(app)
+    snap = await asyncio.to_thread(
+        snapshot_node_solr, f"http://{server.host}:{server.port}/solr")
+    assert snap["cpu"] == {"process_pct": 42.0, "host_pct": 77.1, "load1": 3.2}
+
+
+async def test_solr_unreadable_cpu_is_none_not_negative(aiohttp_server):
+    """A JVM that cannot read the figure returns -1, which would otherwise
+    plot as a dip below the axis."""
+    async def metrics(request):
+        return web.json_response({"metrics": {"solr.jvm": {
+            "os.processCpuLoad": -1.0, "os.systemCpuLoad": -1.0,
+        }}})
+
+    app = web.Application()
+    app.router.add_get("/solr/admin/metrics", metrics)
+    server = await aiohttp_server(app)
+    snap = await asyncio.to_thread(
+        snapshot_node_solr, f"http://{server.host}:{server.port}/solr")
+    assert snap["cpu"]["process_pct"] is None
+    assert snap["cpu"]["host_pct"] is None

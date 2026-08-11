@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections import deque
 
 import httpx
 
@@ -123,6 +124,17 @@ class SolrEngine(Engine):
 
 # --------------------------------------------------------------- es-family ---
 
+# Solr publishes a ready-made 1-minute rate meter; ES/OS publish only the
+# cumulative search counters, so a rate has to be derived here. Measuring it
+# against just the previous sample divides by whatever gap that caller
+# happened to leave: two pollers landing together — a second dashboard tab,
+# or the CLI alongside the browser — give a sub-millisecond gap, and a
+# one-query delta over it reads as hundreds of requests a second. Averaging
+# over a fixed window keeps the answer steady however often it is asked.
+_SEARCH_SAMPLES: dict[str, deque[tuple[float, int, int]]] = {}
+_RATE_WINDOW_S = 60.0   # matches the "1m" the Solr side reports
+
+
 class _EsFamily(Engine):
     """Shared behavior for Elasticsearch and OpenSearch (same wire APIs)."""
 
@@ -185,7 +197,7 @@ class _EsFamily(Engine):
     def snapshot_node(self, base_url) -> dict:
         with httpx.Client(timeout=15) as client:
             stats = client.get(
-                f"{base_url}/_nodes/_local/stats/jvm,indices,thread_pool,breaker"
+                f"{base_url}/_nodes/_local/stats/jvm,indices,thread_pool,breaker,os,process"
             ).json()
         node = next(iter(stats["nodes"].values()))
         jvm, idx = node["jvm"], node["indices"]
@@ -220,6 +232,41 @@ class _EsFamily(Engine):
             h, m = d.get("hit_count", 0), d.get("miss_count", 0)
             return round(h / (h + m), 3) if h + m else None
 
+        # Query rate and mean service time, measured across the window rather
+        # than since the last caller. A negative delta means the node restarted
+        # and reset its counters, so drop the history instead of reporting the
+        # nonsense spike that a backwards counter would produce.
+        search = idx.get("search", {})
+        q_total = search.get("query_total", 0)
+        q_time = search.get("query_time_in_millis", 0)
+        now = time.time()
+        samples = _SEARCH_SAMPLES.setdefault(base_url, deque())
+        if samples and q_total < samples[-1][1]:
+            samples.clear()
+        samples.append((now, q_total, q_time))
+        while len(samples) > 2 and now - samples[0][0] > _RATE_WINDOW_S:
+            samples.popleft()
+
+        rate = mean_ms = None
+        if len(samples) > 1:
+            t0, c0, ms0 = samples[0]
+            dt, dq, dms = now - t0, q_total - c0, q_time - ms0
+            if dt > 0:
+                rate = round(dq / dt, 1)
+            if dq > 0 and dms >= 0:
+                mean_ms = round(dms / dq, 1)
+
+        # Two different questions: the process figure is how hard this engine
+        # is working, the host figure includes everything else on the box —
+        # which on a laptop lab is usually the load generator itself.
+        os_stats, proc = node.get("os") or {}, node.get("process") or {}
+        os_cpu = os_stats.get("cpu") or {}
+        cpu = {
+            "process_pct": (proc.get("cpu") or {}).get("percent"),
+            "host_pct": os_cpu.get("percent"),
+            "load1": (os_cpu.get("load_average") or {}).get("1m"),
+        }
+
         return {
             "ts": time.time(),
             "jvm": {
@@ -227,6 +274,7 @@ class _EsFamily(Engine):
                 "heap_max_mb": round(jvm["mem"]["heap_max_in_bytes"] / 2**20, 1),
                 "gc": gc,
             },
+            "cpu": cpu,
             "threads": pool,
             "breakers": {"configured": bool(breakers), "trips": breakers},
             "cores": {
@@ -247,8 +295,11 @@ class _EsFamily(Engine):
                         "merges_minor": idx.get("merges", {}).get("total", 0),
                         "merges_major": 0,
                     },
-                    "select_p99_ms": None,   # ES exposes totals, not percentiles
-                    "select_rate_1m": None,
+                    # No percentiles on the wire: ES/OS report totals, so the
+                    # honest summary of service time is the interval mean.
+                    "select_p99_ms": None,
+                    "select_mean_ms": mean_ms,
+                    "select_rate_1m": rate,
                 }
             },
         }
