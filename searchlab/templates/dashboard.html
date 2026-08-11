@@ -7,14 +7,55 @@
 <style>
 :root {
   --paper: #f5f6f4;
+  --card: #ffffff;
+  --sunk: #fafafa;
   --ink: #14161a;
   --muted: #5b6068;
   --faint: #9aa0a8;
   --line: #e0e2df;
   --cobalt: #2743c7;
   --cobalt-soft: rgba(39, 67, 199, 0.10);
+  --ok: #2f7d51;
+  --warn: #c9971c;
+  --crit: #b3362b;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Helvetica, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Dark palette. The accents are desaturated rather than lifted straight from
+   the light theme: at this density — every link, border and hover state at
+   once — the light cobalt reads as neon on near-black. All of these clear
+   4.5:1 against --paper. Following the OS is the default; an explicit
+   choice via the toggle wins, hence the :not([data-theme="light"]). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0a0e15;
+    --card: #161e2a;
+    --sunk: #10161f;
+    --ink: #dce4ee;
+    --muted: #8798ae;
+    --faint: #5f6c80;
+    --line: #232e3d;
+    --cobalt: #7b9bd9;
+    --cobalt-soft: rgba(123, 155, 217, 0.12);
+    --ok: #4bab7c;
+    --warn: #d99a2b;
+    --crit: #d1594a;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0a0e15;
+  --card: #161e2a;
+  --sunk: #10161f;
+  --ink: #dce4ee;
+  --muted: #8798ae;
+  --faint: #5f6c80;
+  --line: #232e3d;
+  --cobalt: #7b9bd9;
+  --cobalt-soft: rgba(123, 155, 217, 0.12);
+  --ok: #4bab7c;
+  --warn: #d99a2b;
+  --crit: #d1594a;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 ::selection { background: var(--cobalt-soft); }
@@ -64,7 +105,7 @@ h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.1em;
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0; }
 input[type="text"] {
   font-family: var(--mono); font-size: 13px; color: var(--ink);
-  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 0;
   padding: 7px 9px; outline: none; width: 150px;
 }
 input[type="text"]:focus { border-color: var(--cobalt); }
@@ -94,7 +135,7 @@ label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
   letter-spacing: 0.1em; color: var(--faint); }
 select, input[type="number"] {
   font-family: var(--mono); font-size: 13px; color: var(--ink);
-  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 0;
   padding: 7px 9px; outline: none;
 }
 select:focus, input[type="number"]:focus { border-color: var(--cobalt); }
@@ -139,15 +180,15 @@ input[type="range"]::-moz-range-thumb {
 
 /* action history; the section stays hidden until something has happened */
 #strip { font-family: var(--mono); font-size: 12px; color: var(--muted);
-  background: #fff; border: 1.5px solid var(--line);
+  background: var(--card); border: 1.5px solid var(--line);
   max-height: 190px; overflow-y: auto; }
 #strip:empty { display: none; }
 .act { display: grid; grid-template-columns: 64px 1fr; gap: 12px;
   padding: 7px 14px; border-top: 1px solid var(--line); }
 .act:first-child { border-top: none; }
 .act .when { color: var(--faint); font-variant-numeric: tabular-nums; }
-.act .what::before { content: "\2713\00a0\00a0"; color: #2f7d51; }
-.act.err .what::before { content: "!\00a0\00a0"; color: #b3362b; }
+.act .what::before { content: "\2713\00a0\00a0"; color: var(--ok); }
+.act.err .what::before { content: "!\00a0\00a0"; color: var(--crit); }
 .act.err .what { color: var(--ink); }
 #action-count { float: right; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; color: var(--faint); }
@@ -167,7 +208,7 @@ input[type="range"]::-moz-range-thumb {
   text-transform: none; color: var(--cobalt); margin-left: 6px; }
 #queueing { margin: -8px 0 20px; max-width: 90ch; }
 canvas { width: 100%; height: 150px; display: block;
-  border: 1.5px solid var(--line); background: #fff; }
+  border: 1.5px solid var(--line); background: var(--card); }
 .legend { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .legend span { margin-right: 14px; }
 .legend i { display: inline-block; width: 9px; height: 9px; margin-right: 5px;
@@ -216,7 +257,7 @@ canvas { width: 100%; height: 150px; display: block;
 .cond .occur { font-family: var(--mono); font-size: 11px; }
 /* live DSL preview: the builder's controls, as the body they produce */
 .qdsl { border: 1px solid var(--line); border-radius: 6px;
-  background: var(--sunk, #fafafa); min-height: 0;
+  background: var(--sunk); min-height: 0;
   display: flex; flex-direction: column; }
 .qdsl > summary { cursor: pointer; padding: 10px 14px; font-family: var(--mono);
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
@@ -233,16 +274,16 @@ canvas { width: 100%; height: 150px; display: block;
 .qdsl pre { margin: 0; padding: 0 14px 14px; font-family: var(--mono);
   font-size: 12px; line-height: 1.55; color: var(--ink); overflow: auto;
   white-space: pre; min-height: 0; }
-.qdsl .desc { padding: 0 14px 12px; margin: 0; color: var(--warn, #b4541a); }
+.qdsl .desc { padding: 0 14px 12px; margin: 0; color: var(--warn); }
 /* per-replica segment detail, expanded under its topology row */
 .segbtn { background: none; border: none; padding: 0; cursor: pointer;
   font: inherit; color: var(--ink); border-bottom: 1px dotted var(--line); }
 .segbtn:hover { color: var(--cobalt); border-bottom-color: var(--cobalt); }
-.segwrap { background: #fff; border: 1.5px solid var(--line); padding: 12px 14px;
+.segwrap { background: var(--card); border: 1.5px solid var(--line); padding: 12px 14px;
   margin: 4px 0 10px; }
 .segsum { font-family: var(--mono); font-size: 11px; color: var(--muted);
   margin-bottom: 10px; }
-.segdel { color: #c9971c; }
+.segdel { color: var(--warn); }
 .lustats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px 20px; margin-bottom: 14px; padding-bottom: 12px;
   border-bottom: 1px solid var(--line); }
@@ -267,13 +308,13 @@ canvas { width: 100%; height: 150px; display: block;
 .segtable .segage { color: var(--faint); }
 .state-active { color: var(--cobalt); }
 .state-recovering, .state-down { color: var(--ink); font-weight: 700; }
-.health-GREEN { color: #2f7d51; }
-.health-YELLOW { color: #c9971c; font-weight: 700; }
-.health-RED { color: #b3362b; font-weight: 700; }
+.health-GREEN { color: var(--ok); }
+.health-YELLOW { color: var(--warn); font-weight: 700; }
+.health-RED { color: var(--crit); font-weight: 700; }
 
 /* ---------- logs ---------- */
 #log {
-  background: #fff; border: 1.5px solid var(--line); padding: 10px 14px;
+  background: var(--card); border: 1.5px solid var(--line); padding: 10px 14px;
   font-family: var(--mono); font-size: 11px; line-height: 1.9; color: var(--muted);
   overflow: hidden;
 }
@@ -288,9 +329,9 @@ canvas { width: 100%; height: 150px; display: block;
   cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 /* status dots use traffic-light colors — the one place convention beats the palette */
 .repdot { width: 9px; height: 9px; display: inline-block; cursor: help; }
-.repdot.active { background: #2f7d51; }
-.repdot.recovering { background: #c9971c; }
-.repdot.down, .repdot.recovery_failed { background: #b3362b; }
+.repdot.active { background: var(--ok); }
+.repdot.recovering { background: var(--warn); }
+.repdot.down, .repdot.recovery_failed { background: var(--crit); }
 .repdot.unknown { background: var(--faint); }
 #log .tag { display: inline-block; font-size: 9px; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--cobalt); border: 1px solid var(--cobalt);
@@ -298,7 +339,7 @@ canvas { width: 100%; height: 150px; display: block;
   vertical-align: 1px; }
 /* plain level markers, so untagged lines still line up with tagged ones */
 #log .tag.lvl-info { color: var(--faint); border-color: var(--line); cursor: default; }
-#log .tag.lvl-warn, #log .tag.lvl-error { color: #b3362b; border-color: #b3362b;
+#log .tag.lvl-warn, #log .tag.lvl-error { color: var(--crit); border-color: var(--crit);
   cursor: default; }
 
 /* ---------- chart range + hover ---------- */
@@ -308,7 +349,7 @@ canvas { width: 100%; height: 150px; display: block;
   border-bottom: 1.5px solid transparent; }
 .rangebtn:hover { color: var(--cobalt); }
 .rangebtn.active { color: var(--cobalt); border-bottom-color: var(--cobalt); }
-#tip { position: fixed; display: none; background: #fff; border: 1.5px solid var(--ink);
+#tip { position: fixed; display: none; background: var(--card); border: 1.5px solid var(--ink);
   font-family: var(--mono); font-size: 11px; padding: 8px 10px; pointer-events: none;
   z-index: 50; min-width: 150px; font-variant-numeric: tabular-nums; }
 #tip .twhen { color: var(--faint); font-size: 10px; margin-bottom: 5px; }
@@ -376,7 +417,7 @@ canvas { width: 100%; height: 150px; display: block;
 .hashelp.hasdoc:hover::after { color: var(--cobalt); }
 #phelp[hidden] { display: none; }
 #phelp { position: fixed; z-index: 40; width: 330px; max-width: calc(100vw - 24px);
-  background: #fff; border: 1.5px solid var(--ink); padding: 11px 13px;
+  background: var(--card); border: 1.5px solid var(--ink); padding: 11px 13px;
   box-shadow: 3px 3px 0 var(--cobalt-soft); }
 #phelp b { display: block; font-family: var(--mono); font-size: 10.5px;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint);
@@ -404,7 +445,7 @@ canvas { width: 100%; height: 150px; display: block;
 .qglabel span { font-family: var(--sans); font-size: 12px; font-weight: 400;
   letter-spacing: 0; text-transform: none; color: var(--faint); }
 textarea { font-family: var(--mono); font-size: 13px; color: var(--ink);
-  background: #fff; border: 1.5px solid var(--ink); border-radius: 0;
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 0;
   padding: 7px 9px; outline: none; resize: vertical; }
 textarea:focus { border-color: var(--cobalt); }
 
@@ -430,7 +471,7 @@ textarea:focus { border-color: var(--cobalt); }
 
 /* results: one record per row, long values clamped, click to see the doc */
 #q-results:empty { display: none; }
-#q-results { background: #fff; border: 1.5px solid var(--line); margin-bottom: 18px; }
+#q-results { background: var(--card); border: 1.5px solid var(--line); margin-bottom: 18px; }
 .qdoc { border-top: 1px solid var(--line); padding: 10px 14px; }
 .qdoc:first-child { border-top: none; }
 .qdoc summary { cursor: pointer; list-style: none; display: grid;
@@ -446,7 +487,7 @@ textarea:focus { border-color: var(--cobalt); }
   padding-left: 14px; border-left: 2px solid var(--line); }
 
 /* foldable detail panels: url, timing, parsed query, raw response */
-.qpanel { border: 1.5px solid var(--line); background: #fff; margin-bottom: 10px; }
+.qpanel { border: 1.5px solid var(--line); background: var(--card); margin-bottom: 10px; }
 .qpanel > summary { cursor: pointer; padding: 9px 14px; font-family: var(--mono);
   font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--muted); list-style: none; }
@@ -468,7 +509,7 @@ textarea:focus { border-color: var(--cobalt); }
 
 /* ---------- request traffic ---------- */
 /* white panel, matching the activity log above it */
-#traffic-panel { background: #fff; border: 1.5px solid var(--line);
+#traffic-panel { background: var(--card); border: 1.5px solid var(--line);
   padding: 2px 14px 10px; }
 #traffic { width: 100%; margin-top: 0; }
 #traffic th { padding-top: 10px; }
@@ -484,11 +525,11 @@ textarea:focus { border-color: var(--cobalt); }
 .kind { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
   border: 1px solid currentColor; padding: 0 5px; }
 .kind.query { color: var(--cobalt); }
-.kind.index { color: #2f7d51; }
-.tfail { color: #b3362b; font-weight: 700; }
+.kind.index { color: var(--ok); }
+.tfail { color: var(--crit); font-weight: 700; }
 
 /* ---------- incident timeline ---------- */
-#causal { background: #fff; border: 1.5px solid var(--line); }
+#causal { background: var(--card); border: 1.5px solid var(--line); }
 #causal:empty { display: none; }
 #causal-count { float: right; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; color: var(--faint); }
@@ -507,8 +548,8 @@ textarea:focus { border-color: var(--cobalt); }
   width: 5px; height: 5px; border-radius: 50%; background: var(--cobalt); }
 .step:not(:last-child) .spine::after { content: ""; position: absolute;
   left: 7px; top: 12px; bottom: -6px; width: 1px; background: var(--line); }
-.step.crit .spine::before { background: #b3362b; }
-.step.warn .spine::before { background: #c9971c; }
+.step.crit .spine::before { background: var(--crit); }
+.step.warn .spine::before { background: var(--warn); }
 .step.info .spine::before { background: var(--cobalt); }
 .step .what { font-size: 12.5px; color: var(--ink); font-weight: 600; }
 .step .why { font-size: 11.5px; color: var(--muted); line-height: 1.45;
@@ -518,7 +559,7 @@ textarea:focus { border-color: var(--cobalt); }
 
 /* ---------- health ---------- */
 /* white panel, so findings read as clearly as the activity and traffic logs */
-#health { background: #fff; border: 1.5px solid var(--line); }
+#health { background: var(--card); border: 1.5px solid var(--line); }
 .finding { padding: 13px 16px 14px; border-top: 1px solid var(--line);
   border-left: 3px solid transparent; }
 .finding:first-child { border-top: none; }
@@ -527,10 +568,10 @@ textarea:focus { border-color: var(--cobalt); }
 .finding p { font-size: 13px; color: var(--muted); max-width: 78ch;
   line-height: 1.5; }
 /* same traffic-light convention as the replica dots */
-.finding.crit { border-left-color: #b3362b; }
-.finding.warn { border-left-color: #c9971c; }
+.finding.crit { border-left-color: var(--crit); }
+.finding.warn { border-left-color: var(--warn); }
 .finding.info { border-left-color: var(--cobalt); }
-.finding.ok { border-left-color: #2f7d51; }
+.finding.ok { border-left-color: var(--ok); }
 /* resolved findings stay readable but visibly past-tense */
 .finding.done { opacity: 0.62; }
 .finding.done h5 { font-weight: 600; }
@@ -548,10 +589,10 @@ textarea:focus { border-color: var(--cobalt); }
 .sev { display: inline-block; font-family: var(--mono); font-size: 9px;
   letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid currentColor;
   padding: 0 5px; margin-right: 8px; vertical-align: 2px; }
-.finding.crit .sev { color: #b3362b; }
-.finding.warn .sev { color: #c9971c; }
+.finding.crit .sev { color: var(--crit); }
+.finding.warn .sev { color: var(--warn); }
 .finding.info .sev { color: var(--cobalt); }
-.finding.ok .sev { color: #2f7d51; }
+.finding.ok .sev { color: var(--ok); }
 
 /* ---------- collapsible sections ---------- */
 .sec-toggle { background: none; border: none; cursor: pointer; color: var(--muted);
@@ -747,8 +788,9 @@ section.collapsed h2 { margin-bottom: 0; }
       <div class="legend" id="lg-lt"></div>
     </div>
     <div class="chart">
-      <h4 title="How long Solr itself spent processing queries, per node. Excludes network and any queueing before Solr picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
-        Query latency p99, per node <span class="vantage">as the server sees it</span>
+      <h4 id="h-p99" title="How long the engine itself spent processing queries, per node. Excludes network and any queueing before the engine picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
+        Query latency <span id="p99-stat">p99</span>, per node
+        <span class="vantage">as the server sees it</span>
         <b id="v-p99">—</b></h4>
       <canvas id="c-p99"></canvas>
       <div class="legend" id="lg-p99"></div>
@@ -2063,8 +2105,17 @@ function hideParamHelp() {
 helpCard.addEventListener("mouseenter", () => clearTimeout(helpHideTimer));
 helpCard.addEventListener("mouseleave", hideParamHelp);
 
-/* Hover for the mouse, focus for the keyboard: tabbing onto a control
-   should explain it the same way pointing at its label does. */
+/* Hover the name to have it explained; focus explains only when the keyboard
+   is what moved you there. Clicking into a field focuses it too, so without
+   this distinction the card opens over the box you are trying to type in —
+   the explanation is wanted while reading the form, not while filling it.
+   Tab still opens it, since that is a keyboard user's only way in. */
+let focusFromKeyboard = false;
+addEventListener("mousedown", () => { focusFromKeyboard = false; }, true);
+addEventListener("keydown", e => {
+  if (e.key === "Tab") focusFromKeyboard = true;
+}, true);
+
 function wireParamHelp() {
   for (const key of Object.keys(PARAM_HELP)) {
     const label = document.querySelector(`label[for="${key}"]`)
@@ -2090,7 +2141,9 @@ function wireParamHelp() {
     }
     const ctl = document.getElementById(key);
     if (ctl) {
-      ctl.addEventListener("focus", () => showParamHelp(label, key));
+      ctl.addEventListener("focus", () => {
+        if (focusFromKeyboard) showParamHelp(label, key);
+      });
       ctl.addEventListener("blur", scheduleHideParamHelp);
     }
   }
@@ -3178,6 +3231,7 @@ function render(snap) {
 
   // node series
   let sumRate = 0, worstP99 = 0, sumHeap = 0, worstGC = 0, sumSeg = 0, rows = "";
+  let serverStat = "p99";   // becomes "mean" on engines without percentiles
   for (const [name, n] of Object.entries(snap.nodes)) {
     if (n.error) {
       rows += `<tr><td>${name}</td><td colspan="4" style="color:var(--faint)">unreachable</td></tr>`;
@@ -3206,7 +3260,14 @@ function render(snap) {
       }
     }
     for (const c of Object.values(n.cores)) {
+      // Solr reports a percentile; OS/ES report only totals, so the mean over
+      // the poll interval stands in. Same axis, weaker claim — the heading
+      // says which one you are looking at rather than calling a mean a p99.
       if (c.select_p99_ms != null) p99 = Math.max(p99 ?? 0, c.select_p99_ms);
+      else if (c.select_mean_ms != null) {
+        p99 = Math.max(p99 ?? 0, c.select_mean_ms);
+        serverStat = "mean";
+      }
       rate += c.select_rate_1m || 0; docs += c.num_docs || 0;
     }
     if (p99 != null) { push(hist.p99[name] ??= [], t, p99); worstP99 = Math.max(worstP99, p99); }
@@ -3260,6 +3321,7 @@ function render(snap) {
   legend($("lg-heap"), Object.keys(hist.heap), inks);
   legend($("lg-gc"), Object.keys(hist.gc), inks);
   legend($("lg-seg"), Object.keys(hist.seg), inks);
+  $("p99-stat").textContent = serverStat;
   $("v-p99").textContent = fmt(worstP99, 1) + " ms worst";
   $("v-heap").textContent = fmt(sumHeap) + " MB total";
   $("v-rate").textContent = fmt(sumRate, 1) + " req/s";
