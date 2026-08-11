@@ -52,6 +52,11 @@ def help_entries(html):
 
 
 @pytest.fixture(scope="module")
+def metric_entries(html):
+    return js_object(html, "METRIC_HELP")
+
+
+@pytest.fixture(scope="module")
 def doc_links(html):
     return js_object(html, "PARAM_DOCS")
 
@@ -193,3 +198,96 @@ def test_scroll_repositions_rather_than_dismissing(html):
     scroll = html[html.index('addEventListener("scroll"'):]
     scroll = scroll[:scroll.index("}, true);")]
     assert "placeParamHelp" in scroll
+
+
+# ---------- the charts ----------
+# A parameter's help says what it changes; a chart's says how to read the
+# line. These ride the same card, so they are guarded the same way.
+
+CHARTS = ["m-lt", "m-p99", "m-heap", "m-rate", "m-cpu", "m-gc", "m-seg"]
+
+
+def test_every_chart_has_help(metric_entries):
+    """A chart you cannot interpret is decoration. Two of these had no
+    tooltip at all before, which is what prompted the section."""
+    assert sorted(metric_entries) == sorted(CHARTS)
+
+
+def test_every_chart_help_is_reachable_from_its_title(html, metric_entries):
+    for key in metric_entries:
+        assert f'data-help="{key}"' in html, key
+
+
+def test_chart_help_reads_the_line_rather_than_defining_the_metric(metric_entries):
+    """Same length budget as the parameters: enough to say what a rising
+    line means, short enough to actually be read on hover."""
+    for key, entry in metric_entries.items():
+        bodies = ([entry] if isinstance(entry, list)
+                  else list(entry.values()))
+        for body in bodies:
+            text = body[0]
+            sentences = [s for s in re.split(r"(?<=[.?!])\s+", text.strip()) if s]
+            assert 2 <= len(sentences) <= 4, f"{key}: {len(sentences)} sentences"
+            assert 90 < len(text) < 620, f"{key}: {len(text)} chars"
+
+
+def test_charts_split_by_engine_only_where_the_source_differs(metric_entries):
+    """Heap is heap. Splitting a metric that both engines measure the same
+    way just duplicates the prose and invites the two copies to drift."""
+    for key in ["m-p99", "m-rate"]:
+        assert isinstance(metric_entries[key], dict), key
+        assert set(metric_entries[key]) == {"es", "solr"}, key
+    for key in ["m-lt", "m-heap", "m-cpu", "m-gc", "m-seg"]:
+        assert isinstance(metric_entries[key], list), key
+
+
+def test_engine_split_charts_name_the_other_engine(metric_entries):
+    for key in ["m-p99", "m-rate"]:
+        for engine, entry in metric_entries[key].items():
+            expected = "Solr" if engine == "es" else "OS/ES"
+            assert expected in entry[1], f"{key}/{engine}: {entry[1]!r}"
+
+
+def test_charts_are_not_given_dead_documentation_links(doc_links, metric_entries):
+    """These are readings, not parameters — there is no reference page for
+    "the shape of your heap chart", and the arrow would promise one."""
+    assert not set(metric_entries) & set(doc_links)
+
+
+def test_chart_titles_no_longer_carry_native_tooltips(html):
+    """The browser tooltip and the card would otherwise both fire on the
+    same hover, saying different things at different speeds."""
+    charts = html[html.index('<div class="chartgrid">'):]
+    charts = charts[:charts.index("</div>\n  <table id=\"summary\"")]
+    # data-help-title is the card's own heading, not a browser tooltip
+    assert not re.search(r'(?<![-\w])title=', charts)
+
+
+def test_chart_titles_are_reachable_by_keyboard(html):
+    """A parameter's help opens by tabbing onto the control it describes.
+    A chart has no control, so the title has to become the tab stop itself
+    or these are the only help on the page a keyboard cannot open."""
+    wiring = html[html.index("function wireParamHelp()"):]
+    wiring = wiring[:wiring.index("\n  }")]
+    assert "document.getElementById(key) || label" in wiring
+    assert "label.tabIndex = 0" in wiring
+
+
+def test_a_click_does_not_flash_the_card(html):
+    """Clicking a control focuses it too, and opening on that focus pops
+    the card for the instant before the next click dismisses it."""
+    assert "focusFromKeyboard" in html
+    assert 'addEventListener("mousedown", () => { focusFromKeyboard = false; }' in html
+    assert "if (focusFromKeyboard) showParamHelp" in html
+
+
+def test_the_card_serves_both_maps(html):
+    """One card, two sources — a chart key that only PARAM_HELP is consulted
+    for would silently show nothing."""
+    lookup = html[html.index("function paramHelp(key)"):]
+    lookup = lookup[:lookup.index("}")]
+    assert "METRIC_HELP" in lookup
+    assert "Array.isArray" in lookup, "engine-agnostic entries need a path"
+    wiring = html[html.index("function wireParamHelp()"):]
+    wiring = wiring[:wiring.index("\n  }")]
+    assert "METRIC_HELP" in wiring
