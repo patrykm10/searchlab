@@ -154,6 +154,14 @@ class _DemoState:
                     "heap_max_mb": 1024.0,
                     "gc": {"G1-Young-Generation": dict(self.gc[i])},
                 },
+                # CPU tracks the query rate, since that is what the demo is
+                # pretending to be busy with, and stays short of saturation.
+                "cpu": {
+                    "process_pct": round(min(94, self._rate(t) * 0.7
+                                             + self.rng.uniform(-4, 4)), 1),
+                    "host_pct": None,
+                    "load1": None,
+                },
                 "cores": {
                     f"products_shard{i + 1}_replica_n{i + 1}": {
                         "num_docs": 500_000 + int(self.adds / self.spec.solr_nodes),

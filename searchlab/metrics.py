@@ -104,6 +104,20 @@ def snapshot_node_solr(base_url: str) -> dict:
             collector, stat = key[3:].rsplit(".", 1)
             out["jvm"]["gc"].setdefault(collector, {})[stat] = val
 
+    # Solr reports these as a 0..1 fraction where ES/OS report whole percent;
+    # normalize here so the dashboard has one unit to draw. A JVM that cannot
+    # read a figure reports -1 rather than omitting it, which would otherwise
+    # plot as a dip below the axis.
+    def _pct(name):
+        val = _get(jvm, name)
+        return round(val * 100, 1) if isinstance(val, (int, float)) and val >= 0 else None
+
+    out["cpu"] = {
+        "process_pct": _pct("os.processCpuLoad"),
+        "host_pct": _pct("os.systemCpuLoad"),
+        "load1": _get(jvm, "os.systemLoadAverage"),
+    }
+
     # Solr-layer capacity, as opposed to JVM-layer symptoms: a saturated
     # thread pool or a tripped breaker explains a dropped query directly.
     out["threads"] = _thread_pool(metrics.get("solr.jetty", {}))

@@ -806,6 +806,13 @@ section.collapsed h2 { margin-bottom: 0; }
       <div class="legend" id="lg-rate"></div>
     </div>
     <div class="chart">
+      <h4 title="CPU used by each engine process, not by the whole machine — so the load generator running alongside it does not count. This is the ceiling that matters: once a node sits near 100% the queue grows and latency climbs no matter what else you tune. Flat CPU while latency rises means the engine is waiting, not computing — usually disk, locks, or GC.">
+        Engine CPU, per node <span class="vantage">as the server sees it</span>
+        <b id="v-cpu">—</b></h4>
+      <canvas id="c-cpu"></canvas>
+      <div class="legend" id="lg-cpu"></div>
+    </div>
+    <div class="chart">
       <h4 title="Share of each node's time spent on garbage collection instead of serving requests. Healthy is near 0; sustained 10%+ means the heap is too small for the workload.">
         Time lost to garbage collection <b id="v-gc">—</b></h4>
       <canvas id="c-gc"></canvas>
@@ -1191,7 +1198,7 @@ let windowS = 300;   // selectable: 300 / 900 / 3600
 const cssRoot = getComputedStyle(document.documentElement);
 const cv = name => cssRoot.getPropertyValue(name).trim();
 const INKS = () => [cv("--ink"), cv("--cobalt"), cv("--muted"), cv("--faint")];
-const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [], gc: {}, seg: {} };
+const hist = { p99: {}, heap: {}, rate: [], ltp50: [], ltp99: [], gc: {}, seg: {}, cpu: {} };
 const prevGC = {};      // node -> [ts, cumulative gc ms] for rate deltas
 let lastSnap = null;    // latest snapshot, reused by the topology renderer
 let historySeeded = false;
@@ -3231,6 +3238,7 @@ function render(snap) {
 
   // node series
   let sumRate = 0, worstP99 = 0, sumHeap = 0, worstGC = 0, sumSeg = 0, rows = "";
+  let worstCPU = 0;
   let serverStat = "p99";   // becomes "mean" on engines without percentiles
   for (const [name, n] of Object.entries(snap.nodes)) {
     if (n.error) {
@@ -3240,6 +3248,13 @@ function render(snap) {
     const used = n.jvm.heap_used_mb, max = n.jvm.heap_max_mb || 1;
     sumHeap += used || 0;
     push(hist.heap[name] ??= [], t, used || 0);
+    // A node that cannot read its own CPU reports nothing rather than zero,
+    // so an unsupported JVM leaves a gap instead of a flat idle line.
+    const cpuPct = n.cpu && n.cpu.process_pct;
+    if (cpuPct != null) {
+      push(hist.cpu[name] ??= [], t, cpuPct);
+      worstCPU = Math.max(worstCPU, cpuPct);
+    }
     // time lost to GC: delta of cumulative collector ms over wall time
     const gcTotal = Object.values(n.jvm.gc).reduce((a, g) => a + (g.time || 0), 0);
     const pg = prevGC[name];
@@ -3315,16 +3330,20 @@ function render(snap) {
   drawChart($("c-p99"), hist.p99, inks, "ms");
   drawChart($("c-heap"), hist.heap, inks, "MB");
   drawChart($("c-rate"), { all: hist.rate }, rateInks, "r/s");
+  drawChart($("c-cpu"), hist.cpu, inks, "%");
   drawChart($("c-gc"), hist.gc, inks, "%");
   drawChart($("c-seg"), hist.seg, inks, "seg");
   legend($("lg-p99"), Object.keys(hist.p99), inks);
   legend($("lg-heap"), Object.keys(hist.heap), inks);
+  legend($("lg-cpu"), Object.keys(hist.cpu), inks);
   legend($("lg-gc"), Object.keys(hist.gc), inks);
   legend($("lg-seg"), Object.keys(hist.seg), inks);
   $("p99-stat").textContent = serverStat;
   $("v-p99").textContent = fmt(worstP99, 1) + " ms worst";
   $("v-heap").textContent = fmt(sumHeap) + " MB total";
   $("v-rate").textContent = fmt(sumRate, 1) + " req/s";
+  $("v-cpu").textContent = Object.keys(hist.cpu).length
+    ? fmt(worstCPU, 1) + " % busiest" : "—";
   $("v-gc").textContent = fmt(worstGC, 1) + " % worst";
   $("v-seg").textContent = fmt(sumSeg) + " total";
 

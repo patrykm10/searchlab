@@ -197,7 +197,7 @@ class _EsFamily(Engine):
     def snapshot_node(self, base_url) -> dict:
         with httpx.Client(timeout=15) as client:
             stats = client.get(
-                f"{base_url}/_nodes/_local/stats/jvm,indices,thread_pool,breaker"
+                f"{base_url}/_nodes/_local/stats/jvm,indices,thread_pool,breaker,os,process"
             ).json()
         node = next(iter(stats["nodes"].values()))
         jvm, idx = node["jvm"], node["indices"]
@@ -256,6 +256,17 @@ class _EsFamily(Engine):
             if dq > 0 and dms >= 0:
                 mean_ms = round(dms / dq, 1)
 
+        # Two different questions: the process figure is how hard this engine
+        # is working, the host figure includes everything else on the box —
+        # which on a laptop lab is usually the load generator itself.
+        os_stats, proc = node.get("os") or {}, node.get("process") or {}
+        os_cpu = os_stats.get("cpu") or {}
+        cpu = {
+            "process_pct": (proc.get("cpu") or {}).get("percent"),
+            "host_pct": os_cpu.get("percent"),
+            "load1": (os_cpu.get("load_average") or {}).get("1m"),
+        }
+
         return {
             "ts": time.time(),
             "jvm": {
@@ -263,6 +274,7 @@ class _EsFamily(Engine):
                 "heap_max_mb": round(jvm["mem"]["heap_max_in_bytes"] / 2**20, 1),
                 "gc": gc,
             },
+            "cpu": cpu,
             "threads": pool,
             "breakers": {"configured": bool(breakers), "trips": breakers},
             "cores": {

@@ -106,6 +106,8 @@ NODES_STATS = {
                     "request_cache": {"hit_count": 0, "miss_count": 0, "evictions": 0},
                     "indexing": {"index_total": 9999}, "flush": {"total": 4},
                     "refresh": {"total": 120}, "merges": {"total": 7}},
+        "os": {"cpu": {"percent": 61, "load_average": {"1m": 2.5}}},
+        "process": {"cpu": {"percent": 47, "total_in_millis": 43160}},
     }}
 }
 
@@ -135,7 +137,8 @@ async def mock_es(aiohttp_server):
     app.router.add_post("/idx/_bulk", bulk)
     app.router.add_post("/idx/_search", search)
     app.router.add_post("/idx/_refresh", refresh)
-    app.router.add_get("/_nodes/_local/stats/jvm,indices,thread_pool,breaker", stats)
+    app.router.add_get(
+        "/_nodes/_local/stats/jvm,indices,thread_pool,breaker,os,process", stats)
     server = await aiohttp_server(app)
     server.state = state
     return server
@@ -170,6 +173,8 @@ async def test_es_metrics_normalization(mock_es):
     assert core["caches"]["requestCache"]["hitratio"] is None  # 0/0 traffic
     assert core["update"]["adds_cumulative"] == 9999
     assert core["update"]["merges_minor"] == 7
+    # the engine's own CPU, kept apart from the whole machine's
+    assert snap["cpu"] == {"process_pct": 47, "host_pct": 61, "load1": 2.5}
 
 
 class _CannedClient:
