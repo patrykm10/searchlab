@@ -909,6 +909,7 @@ section.collapsed h2 { margin-bottom: 0; }
       <button class="btn" id="btn-embed">Embed documents</button>
     </div>
   </div>
+  <div class="desc" id="ctl-embed-status" style="margin-top:8px"></div>
   <div class="desc" style="margin-top:8px">Reads every document back,
     embeds the chosen field with the loaded model, and writes the vector
     back in — the same shape as a real re-embedding migration.</div>
@@ -1886,6 +1887,14 @@ const PARAM_HELP = {
   "q-field": {
     es: ["The single field for match, match_phrase and term. These clauses take exactly one — when the words could be in any of several fields, that is what multi_match is for."],
   },
+  "ctl-model": {
+    es: ["Which fastembed model turns text into vectors when you press Load model — real weights, not synthetic vectors, downloaded on first use (~90 MB for the small ones, more for bge-base and nomic). Pick it before embedding: each model has a fixed output size, and the vec field is created at that size on the first run, so switching models later means the field has to be re-created, not just re-filled."],
+    solr: ["Which fastembed model turns text into vectors when you press Load model — real weights, not synthetic vectors, downloaded on first use (~90 MB for the small ones, more for bge-base and nomic). Pick it before embedding: each model has a fixed output size, and the Solr DenseVectorField is created at that size on the first run, so switching models later means the field has to be re-created, not just re-filled."],
+  },
+  "ctl-embed-field": {
+    es: ["The text field Embed documents reads. It walks every document, runs this field through the loaded model, and writes the result into the vec field — the same field the Vector field box in Query below searches. Re-run it after loading a different model to compare recall; each run overwrites the same vector field."],
+    solr: ["The text field Embed documents reads. It walks every document, runs this field through the loaded model, and writes the result into the vec field — the same field the Vector field box in Query below searches. Re-run it after loading a different model to compare recall; each run overwrites the same vector field."],
+  },
   "q-vecfield": {
     es: ["The field holding the embeddings to search. It has to have been filled in already: the Vector Search section above reads an existing text field, embeds it, and writes the vectors here.",
          "Solr: the dense vector field on a knn query"],
@@ -2333,8 +2342,25 @@ async function refreshModel() {
   $("ctl-model-status").textContent = text;
   $("q-model-status").textContent = text;      // mirrored in the Query section
   $("btn-loadmodel").disabled = !out.available || out.loading;
-  $("btn-embed").disabled = !out.available || out.loading
-                            || !out.loaded.includes(sel.value);
+  syncEmbedButton(out);
+}
+
+/* A disabled button that says nothing is indistinguishable from a broken
+   one — you press it and the page just sits there. The model is held in
+   the dashboard process, so restarting the server drops it and this goes
+   back to disabled with no other visible change. Say which it is, next to
+   the button rather than in the status line above it. */
+function syncEmbedButton(state) {
+  const chosen = $("ctl-model").value;
+  const why = !state.available ? "Embedding support isn't installed."
+    : state.loading ? "Waiting for the model to finish loading…"
+    : !state.loaded.includes(chosen)
+      ? `Load “${chosen}” first — the model has to be in memory before `
+        + `documents can be embedded.`
+      : "";
+  $("btn-embed").disabled = !!why;
+  if (why) $("ctl-embed-status").textContent = why;
+  else if (!$("ctl-embed-status").dataset.busy) $("ctl-embed-status").textContent = "";
 }
 
 $("ctl-model").addEventListener("change", () => {
@@ -2342,7 +2368,7 @@ $("ctl-model").addEventListener("change", () => {
     const text = modelStatusText(modelState);
     $("ctl-model-status").textContent = text;
     $("q-model-status").textContent = text;
-    $("btn-embed").disabled = !modelState.loaded.includes($("ctl-model").value);
+    syncEmbedButton(modelState);
   }
 });
 
@@ -2359,11 +2385,25 @@ $("btn-loadmodel").addEventListener("click", async () => {
 });
 
 $("btn-embed").addEventListener("click", async () => {
+  // The outcome also lands in the action strip, but that sits far enough
+  // below this panel to read as nothing having happened — so say it here,
+  // next to the button that was just pressed.
+  const status = $("ctl-embed-status");
   const out = await post("/api/embed",
     { collection: coll(), text_field: $("ctl-embed-field").value,
       vector_field: "vec" });
-  if (out.ok) showStrip("Embedding documents — this reads them back, "
-                        + "vectorises them and writes them again…", false);
+  if (out.ok) {
+    // marked busy so the next model poll doesn't clear the progress note
+    status.dataset.busy = "1";
+    status.textContent = "Embedding documents — reading them back, "
+      + "vectorising and writing them again. The action log below reports "
+      + "the count when it finishes.";
+    showStrip("Embedding documents — this reads them back, "
+              + "vectorises them and writes them again…", false);
+  } else {
+    delete status.dataset.busy;
+    status.textContent = out.error || "Could not start embedding.";
+  }
   poll();
 });
 

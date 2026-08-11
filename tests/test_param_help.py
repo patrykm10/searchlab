@@ -132,15 +132,20 @@ def test_every_documented_parameter_has_help(doc_links, help_entries):
     assert not [k for k in doc_links if k not in help_entries]
 
 
+NOT_AN_ENGINE_PARAM = {"q-load-rps", "ctl-model", "ctl-embed-field"}
+
+
 def test_every_parameter_links_to_its_own_engine_docs(doc_links, help_entries):
-    """The rate control is the one thing here that is not an engine
-    parameter, so it is the one thing with nowhere to link."""
+    """The rate control and the embedding controls are not engine
+    parameters — fastembed's model list and the field picker have no Solr
+    or OpenSearch reference page to send someone to — so they are the
+    things with nowhere to link."""
     missing = [f"{key}/{engine}"
                for key, variants in help_entries.items()
                for engine in variants
-               if key != "q-load-rps" and engine not in doc_links.get(key, {})]
+               if key not in NOT_AN_ENGINE_PARAM and engine not in doc_links.get(key, {})]
     assert not missing, f"no doc link for: {missing}"
-    assert "q-load-rps" not in doc_links
+    assert not NOT_AN_ENGINE_PARAM & doc_links.keys()
 
 
 def test_doc_paths_are_relative_to_the_root(doc_links):
