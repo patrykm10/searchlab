@@ -172,6 +172,76 @@ async def test_es_metrics_normalization(mock_es):
     assert core["update"]["merges_minor"] == 7
 
 
+class _CannedClient:
+    """Stands in for httpx.Client so snapshot_node sees chosen counters."""
+
+    payload: dict = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, url, **kw):
+        return type("R", (), {"json": lambda _self: _CannedClient.payload})()
+
+
+@pytest.fixture
+def canned_stats(monkeypatch):
+    """Drive snapshot_node with a fake clock and fake search counters."""
+    from searchlab import engines
+
+    engines._SEARCH_SAMPLES.clear()
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(engines.httpx, "Client", lambda **kw: _CannedClient())
+    monkeypatch.setattr(engines.time, "time", lambda: clock["t"])
+
+    def poll(at, query_total, query_time_ms):
+        clock["t"] = at
+        stats = json.loads(json.dumps(NODES_STATS))
+        stats["nodes"]["abc"]["indices"]["search"] = {
+            "query_total": query_total, "query_time_in_millis": query_time_ms}
+        _CannedClient.payload = stats
+        snap = engines.get_engine("opensearch").snapshot_node("http://os:9200")
+        return snap["cores"]["indices (node total)"]
+
+    return poll
+
+
+def test_es_query_rate_needs_a_baseline(canned_stats):
+    """One sample is a total, not a rate — say so rather than draw a zero."""
+    core = canned_stats(1000.0, 100, 500)
+    assert core["select_rate_1m"] is None
+    assert core["select_mean_ms"] is None
+    assert core["select_p99_ms"] is None   # no percentiles on the ES/OS wire
+
+
+def test_es_query_rate_and_mean_from_counter_deltas(canned_stats):
+    canned_stats(1000.0, 100, 500)
+    core = canned_stats(1010.0, 200, 1000)
+    assert core["select_rate_1m"] == 10.0     # 100 queries over 10 s
+    assert core["select_mean_ms"] == 5.0      # 500 ms over those 100
+
+
+def test_es_rate_survives_two_pollers_landing_together(canned_stats):
+    """A second dashboard tab polling microseconds later must not divide a
+    one-query delta by a microsecond and report a fictional spike."""
+    canned_stats(1000.0, 0, 0)
+    canned_stats(1010.0, 100, 500)
+    core = canned_stats(1010.001, 100, 500)
+    assert core["select_rate_1m"] == 10.0
+
+
+def test_es_counter_reset_does_not_spike(canned_stats):
+    """A restarted node counts from zero again; that is not negative traffic."""
+    canned_stats(1000.0, 5000, 20000)
+    core = canned_stats(1010.0, 3, 9)     # node restarted
+    assert core["select_rate_1m"] is None
+    core = canned_stats(1020.0, 103, 209)
+    assert core["select_rate_1m"] == 10.0
+
+
 def test_shipped_es_queries_load():
     from pathlib import Path
 
