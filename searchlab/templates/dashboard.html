@@ -781,46 +781,49 @@ section.collapsed h2 { margin-bottom: 0; }
   <div id="queueing" class="desc" style="display:none"></div>
   <div class="chartgrid">
     <div class="chart">
-      <h4 title="Measured by the load generator from when each request was scheduled until the response arrived. Includes network and any time queued waiting for the cluster to get to it — what a real user would feel. Only runs during a load test.">
-        Load test latency <span class="vantage">as the client sees it</span>
+      <h4><span class="mname" data-help="m-lt">Load test latency</span>
+        <span class="vantage">as the client sees it</span>
         <b id="v-lt">—</b></h4>
       <canvas id="c-lt"></canvas>
       <div class="legend" id="lg-lt"></div>
     </div>
     <div class="chart">
-      <h4 id="h-p99" title="How long the engine itself spent processing queries, per node. Excludes network and any queueing before the engine picked the request up. When this stays flat while load-test latency climbs, the gap between them is queueing — a capacity problem, not a slow-query problem.">
-        Query latency <span id="p99-stat">p99</span>, per node
+      <h4 id="h-p99"><span class="mname" data-help="m-p99"
+          data-help-title="Query latency, per node">Query latency
+        <span id="p99-stat">p99</span>, per node</span>
         <span class="vantage">as the server sees it</span>
         <b id="v-p99">—</b></h4>
       <canvas id="c-p99"></canvas>
       <div class="legend" id="lg-p99"></div>
     </div>
     <div class="chart">
-      <h4>JVM heap, per node <b id="v-heap">—</b></h4>
+      <h4><span class="mname" data-help="m-heap">JVM heap, per node</span>
+        <b id="v-heap">—</b></h4>
       <canvas id="c-heap"></canvas>
       <div class="legend" id="lg-heap"></div>
     </div>
     <div class="chart">
-      <h4>Query rate <b id="v-rate">—</b></h4>
+      <h4><span class="mname" data-help="m-rate">Query rate</span>
+        <b id="v-rate">—</b></h4>
       <canvas id="c-rate"></canvas>
       <div class="legend" id="lg-rate"></div>
     </div>
     <div class="chart">
-      <h4 title="CPU used by each engine process, not by the whole machine — so the load generator running alongside it does not count. This is the ceiling that matters: once a node sits near 100% the queue grows and latency climbs no matter what else you tune. Flat CPU while latency rises means the engine is waiting, not computing — usually disk, locks, or GC.">
-        Engine CPU, per node <span class="vantage">as the server sees it</span>
+      <h4><span class="mname" data-help="m-cpu">Engine CPU, per node</span>
+        <span class="vantage">as the server sees it</span>
         <b id="v-cpu">—</b></h4>
       <canvas id="c-cpu"></canvas>
       <div class="legend" id="lg-cpu"></div>
     </div>
     <div class="chart">
-      <h4 title="Share of each node's time spent on garbage collection instead of serving requests. Healthy is near 0; sustained 10%+ means the heap is too small for the workload.">
-        Time lost to garbage collection <b id="v-gc">—</b></h4>
+      <h4><span class="mname" data-help="m-gc">Time lost to garbage collection</span>
+        <b id="v-gc">—</b></h4>
       <canvas id="c-gc"></canvas>
       <div class="legend" id="lg-gc"></div>
     </div>
     <div class="chart">
-      <h4 title="Lucene segments per shard. Indexing creates new segments and merging collapses them, so this saws up and down — that sawtooth is exactly what the Merge threshold knob controls. A steady climb means merging isn't keeping up; searches get slower the more segments they must visit.">
-        Index segments, per shard <b id="v-seg">—</b></h4>
+      <h4><span class="mname" data-help="m-seg">Index segments, per shard</span>
+        <b id="v-seg">—</b></h4>
       <canvas id="c-seg"></canvas>
       <div class="legend" id="lg-seg"></div>
     </div>
@@ -1999,6 +2002,56 @@ const PARAM_HELP = {
   },
 };
 
+/* ---------- chart help ----------
+   A parameter needs to say what it changes; a chart needs to say how to
+   read it — what a rising line means, what it should be compared against,
+   and what counts as bad. So these are written to the shape of the line
+   rather than to a definition, and the number in the corner is deliberately
+   not the subject: a metric you can only read at one instant is a metric
+   you cannot tell a trend from.
+
+   Entries are a plain array where the two engines genuinely measure the
+   same thing — heap is heap — and split into {es, solr} only where the
+   source of the number differs enough to change how you read it. */
+
+const METRIC_HELP = {
+  "m-lt": [
+    "Measured by the load generator, from when each request was scheduled to when the response arrived — so it includes network and any time spent queued waiting for the cluster. This is the only chart here that sees what a user would actually feel, and it only moves during a load test. Read the gap between p50 and p99: p50 drifting up means everything is slower, while p99 pulling away from a flat p50 means most requests are fine and a tail is suffering.",
+  ],
+  "m-p99": {
+    es: [
+      "How long OpenSearch itself spent on queries, per node, taken from its own metrics — network and any queueing before the engine picked the request up are excluded. Read it against Load test latency directly above: when this stays flat while that one climbs, the difference between them is queueing, which is a capacity problem rather than a slow-query problem. When both climb together, the queries themselves got more expensive.",
+      "Solr: the same idea, read from the request handler's metrics",
+    ],
+    solr: [
+      "How long Solr itself spent on queries, per node, taken from the request handler's own metrics — network and any queueing before the engine picked the request up are excluded. Read it against Load test latency directly above: when this stays flat while that one climbs, the difference between them is queueing, which is a capacity problem rather than a slow-query problem. When both climb together, the queries themselves got more expensive.",
+      "OS/ES: the same idea, read from the node's search metrics",
+    ],
+  },
+  "m-heap": [
+    "Java heap in use per node, which is expected to saw up and down rather than sit still — allocation fills it, garbage collection empties it. Read the floor each collection falls back to, not the peaks: a floor creeping upward run after run is memory that is not being released, which ends in longer pauses and eventually an out-of-memory. Peaks near the ceiling are only a problem when the floor is rising with them.",
+  ],
+  "m-rate": {
+    es: [
+      "Queries per second the engine reports actually serving, counted from its own search metrics rather than from what the load generator sent. That is what makes it worth having next to the load-test rate: the two matching means the cluster is keeping up, and a shortfall means requests are queued or failing rather than being served. It also catches traffic this dashboard did not generate.",
+      "Solr: the select handler's request rate",
+    ],
+    solr: [
+      "Queries per second the engine reports actually serving, counted from the select handler's own metrics rather than from what the load generator sent. That is what makes it worth having next to the load-test rate: the two matching means the cluster is keeping up, and a shortfall means requests are queued or failing rather than being served. It also catches traffic this dashboard did not generate.",
+      "OS/ES: the node's search request rate",
+    ],
+  },
+  "m-cpu": [
+    "CPU used by each engine process, not by the whole machine — so the load generator running alongside it does not count toward this. This is usually the real ceiling: once a node sits near 100% the queue grows and latency climbs no matter what else you tune. Flat CPU while latency rises is the more interesting case, because it means the engine is waiting rather than computing — normally disk, lock contention, or garbage collection.",
+  ],
+  "m-gc": [
+    "The share of each node's time spent collecting garbage instead of serving requests. Healthy is near zero and a brief spike after heavy indexing is normal; sustained 10% or more means the heap is too small for the workload, and the fix is more heap or less garbage, not more CPU. This is the chart to check when latency spikes line up with nothing else.",
+  ],
+  "m-seg": [
+    "Lucene segments per shard. Indexing creates new ones and merging collapses them, so a sawtooth is the healthy shape — and that sawtooth is exactly what the Merge threshold knob in Tuning controls. A steady climb with no teeth means merging is not keeping up, and searches get slower the more segments they have to visit; a flat line at a low number during heavy indexing means merging is aggressive enough to be stealing I/O from queries.",
+  ],
+};
+
 /* Where the official word on each parameter lives. Kept apart from the
    prose because it varies on one axis only — which engine is running —
    and because a dead link is worse than no link, so it is worth being
@@ -2051,8 +2104,9 @@ const helpCard = Object.assign(document.createElement("div"),
 document.body.appendChild(helpCard);
 
 function paramHelp(key) {
-  const h = PARAM_HELP[key];
+  const h = PARAM_HELP[key] || METRIC_HELP[key];
   if (!h) return null;
+  if (Array.isArray(h)) return h;      // measured the same in both engines
   return h[isES() ? "es" : "solr"] || null;
 }
 
@@ -2133,7 +2187,7 @@ addEventListener("keydown", e => {
 }, true);
 
 function wireParamHelp() {
-  for (const key of Object.keys(PARAM_HELP)) {
+  for (const key of [...Object.keys(PARAM_HELP), ...Object.keys(METRIC_HELP)]) {
     const label = document.querySelector(`label[for="${key}"]`)
                || document.querySelector(`[data-help="${key}"]`);
     if (!label) continue;
@@ -2155,13 +2209,16 @@ function wireParamHelp() {
         window.open(url, "_blank", "noopener");
       });
     }
-    const ctl = document.getElementById(key);
-    if (ctl) {
-      ctl.addEventListener("focus", () => {
-        if (focusFromKeyboard) showParamHelp(label, key);
-      });
-      ctl.addEventListener("blur", scheduleHideParamHelp);
-    }
+    // A parameter's help is reachable by tabbing onto the control it
+    // describes. A chart has no control, so the title itself becomes the
+    // stop — otherwise these would be the only help on the page a
+    // keyboard cannot open.
+    const ctl = document.getElementById(key) || label;
+    if (ctl === label) label.tabIndex = 0;
+    ctl.addEventListener("focus", () => {
+      if (focusFromKeyboard) showParamHelp(label, key);
+    });
+    ctl.addEventListener("blur", scheduleHideParamHelp);
   }
   addEventListener("keydown", e => { if (e.key === "Escape") hideParamHelp(); });
   // Tabbing onto a control scrolls it into view, so dismissing on scroll
