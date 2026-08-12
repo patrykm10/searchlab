@@ -17,7 +17,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from .loglex import classify, is_noise, parse_request
+from .loglex import classify, is_noise, parse_request, parse_request_os
 
 # A genuine Solr log record always opens with a timestamp + level, e.g.
 # "searchlab-solr1  | 2026-07-21 06:41:05.488 INFO  (...)". Some operations
@@ -26,8 +26,14 @@ from .loglex import classify, is_noise, parse_request
 # and would otherwise show up as its own contextless fragment. Lines
 # without the header are continuations of whichever record came before.
 _RECORD_START = re.compile(r"\|\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\w+)")
+# OpenSearch and Elasticsearch write the same information in a different
+# shape — "[2026-08-12T07:16:33,919][TRACE][i.s.s.query]" — so a stream from
+# those clusters matched none of the Solr patterns and every line was taken
+# for a continuation of a record that never began.
+_RECORD_START_ES = re.compile(
+    r"\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2},\d+\]\[(\w+)\s*\]")
 # compose prefixes each line with the container it came from
-_RECORD_NODE = re.compile(r"^\s*\S*?(solr\d+|zk\d+)\s*\|")
+_RECORD_NODE = re.compile(r"^\s*\S*?(solr\d+|zk\d+|os\d+|es\d+)\s*\|")
 
 
 class LogStream:
@@ -79,7 +85,7 @@ class LogStream:
 
     def _append(self, line: str) -> None:
         text = line.rstrip("\n")
-        m = _RECORD_START.search(text)
+        m = _RECORD_START.search(text) or _RECORD_START_ES.search(text)
         if m is None:
             # Continuation of the previous record (e.g. a multi-line JSON
             # blob or a stack trace). Skip fragments of routine INFO records
@@ -90,7 +96,7 @@ class LogStream:
         else:
             self._drop_continuation = is_noise(text) or m.group(1) == "INFO"
 
-        request = parse_request(text)
+        request = parse_request(text) or parse_request_os(text)
         if request is not None:
             # Per-shard fan-out would show every query two or three times.
             if not request["internal"]:

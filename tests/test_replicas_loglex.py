@@ -14,7 +14,7 @@ from searchlab.cluster import (
     delete_replica,
     split_shard,
 )
-from searchlab.loglex import classify, is_noise, parse_request
+from searchlab.loglex import classify, is_noise, parse_request, parse_request_os
 
 
 # ----------------------------------------------------------------- loglex ---
@@ -271,3 +271,49 @@ async def test_delete_replica_params(mock_collections_api):
     await asyncio.to_thread(delete_replica, spec, "products", "shard1", "core_node5")
     assert mock_collections_api.seen["action"] == "DELETEREPLICA"
     assert mock_collections_api.seen["replica"] == "core_node5"
+
+
+# ------------------------------------------- OpenSearch / Elasticsearch ---
+#
+# These engines have no request log. The lab turns the search slow log down
+# to zero so every query is reported, and these are the records that reach
+# container stdout as a result.
+
+OS_QUERY_LINE = (
+    "searchlab-os1  | [2026-08-12T07:16:33,919][TRACE]"
+    "[i.s.s.query              ] [os1] [products][0] took[281.5micros], "
+    "took_millis[7], total_hits[42 hits], stats[], "
+    "search_type[QUERY_THEN_FETCH], total_shards[1], "
+    'source[{"size":3,"query":{"query_string":{"query":"laptop"}}}], id[], ')
+OS_FETCH_LINE = OS_QUERY_LINE.replace("i.s.s.query", "i.s.s.fetch")
+
+
+def test_parse_opensearch_slowlog_query():
+    e = parse_request_os(OS_QUERY_LINE)
+    assert e["kind"] == "query"
+    assert e["node"] == "os1"
+    assert e["hits"] == 42
+    assert e["qtime"] == 7          # took_millis, not the micros figure
+    assert e["status"] is None      # the slow log never reports one
+    assert '"query":"laptop"' in e["detail"]
+
+
+def test_shard_is_named_because_each_shard_logs_its_own_record():
+    """There is no coordinator record to collapse these onto, so a query
+    across several shards really is several rows — the shard says which."""
+    e = parse_request_os(OS_QUERY_LINE)
+    assert e["core"] == "products[0]"
+    assert e["internal"] is False   # all of it is real work
+
+
+def test_fetch_phase_is_not_counted_as_a_second_query():
+    """Every search logs a query record and a fetch record; counting both
+    would double the traffic for one request."""
+    assert parse_request_os(OS_FETCH_LINE) is None
+
+
+def test_the_two_log_formats_do_not_parse_each_other():
+    """Both parsers run over every line, so a false positive either way
+    would put nonsense in the panel."""
+    assert parse_request_os(QUERY_LINE) is None
+    assert parse_request(OS_QUERY_LINE) is None

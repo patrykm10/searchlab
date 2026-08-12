@@ -105,7 +105,9 @@ NODES_STATS = {
                     "query_cache": {"hit_count": 80, "miss_count": 20, "evictions": 3, "cache_count": 10},
                     "request_cache": {"hit_count": 0, "miss_count": 0, "evictions": 0},
                     "indexing": {"index_total": 9999}, "flush": {"total": 4},
-                    "refresh": {"total": 120}, "merges": {"total": 7}},
+                    "refresh": {"total": 120}, "merges": {"total": 7},
+                    "segments": {"count": 11},
+                    "store": {"size_in_bytes": 987654}},
         "os": {"cpu": {"percent": 61, "load_average": {"1m": 2.5}}},
         "process": {"cpu": {"percent": 47, "total_in_millis": 43160}},
     }}
@@ -175,6 +177,9 @@ async def test_es_metrics_normalization(mock_es):
     assert core["update"]["merges_minor"] == 7
     # the engine's own CPU, kept apart from the whole machine's
     assert snap["cpu"] == {"process_pct": 47, "host_pct": 61, "load1": 2.5}
+    # segments: the chart drew nothing at all on these engines without it
+    assert core["segments"] == 11
+    assert core["size_bytes"] == 987654
 
 
 class _CannedClient:

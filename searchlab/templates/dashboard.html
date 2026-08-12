@@ -822,7 +822,8 @@ section.collapsed h2 { margin-bottom: 0; }
       <div class="legend" id="lg-gc"></div>
     </div>
     <div class="chart">
-      <h4><span class="mname" data-help="m-seg">Index segments, per shard</span>
+      <h4><span class="mname" data-help="m-seg">Index segments, per
+        <span id="seg-scope">shard</span></span>
         <b id="v-seg">—</b></h4>
       <canvas id="c-seg"></canvas>
       <div class="legend" id="lg-seg"></div>
@@ -872,9 +873,9 @@ section.collapsed h2 { margin-bottom: 0; }
   <h2>Request traffic
     <span id="traffic-count"></span>
   </h2>
-  <div class="desc" style="margin:-12px 0 14px">The queries and indexing
-    requests actually hitting the cluster right now. Per-shard fan-out is
-    hidden — these are the requests as clients sent them.</div>
+  <div class="desc" style="margin:-12px 0 14px" id="traffic-desc">The queries
+    and indexing requests actually hitting the cluster right now. Per-shard
+    fan-out is hidden — these are the requests as clients sent them.</div>
   <div id="traffic-panel">
     <table id="traffic" class="mtable"></table>
   </div>
@@ -1807,6 +1808,18 @@ function renderTraffic() {
     return;
   }
   $("traffic-count").textContent = trafficTotal.toLocaleString() + " seen";
+  // Solr names the request the client sent and flags the fan-out beneath it,
+  // so the fan-out can be hidden. OS/ES log only the per-shard work, with no
+  // coordinator record to collapse them onto — so on a multi-shard index one
+  // query is genuinely several rows, and saying otherwise would be a lie.
+  $("traffic-desc").textContent = isES()
+    ? "The queries and indexing requests actually hitting the cluster right "
+      + "now. These engines log each shard's work separately, so a query "
+      + "against several shards appears once per shard — the shard is named "
+      + "in each row."
+    : "The queries and indexing requests actually hitting the cluster right "
+      + "now. Per-shard fan-out is hidden — these are the requests as "
+      + "clients sent them.";
   el.innerHTML = `<tr><th>Time</th><th>Kind</th><th>Request</th>
       <th class="num">Hits</th><th class="num">Took</th></tr>` +
     trafficRows.slice().reverse().map(e => {
@@ -3442,6 +3455,9 @@ function render(snap) {
   $("v-cpu").textContent = Object.keys(hist.cpu).length
     ? fmt(worstCPU, 1) + " % busiest" : "—";
   $("v-gc").textContent = fmt(worstGC, 1) + " % worst";
+  // Solr counts segments per replica; ES/OS give one figure covering every
+  // shard on the node, so the heading says which is on screen.
+  $("seg-scope").textContent = isES() ? "node" : "shard";
   $("v-seg").textContent = fmt(sumSeg) + " total";
 
   // The two latency charts answer different questions, and the gap between
