@@ -148,7 +148,13 @@ class _EsFamily(Engine):
 
     def create_index(self, spec, name, shards, replicas, config_set="_default"):
         settings = {"number_of_shards": shards,
-                    "number_of_replicas": max(replicas - 1, 0)}
+                    "number_of_replicas": max(replicas - 1, 0),
+                    # Solr logs every request; these engines log none unless
+                    # a slow-query threshold is crossed. Zero means "report
+                    # all of them", which is what gives the traffic panel
+                    # something to show. Reasonable for a lab and wrong for
+                    # production, where this writes a line per query.
+                    "index.search.slowlog.threshold.query.trace": "0ms"}
         if self.name == "opensearch":
             # index.knn is static (create-time only); always on for lab indexes
             settings["index.knn"] = True
@@ -282,6 +288,11 @@ class _EsFamily(Engine):
                     "num_docs": idx.get("docs", {}).get("count", 0),
                     "deleted_docs": idx.get("docs", {}).get("deleted", 0),
                     "warmup_ms": None,
+                    # Solr counts these per replica; ES/OS report one figure
+                    # for every shard the node holds, which is why the chart
+                    # names its own granularity rather than claiming shards.
+                    "segments": idx.get("segments", {}).get("count"),
+                    "size_bytes": idx.get("store", {}).get("size_in_bytes"),
                     "caches": {
                         "queryCache": {"hitratio": ratio(qc), "size": qc.get("cache_count"),
                                        "evictions": qc.get("evictions", 0)},

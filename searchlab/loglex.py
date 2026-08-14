@@ -109,6 +109,28 @@ _NODE_PREFIX = re.compile(r"^\s*\S*?(solr\d+|zk\d+)\s*\|")
 _CORE = re.compile(r"\bx:([^\s\]]+)")
 _TAIL_INTS = re.compile(r"\s(\d+)\s+(\d+)\s*$")
 
+# OpenSearch/Elasticsearch say nothing about ordinary requests: there is no
+# equivalent of Solr's request log, only the slow log, which stays silent
+# until a threshold is crossed. The lab sets that threshold to zero so every
+# query is reported — see the slowlog settings applied at index creation.
+#
+# A shape worth knowing before reading the panel: these records are emitted
+# per shard, and unlike Solr there is no coordinator line naming the request
+# the client actually sent. On a multi-shard index one query therefore
+# appears once per shard. They are all real work, so none is dropped as
+# internal; the shard is named in the entry so the repetition is legible
+# rather than looking like duplicated traffic.
+_OS_SLOWLOG = re.compile(
+    r"\[\d{4}-\d{2}-\d{2}T(?P<hms>\d{2}:\d{2}:\d{2}),\d+\]"   # ISO stamp
+    r"\[\w+\s*\]"                                   # level
+    r"\[i\.(?P<phase>s\.s\.query|s\.s\.fetch)\s*\]" # which slowlog
+    r"\s*\[(?P<node>[^\]]+)\]"                      # node name
+    r"\s*\[(?P<index>[^\]]+)\]\[(?P<shard>\d+)\]"   # index and shard
+)
+_OS_TOOK_MS = re.compile(r"took_millis\[(\d+)\]")
+_OS_HITS = re.compile(r"total_hits\[(\d+)")
+_OS_SOURCE = re.compile(r"source\[(.*)\],\s*id\[", re.DOTALL)
+
 # params not worth showing: transport/plumbing rather than intent
 _DULL_PARAMS = {
     "wt", "rid", "version", "df", "distrib", "shards.purpose", "NOW",
@@ -217,3 +239,41 @@ def parse_request(line: str) -> dict | None:
     entry["qtime"] = int(tail.group(2)) if tail else None
     entry["hits"] = None
     return entry
+
+
+def parse_request_os(line: str) -> dict | None:
+    """Structured traffic entry for an OpenSearch/ES slow-log line, else None.
+
+    Only the query phase is turned into an entry. Every search also logs a
+    fetch record, and counting both would double the apparent traffic for
+    one request.
+    """
+    m = _OS_SLOWLOG.search(line)
+    if m is None or m.group("phase") == "s.s.fetch":
+        return None
+
+    took = _OS_TOOK_MS.search(line)
+    hits = _OS_HITS.search(line)
+    source = _OS_SOURCE.search(line)
+
+    detail = source.group(1).strip() if source else ""
+    if detail in ("", "{}"):
+        # an empty source is a match_all issued without a body
+        detail = "match_all"
+    elif len(detail) > 300:
+        detail = detail[:297] + "…"
+
+    return {
+        "kind": "query",
+        "time": m.group("hms"),
+        "node": m.group("node"),
+        # the shard is part of the identity here: one client query produces
+        # one of these per shard, and hiding that makes it look duplicated
+        "core": f'{m.group("index")}[{m.group("shard")}]',
+        "internal": False,
+        "detail": detail,
+        "hits": int(hits.group(1)) if hits else None,
+        # the slow log reports timing and hits but never a response code
+        "status": None,
+        "qtime": int(took.group(1)) if took else None,
+    }
