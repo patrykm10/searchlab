@@ -76,6 +76,8 @@ searchlab is **open-loop**: requests fire on a fixed wall-clock schedule derived
 | `gclog` | GC pause analysis: tail percentiles, throughput lost, Full GC detection |
 | `doctor` | Preflight checks: docker, compose plugin, ports, disk, leftover state |
 | `k8s` | Export Kubernetes operator manifests (SolrCloud / ECK / OpenSearch CRs) |
+| `recall` | ANN recall@k against exact ground truth computed locally, with latency |
+| `relevance` | Term matching vs vector search on the catalogue's ground truth, precision@k |
 | `metrics` | Heap, GC, cache hit ratios, merge/commit stats per node (`--watch N` to poll) |
 | `metrics-diff` | Before/after story of a run: GC time burned, cache movement, merges |
 | `compare` | Diff two JSON reports (A/B across versions or configs), `--html` for charts |
@@ -268,6 +270,32 @@ searchlab recall --collection vecs --profile profiles/vectors.yaml --data vecs.j
 On ES the `--candidates` sweep produces the recall/latency tradeoff curve — the plot HNSW tuning actually happens on. Recall under 0.9 gets a hint pointing at `num_candidates` and the build-time knobs.
 
 Query templates use `{RAND_VECTOR:dims}` — a fresh normalized vector per request (kNN caches can't fake your numbers either). It becomes a real JSON array in ES/OS bodies and bracketed text inside Solr's `{!knn f=vec topK=10}` syntax. The shipped templates include the two classic latency levers: deep `topK`/`num_candidates` and pre-filtered kNN. And since vectors are just profile fields, everything composes: `sweep` HNSW build knobs or heap sizes under vector load, `drill` a node loss mid-kNN, gate `p99_ms` in CI.
+
+## Relevance: did it find the right thing
+
+`recall` asks whether approximate kNN returned the same neighbours brute force would. That is a property of the index, and it can be answered with meaningless vectors — it never asks whether those neighbours were the right *documents*.
+
+Answering that needs a corpus that is about something. The generated profiles draw words at random, which is the right shape for measuring how an engine moves bytes and the wrong one for relevance: nothing is relevant to "ember rank desert cipher boost". `profiles/catalog.yaml` generates a product catalogue in real English instead — running shoes, espresso machines, backpacking tents — where every document holds together and its category is known ground truth.
+
+```
+searchlab gen --profile profiles/catalog.yaml --count 20000 --out catalog.jsonl
+searchlab index --collection catalog --file catalog.jsonl
+# then load a model and press Embed documents in the control panel
+searchlab relevance --collection catalog --model minilm --k 10
+```
+
+`relevance` runs every benchmark query twice — once as a `multi_match` over the text, once as kNN over the embeddings — and scores both with precision@k against the category that answers the query. The queries are phrased the way a shopper asks ("how do I block out noise in an office"), not the way the catalogue describes itself, which is the case term matching cannot reach:
+
+```
+36 benchmark queries, precision@10 against the category that answers each one
+
+  lexical   0.319   median 5.9 ms   (19 returned nothing relevant at all)
+  semantic  0.928   median 9.3 ms
+```
+
+The report names the queries where term matching *won*, too. On this corpus it wins none, but it ties on ten — every query that happens to share a word with its answer — and embeddings cost roughly 3 ms more per query for the rest. Semantic search is not uniformly better either: "what do I sleep in on a long walk" scores 0.10 against tents.
+
+Use the catalogue for relevance work and the other profiles for load work — its vocabulary is deliberately small and repetitive, which is honest English but not a realistic term distribution for index-size or cardinality experiments.
 
 ## Replaying production traffic
 

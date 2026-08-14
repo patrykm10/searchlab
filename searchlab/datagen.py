@@ -116,6 +116,8 @@ class FieldGen:
 
 def load_profile(path: str | Path) -> dict[str, Any]:
     data = yaml.safe_load(Path(path).read_text())
+    if data.get("source") == "catalog":
+        return data
     if "fields" not in data:
         sys.exit(f"searchlab: profile {path} has no 'fields' section")
     return data
@@ -123,6 +125,22 @@ def load_profile(path: str | Path) -> dict[str, Any]:
 
 def generate(profile: dict[str, Any], count: int, seed: int | None = None) -> Iterator[dict]:
     rng = random.Random(seed)
+    # The catalogue writes whole documents rather than independent fields.
+    # It has to: a title, a body and a category only mean anything together,
+    # and this generator draws each field in isolation by design.
+    if profile.get("source") == "catalog":
+        from .catalog import product_doc
+
+        extra = [FieldGen(name, cfg or {}, rng)
+                 for name, cfg in (profile.get("fields") or {}).items()]
+        for seq in range(count):
+            doc = product_doc(seq, rng)
+            # Anything the profile also declares is layered on top, so a
+            # catalogue can still carry a vector field or a date.
+            doc.update({g.name: g.value(seq) for g in extra})
+            yield doc
+        return
+
     gens = [FieldGen(name, cfg or {}, rng) for name, cfg in profile["fields"].items()]
     for seq in range(count):
         yield {g.name: g.value(seq) for g in gens}
