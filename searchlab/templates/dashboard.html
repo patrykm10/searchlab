@@ -2197,12 +2197,16 @@ function wireParamHelp() {
       showParamHelp(label, key);
     });
     label.addEventListener("mouseleave", scheduleHideParamHelp);
-    // clicking the label goes straight to the official page for it
-    if (PARAM_DOCS[key]) {
+    // Clicking the label goes straight to the official page for it — except
+    // where the label wraps its own checkbox. There, clicking the text is
+    // how you tick the box, and taking that click for a link leaves the box
+    // itself as the only target: a few millimetres, next to a whole line of
+    // text that navigates away instead. Those keep hover help, and the card
+    // it opens carries the same link.
+    const wrapsItsOwnControl = label.querySelector("input, select, textarea");
+    if (PARAM_DOCS[key] && !wrapsItsOwnControl) {
       label.classList.add("hasdoc");
       label.addEventListener("click", ev => {
-        // the checkbox labels wrap their input; let that keep toggling
-        if (ev.target.tagName === "INPUT") return;
         const url = docFor(key);
         if (!url) return;
         ev.preventDefault();

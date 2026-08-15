@@ -166,14 +166,30 @@ def test_doc_paths_are_relative_to_the_root(doc_links):
                 assert path.endswith("/"), f"{key}: {path}"
 
 
-def test_clicking_a_label_opens_its_docs_without_breaking_checkboxes(html):
-    """Two of these labels wrap their own checkbox — hijacking the click
-    there would stop the box toggling."""
+def test_clicking_a_label_opens_its_docs(html):
     handler = html[html.index('label.addEventListener("click"'):]
     handler = handler[:handler.index("});")]
-    assert 'ev.target.tagName === "INPUT"' in handler
     assert "ev.preventDefault()" in handler
     assert 'window.open(url, "_blank", "noopener")' in handler
+
+
+def test_a_label_wrapping_its_own_control_keeps_the_click(html):
+    """Some labels wrap their own checkbox, where clicking the text is how
+    you tick the box. Taking that click for a link leaves the box itself as
+    the only target — a few millimetres beside a line of text that navigates
+    away instead."""
+    assert 'label.querySelector("input, select, textarea")' in html
+    assert "if (PARAM_DOCS[key] && !wrapsItsOwnControl)" in html
+
+
+def test_the_checkbox_labels_this_protects_are_still_there(html):
+    """If these stopped wrapping their inputs the guard above would quietly
+    stop applying to anything."""
+    wrappers = re.findall(r"<label\b[^>]*>.*?</label>", html, re.S)
+    wrapping_a_checkbox = [w for w in wrappers if 'type="checkbox"' in w]
+    assert len(wrapping_a_checkbox) >= 2
+    # and each still names a help entry, or it would lose its hover text too
+    assert any("q-explain" in w for w in wrapping_a_checkbox)
 
 
 def test_the_card_survives_the_trip_to_its_own_link(html):
