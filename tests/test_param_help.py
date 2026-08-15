@@ -192,6 +192,28 @@ def test_the_checkbox_labels_this_protects_are_still_there(html):
     assert any("q-explain" in w for w in wrapping_a_checkbox)
 
 
+def test_hover_help_defaults_off_and_gates_through_one_flag(html):
+    """A card that opens over every label passed on the way to a field is in
+    the way far more often than it is wanted, so this starts off. The flag
+    lives inside showParamHelp — the one function every trigger calls —
+    rather than duplicated across hover/focus listeners, or a future trigger
+    could add itself without picking up the gate."""
+    assert 'let paramHelpOn = false;' in html
+    fn = html[html.index("function showParamHelp("):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "if (!paramHelpOn) return;" in fn.split("\n")[1]
+
+
+def test_hover_help_toggle_closes_an_open_card_immediately(html):
+    """Switching off mid-hover should not wait for whatever mouseleave or
+    blur happens to fire next — the card should not outlive the setting
+    that was just turned off."""
+    block = html[html.index('getElementById("help-toggle")'):]
+    block = block[:block.index("})();")]
+    assert "hideParamHelp()" in block
+    assert 'localStorage.setItem("searchlab-param-help"' in block
+
+
 def test_the_card_survives_the_trip_to_its_own_link(html):
     """The link lives in the card, so leaving the label cannot dismiss it
     immediately or the link is unreachable."""
