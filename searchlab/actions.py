@@ -452,23 +452,25 @@ class ActionRunner:
         user has to decode.
         """
         mod = self._query_module()
-        preview = getattr(mod, "preview_body", None)
-        if preview is None:
-            # Solr sends params, not a body; the request line is the preview
-            return {"ok": True, "kind": "params",
-                    "request": mod.build_params(dict(body, wt="json"))}
-
         embedder = None
         if body.get("semantic"):
             from . import embeddings as emb
 
             if emb.available() and self._model_name in emb.loaded_names():
                 embedder = emb.get(self._model_name)
+
+        preview = getattr(mod, "preview_body", None)
         try:
+            if preview is None:
+                # Solr sends params, not a body; the request line is the preview
+                return {"ok": True, "kind": "params",
+                        "request": mod.build_params(body, embedder)}
             return {"ok": True, "kind": "dsl",
                     "url": f"POST /{collection or '<index>'}/_search",
                     "request": preview(body, embedder)}
         except ValueError as e:
+            # a complaint about a half-typed value is the useful answer here,
+            # not a 500 the caller has to decode
             return {"ok": False, "error": str(e)}
 
     # --------------------------------------------------------- collections --

@@ -19,6 +19,46 @@ from .cluster import ClusterSpec
 
 PARSERS = ("lucene", "dismax", "edismax")
 MAX_ROWS = 100
+MAX_START = 10_000       # past this, deep paging wants cursorMark instead
+
+DISMAX = ("dismax", "edismax")
+
+# The dismax family's scoring knobs, and which parsers actually read them.
+#
+# Solr answers an unknown parameter by ignoring it, so `mm` sent to the
+# lucene parser looks like it worked and changes nothing. That silence is
+# the thing worth guarding against here: a control that does nothing reads
+# as a control that did nothing useful, which is a different lesson.
+#
+# (form key, Solr param, parsers that accept it)
+SCORING_PARAMS = (
+    ("minimum_should_match", "mm", DISMAX),
+    ("tie_breaker", "tie", DISMAX),
+    ("qs", "qs", DISMAX),
+    ("pf", "pf", DISMAX),
+    ("ps", "ps", DISMAX),
+    ("pf2", "pf2", ("edismax",)),
+    ("ps2", "ps2", ("edismax",)),
+    ("pf3", "pf3", ("edismax",)),
+    ("ps3", "ps3", ("edismax",)),
+    ("bq", "bq", DISMAX),
+    ("bf", "bf", DISMAX),
+    ("boost", "boost", ("edismax",)),
+)
+
+# The ones that are numbers, and the range Solr will accept. Slop is a term
+# distance, so it is a whole number; tie is a weight between 0 and 1.
+NUMERIC_PARAMS = {
+    "tie_breaker": ("tie", 0.0, 1.0, float),
+    "qs": ("qs", 0, 100, int),
+    "ps": ("ps", 0, 100, int),
+    "ps2": ("ps2", 0, 100, int),
+    "ps3": ("ps3", 0, 100, int),
+}
+
+# Each phrase slop only means anything alongside the phrase fields it
+# applies to: ps with no pf is slop on a phrase query that was never built.
+SLOP_NEEDS_FIELDS = {"ps": "pf", "ps2": "pf2", "ps3": "pf3"}
 
 
 def list_fields(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> list[dict]:
@@ -44,6 +84,67 @@ def list_fields(spec: ClusterSpec, collection: str, timeout: float = 15.0) -> li
             # rest are exact-match and are what faceting/sorting want
             "text": ftype.startswith("text"),
         })
+    return out
+
+
+def _text(body: dict, key: str) -> str:
+    return str(body.get(key) or "").strip()
+
+
+def _num(body: dict, key: str, label: str, lo: float, hi: float,
+         default=None, cast=float):
+    """Read an optional numeric field, or explain what is wrong with it."""
+    raw = body.get(key)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = cast(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a number.") from None
+    if not lo <= value <= hi:
+        raise ValueError(f"{label} must be between {lo:g} and {hi:g}.")
+    return value
+
+
+def _operator(body: dict) -> str | None:
+    """q.op — whether the terms in q are all required or any one will do."""
+    op = _text(body, "operator").upper()
+    if not op:
+        return None
+    if op not in ("AND", "OR"):
+        raise ValueError("Operator must be AND or OR.")
+    return op
+
+
+def _scoring(body: dict, parser: str) -> dict:
+    """The dismax-family params, checked against the parser that will read them.
+
+    Everything here is optional; what is not optional is that a param which
+    made it into the request is one the parser will actually act on.
+    """
+    out: dict = {}
+    for key, param, parsers in SCORING_PARAMS:
+        if key in NUMERIC_PARAMS:
+            _, lo, hi, cast = NUMERIC_PARAMS[key]
+            value = _num(body, key, param, lo, hi, cast=cast)
+            if value is None:
+                continue
+        else:
+            value = _text(body, key)
+            if not value:
+                continue
+        if parser not in parsers:
+            raise ValueError(
+                f"“{param}” belongs to {' and '.join(parsers)}, and this query "
+                f"is using {parser}. Switch parser, or clear {param}.")
+        out[param] = value
+
+    for slop, fields in SLOP_NEEDS_FIELDS.items():
+        if slop in out and fields not in out:
+            raise ValueError(
+                f"“{slop}” is the slop on the phrase {fields} builds, so on its "
+                f"own it changes nothing. Set {fields} to the fields whose "
+                f"phrase matches should be boosted.")
     return out
 
 
@@ -79,15 +180,33 @@ def build_params(body: dict, embedder=None) -> dict:
         raise ValueError(f"Rows must be between 0 and {MAX_ROWS}.")
 
     params: dict = {"q": q, "rows": rows, "wt": "json"}
+    start = _num(body, "start", "Start", 0, MAX_START, cast=int)
+    if start:
+        params["start"] = start
+    # q.op is read by the lucene parser too, so it sits outside the block below
+    op = _operator(body)
+    if op:
+        params["q.op"] = op
     if parser != "lucene":
         params["defType"] = parser
         qf = (body.get("qf") or "").strip()
         if qf:
             params["qf"] = qf
-    for key in ("sort", "fl"):
-        val = (body.get(key) or "").strip()
-        if val:
-            params[key] = val
+    params.update(_scoring(body, parser))
+
+    hl_fields = _text(body, "highlight").replace(",", " ").split()
+    if hl_fields:
+        params["hl"] = "true"
+        params["hl.fl"] = ",".join(hl_fields)
+    sort = _text(body, "sort")
+    if sort:
+        params["sort"] = sort
+    # Solr returns the score only when fl asks for it, unlike ES which puts
+    # _score on every hit. Without it the boosting params above are invisible
+    # — you can see the order change but not by how much, which is most of
+    # what there is to learn from them.
+    fl = _text(body, "fl")
+    params["fl"] = f"{fl},score" if fl else "*,score"
     # repeated fq is meaningful in Solr, so keep them as a list
     fqs = [f.strip() for f in (body.get("fq") or []) if f and f.strip()]
     if fqs:
@@ -156,6 +275,9 @@ def run_query(spec: ClusterSpec, collection: str, body: dict,
         "qtime": (data.get("responseHeader") or {}).get("QTime"),
         "docs": resp.get("docs", []),
         "facets": facets,
+        # id -> field -> fragments. Solr returns this beside the documents
+        # rather than on them, so it is keyed by id for the UI to line up.
+        "highlights": data.get("highlighting") or {},
         "raw": data,          # the untouched response, for the raw panel
     }
     debug = data.get("debug") or {}

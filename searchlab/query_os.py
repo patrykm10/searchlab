@@ -227,7 +227,13 @@ def _inner_query(body: dict, qtype: str, size: int, embedder=None) -> dict:
     if qtype == "query_string":
         clause: dict = {"query": q}
         _put(clause, "default_operator", _operator(body))
+        _put(clause, "minimum_should_match", _mm(body))
         _put(clause, "fields", body.get("fields") and _fields(body))
+        # slop for the phrases written inside the query text itself — the
+        # "quoted words" a query_string may contain, which the other clause
+        # types never see because they treat the whole box as one query
+        _put(clause, "phrase_slop", _num(body, "slop", "Slop", 0, 100, cast=int))
+        _fuzzy_extras(clause, body, fuzzy=None)
         return {"query_string": clause}
 
     if qtype == "multi_match":
@@ -240,7 +246,9 @@ def _inner_query(body: dict, qtype: str, size: int, embedder=None) -> dict:
             clause["type"] = mm_type
         _put(clause, "operator", _operator(body))
         _put(clause, "minimum_should_match", _mm(body))
-        _put(clause, "fuzziness", _fuzziness(body, mm_type))
+        fuzziness = _fuzziness(body, mm_type)
+        _put(clause, "fuzziness", fuzziness)
+        _fuzzy_extras(clause, body, fuzzy=fuzziness is not None)
         _put(clause, "tie_breaker",
              _num(body, "tie_breaker", "Tie breaker", 0, 1))
         _put(clause, "slop", _num(body, "slop", "Slop", 0, 100, cast=int)
@@ -255,7 +263,9 @@ def _inner_query(body: dict, qtype: str, size: int, embedder=None) -> dict:
         clause = {"query": q}
         _put(clause, "operator", _operator(body))
         _put(clause, "minimum_should_match", _mm(body))
-        _put(clause, "fuzziness", _fuzziness(body, None))
+        fuzziness = _fuzziness(body, None)
+        _put(clause, "fuzziness", fuzziness)
+        _fuzzy_extras(clause, body, fuzzy=fuzziness is not None)
         return {"match": {field: clause}} if len(clause) > 1 else \
                {"match": {field: q}}
 
@@ -298,6 +308,39 @@ def _fuzziness(body: dict, mm_type: str | None) -> str | None:
             f"multi_match type “{mm_type}” cannot use fuzziness — it matches "
             f"terms in sequence. Use best_fields or most_fields instead.")
     return value.upper() if value.upper() == "AUTO" else value
+
+
+def _fuzzy_extras(target: dict, body: dict, fuzzy: bool | None) -> None:
+    """The knobs that decide what fuzzy matching costs.
+
+    A fuzzy term is rewritten into every indexed term within the edit
+    distance, so these control how big that rewrite gets: prefix_length
+    anchors the first N characters (nothing matches unless it starts the
+    same, which cuts the candidate set hard), and max_expansions caps how
+    many rewritten terms are kept at all.
+
+    `fuzzy` is None on query_string, where fuzziness is written inline as
+    `term~` rather than set as a parameter — so there is nothing to check
+    against, and the keys carry a fuzzy_ prefix.
+    """
+    prefix = _num(body, "prefix_length", "Prefix length", 0, 20, cast=int)
+    expansions = _num(body, "max_expansions", "Max expansions", 1, 10_000,
+                      cast=int)
+    transpositions = body.get("fuzzy_transpositions")
+
+    if fuzzy is False:
+        if prefix is not None or expansions is not None:
+            raise ValueError(
+                "Prefix length and max expansions only shape a fuzzy match — "
+                "set fuzziness first, or they change nothing.")
+        return
+    pre = "fuzzy_" if fuzzy is None else ""
+    _put(target, f"{pre}prefix_length", prefix)
+    _put(target, f"{pre}max_expansions", expansions)
+    # ab -> ba counts as one edit by default; turning it off makes a
+    # transposed pair cost two, which is how Levenshtein proper scores it
+    if transpositions is False:
+        target["fuzzy_transpositions"] = False
 
 
 def _put(target: dict, key: str, value) -> None:
@@ -458,6 +501,49 @@ def _source_fields(body: dict) -> list[str]:
     return [f.strip() for f in fl.split(",") if f.strip()] if fl else []
 
 
+# How a document's own value gets folded into the score. multiply is
+# Solr's `boost`, sum is its `bf` — the same two ways of saying "rank
+# popular things higher" with very different effects on a weak text match.
+BOOST_MODES = ("multiply", "sum", "avg", "max", "min", "replace")
+
+# Raw field values make brutal multipliers — a 10,000-review product buries
+# everything — so the modifier is how the curve gets flattened.
+BOOST_MODIFIERS = ("none", "log1p", "log2p", "ln1p", "ln2p", "sqrt", "square",
+                   "reciprocal")
+
+
+def _function_score(body: dict, query: dict) -> dict:
+    """Rank by a field's value as well as by the text match.
+
+    The counterpart of Solr's bf/boost: the query decides what matches and
+    roughly how well, and this decides how much a document's own numbers —
+    popularity, rating, recency — are allowed to move it.
+    """
+    field = (body.get("boost_field") or "").strip()
+    mode = (body.get("boost_mode") or "").strip()
+    modifier = (body.get("boost_modifier") or "").strip()
+    if not field:
+        if mode or modifier:
+            raise ValueError(
+                "Boost mode and modifier need a field to read — pick the "
+                "numeric field whose value should move the ranking.")
+        return query
+    if mode and mode not in BOOST_MODES:
+        raise ValueError(f"Boost mode must be one of {', '.join(BOOST_MODES)}.")
+    if modifier and modifier not in BOOST_MODIFIERS:
+        raise ValueError(
+            f"Boost modifier must be one of {', '.join(BOOST_MODIFIERS)}.")
+
+    factor: dict = {"field": field}
+    _put(factor, "modifier", modifier if modifier != "none" else None)
+    _put(factor, "factor", _num(body, "boost_factor", "Boost factor", 0, 1e6))
+    # a document missing the field would otherwise fail the whole shard
+    factor["missing"] = 1
+    out: dict = {"query": query, "field_value_factor": factor}
+    _put(out, "boost_mode", mode)
+    return {"function_score": out}
+
+
 def _highlight(body: dict) -> dict | None:
     raw = (body.get("highlight") or "").strip()
     if not raw:
@@ -481,7 +567,7 @@ def build_body(body: dict, embedder=None) -> dict:
         parts.setdefault("filter", []).extend(filters)
 
     if not parts:
-        out["query"] = inner
+        out["query"] = _function_score(body, inner)
     else:
         # a bare match_all next to real conditions is noise: the conditions
         # already say what to match, so it is left out of the preview
@@ -489,11 +575,14 @@ def build_body(body: dict, embedder=None) -> dict:
             parts.setdefault("must", []).insert(0, inner)
         # ordered so the body reads the way the bool query is explained:
         # what must match, what merely filters, what boosts, what excludes
-        out["query"] = {"bool": {k: parts[k] for k in OCCURS if parts.get(k)}}
+        bool_query: dict = {"bool": {k: parts[k] for k in OCCURS if parts.get(k)}}
         # a should clause alongside a must is pure boosting and matches
         # nothing on its own; alone, at least one of them has to match
         if parts.get("should") and not (parts.get("must") or parts.get("filter")):
-            out["query"]["bool"]["minimum_should_match"] = 1
+            bool_query["bool"]["minimum_should_match"] = 1
+        # the function wraps the whole bool, so filters narrow first and the
+        # field value only re-ranks what survived
+        out["query"] = _function_score(body, bool_query)
 
     sorts = _sorts(body)
     if sorts:
@@ -711,12 +800,17 @@ def run_query(spec: ClusterSpec, index: str, body: dict,
     facets, aggs = _read_aggs(data.get("aggregations") or {})
 
     docs = []
+    highlights = {}
     for h in hits.get("hits", []):
         doc = dict(h.get("_source") or {})
         doc.setdefault("id", h.get("_id"))
         if h.get("_score") is not None:
             doc["score"] = h["_score"]
         docs.append(doc)
+        # ES hangs the fragments off each hit; Solr returns one block keyed
+        # by id, so they are re-keyed here and one renderer serves both
+        if h.get("highlight"):
+            highlights[doc["id"]] = h["highlight"]
 
     out = {
         "ok": True,
@@ -727,6 +821,7 @@ def run_query(spec: ClusterSpec, index: str, body: dict,
         "docs": docs,
         "facets": facets,
         "aggs": aggs,
+        "highlights": highlights,
         "raw": data,
     }
     profile = data.get("profile")

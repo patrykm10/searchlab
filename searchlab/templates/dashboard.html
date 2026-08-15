@@ -15,6 +15,7 @@
   --line: #e0e2df;
   --cobalt: #2743c7;
   --cobalt-soft: rgba(39, 67, 199, 0.10);
+  --hl: #fbe7a1;
   --ok: #2f7d51;
   --warn: #c9971c;
   --crit: #b3362b;
@@ -38,6 +39,7 @@
     --line: #232e3d;
     --cobalt: #7b9bd9;
     --cobalt-soft: rgba(123, 155, 217, 0.12);
+    --hl: #5a4a1c;
     --ok: #4bab7c;
     --warn: #d99a2b;
     --crit: #d1594a;
@@ -53,6 +55,7 @@
   --line: #232e3d;
   --cobalt: #7b9bd9;
   --cobalt-soft: rgba(123, 155, 217, 0.12);
+  --hl: #5a4a1c;
   --ok: #4bab7c;
   --warn: #d99a2b;
   --crit: #d1594a;
@@ -486,6 +489,14 @@ textarea:focus { border-color: var(--cobalt); }
 .qdoc pre { font-family: var(--mono); font-size: 11px; color: var(--muted);
   white-space: pre-wrap; word-break: break-word; margin-top: 10px;
   padding-left: 14px; border-left: 2px solid var(--line); }
+
+/* highlight fragments: the answer to "why did this match", so they sit
+   above the raw document rather than inside it */
+.qhl { font-size: 12.5px; color: var(--ink); margin-top: 8px;
+  padding-left: 14px; border-left: 2px solid var(--cobalt); }
+.qhl .qhlf { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-right: 8px; }
+.qhl mark { background: var(--hl); color: var(--ink); padding: 0 2px; }
 
 /* foldable detail panels: url, timing, parsed query, raw response */
 .qpanel { border: 1.5px solid var(--line); background: var(--card); margin-bottom: 10px; }
@@ -966,10 +977,12 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
     </div>
 
-    <!-- ES/OS only: the parameters that actually change what a clause does.
-         Solr reaches most of these through local params on one parser; here
-         they are named keys on the clause, so they get named controls. -->
-    <div class="qrow qsplit3 esonly" id="q-mm-row" style="display:none">
+    <!-- The parameters that actually change what a match means. Both engines
+         have most of them: ES names them as keys on the clause, Solr as
+         params on the dismax family, so the same control serves both and
+         only the label changes. Which ones are on screen is decided by the
+         parser/query type, in one place, below. -->
+    <div class="qrow qsplit3" id="q-mm-row" style="display:none">
       <div>
         <label for="q-mmtype">multi_match type</label>
         <select id="q-mmtype">
@@ -996,7 +1009,7 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
     </div>
 
-    <div class="qrow qsplit3 esonly" id="q-fuzzy-row" style="display:none">
+    <div class="qrow qsplit3" id="q-fuzzy-row" style="display:none">
       <div>
         <label for="q-fuzziness">Fuzziness</label>
         <select id="q-fuzziness">
@@ -1016,6 +1029,116 @@ section.collapsed h2 { margin-bottom: 0; }
         <label for="q-slop">Slop</label>
         <input type="number" id="q-slop" min="0" max="100" placeholder="0"
                title="How far apart the phrase's words may drift and still match. 0 means strictly adjacent.">
+      </div>
+    </div>
+
+    <!-- ES/OS: what a fuzzy term costs. A fuzzy term is rewritten into every
+         indexed term within the edit distance, and these bound that rewrite. -->
+    <div class="qrow qsplit3" id="q-fuzzy-cost-row" style="display:none">
+      <div>
+        <label for="q-prefixlen">prefix_length</label>
+        <input type="number" id="q-prefixlen" min="0" max="20" placeholder="0"
+               title="How many leading characters must match exactly before the edits are allowed. 1 or 2 cuts the work enormously, at the cost of never catching a typo in the first letter.">
+      </div>
+      <div>
+        <label for="q-maxexp">max_expansions</label>
+        <input type="number" id="q-maxexp" min="1" max="10000" placeholder="50"
+               title="A ceiling on how many rewritten terms are kept. The cap is applied per shard and takes whichever terms it reached first, so raising it costs time and lowering it costs matches you cannot see missing.">
+      </div>
+      <div>
+        <label for="q-transpose" style="text-transform:none; letter-spacing:0;
+               font-family:var(--sans); font-size:13px; color:var(--ink)">
+          <input type="checkbox" id="q-transpose" checked
+                 style="vertical-align:-1px"> fuzzy_transpositions
+        </label>
+        <span class="desc" style="margin:0">counts a swapped pair as one
+          edit, not two</span>
+      </div>
+    </div>
+
+    <!-- Solr: phrase boosting. This is the half of edismax that slop exists
+         for — pf builds a phrase query out of the same words and adds its
+         score on top, so documents where the words sit together outrank
+         documents that merely contain them all. -->
+    <div class="qrow qsplit3 solronly" id="q-pf-row" style="display:none">
+      <div>
+        <label for="q-pf">pf — phrase fields</label>
+        <input type="text" id="q-pf" placeholder="title_t^5 body_t"
+               title="Fields where the whole query, matched as a phrase, earns extra score. Same syntax as qf, and a boost here is added on top of the ordinary match rather than replacing it.">
+      </div>
+      <div>
+        <label for="q-pf2">pf2 — word pairs</label>
+        <input type="text" id="q-pf2" placeholder="title_t^3"
+               title="Like pf, but for every adjacent pair of query words rather than the whole phrase. Catches partial proximity when the full phrase never appears.">
+      </div>
+      <div>
+        <label for="q-pf3">pf3 — word triples</label>
+        <input type="text" id="q-pf3" placeholder="title_t^2"
+               title="Like pf2, for runs of three words. Rewards longer stretches of the query appearing intact.">
+      </div>
+    </div>
+
+    <div class="qrow qsplit3 solronly" id="q-ps-row" style="display:none">
+      <div>
+        <label for="q-ps">ps — phrase slop</label>
+        <input type="number" id="q-ps" min="0" max="100" placeholder="0"
+               title="How far apart the words in the pf phrase may sit and still earn the boost. 0 demands they be adjacent; 2 or 3 tolerates a word between them.">
+      </div>
+      <div>
+        <label for="q-ps2">ps2</label>
+        <input type="number" id="q-ps2" min="0" max="100" placeholder="0"
+               title="Slop for the pf2 pairs. Left unset it follows ps.">
+      </div>
+      <div>
+        <label for="q-ps3">ps3</label>
+        <input type="number" id="q-ps3" min="0" max="100" placeholder="0"
+               title="Slop for the pf3 triples. Left unset it follows ps.">
+      </div>
+    </div>
+
+    <!-- Solr: ranking by something other than the text match. -->
+    <div class="qrow qsplit3 solronly" id="q-boost-row" style="display:none">
+      <div>
+        <label for="q-bq">bq — boost query</label>
+        <input type="text" id="q-bq" placeholder="category_s:shoes^2"
+               title="An extra query whose score is added to the main one. It cannot bring in documents the main query missed, so it only re-ranks what already matched.">
+      </div>
+      <div>
+        <label for="q-bf">bf — boost function</label>
+        <input type="text" id="q-bf" placeholder="recip(ms(NOW,ts_dt),3.16e-11,1,1)"
+               title="A function of the document's own fields, added to the score. Additive, so on a weak text match it can dominate.">
+      </div>
+      <div>
+        <label for="q-boostfn">boost — multiplier</label>
+        <input type="text" id="q-boostfn" placeholder="log(popularity_i)"
+               title="Like bf, but multiplied into the score rather than added. Multiplying keeps the text match's shape; adding can flatten it.">
+      </div>
+    </div>
+
+    <!-- ES/OS: the same idea as bf/boost, spelled as one wrapper clause. -->
+    <div class="qrow qsplit3" id="q-fnboost-row" style="display:none">
+      <div>
+        <label for="q-boostfield">Boost by field</label>
+        <select id="q-boostfield"><option value="">no field boost</option></select>
+      </div>
+      <div>
+        <label for="q-boostmod">modifier</label>
+        <select id="q-boostmod">
+          <option value="" title="Use the field's raw value.">none — raw value</option>
+          <option value="log1p" title="log(1 + value). The usual choice: it keeps the ordering but compresses the range, so a 10,000-review product does not bury everything.">log1p — flatten it</option>
+          <option value="sqrt" title="The square root. Flattens less aggressively than log1p.">sqrt</option>
+          <option value="square" title="The square. Exaggerates the differences instead of flattening them.">square</option>
+          <option value="reciprocal" title="1/value. Turns a smaller number into a stronger boost, which is how age becomes recency.">reciprocal — smaller wins</option>
+        </select>
+      </div>
+      <div>
+        <label for="q-boostmode">boost_mode</label>
+        <select id="q-boostmode">
+          <option value="" title="The default, multiply.">default</option>
+          <option value="multiply" title="Multiply the field's contribution into the text score. Solr's boost.">multiply — scale the score</option>
+          <option value="sum" title="Add it to the text score. Solr's bf, and the one that can swamp a weak match.">sum — add to the score</option>
+          <option value="replace" title="Ignore the text score entirely and rank purely by the field. Matching still decides what comes back.">replace — ignore relevance</option>
+        </select>
       </div>
     </div>
 
@@ -1072,7 +1195,9 @@ section.collapsed h2 { margin-bottom: 0; }
       </div>
     </div>
 
-    <div class="qrow qsplit3 esonly" id="q-extra-row" style="display:none">
+    <!-- paging and highlighting are the same idea on both engines, so the
+         row is shared; only min_score has no Solr spelling -->
+    <div class="qrow qsplit3" id="q-extra-row">
       <div>
         <label for="q-from">From (offset)</label>
         <input type="number" id="q-from" min="0" placeholder="0"
@@ -1083,7 +1208,7 @@ section.collapsed h2 { margin-bottom: 0; }
         <input type="text" id="q-highlight" placeholder="title_t body_t"
                title="Return the matching fragments with the matched terms marked, so you can see why a document matched.">
       </div>
-      <div>
+      <div class="esonly" style="display:none">
         <label for="q-minscore">min_score</label>
         <input type="number" id="q-minscore" step="0.1" min="0"
                placeholder="none"
@@ -1181,11 +1306,11 @@ section.collapsed h2 { margin-bottom: 0; }
   <!-- the whole point: every control on the left is a key in this body, and
        it belongs beside them rather than under a screenful of form, so the
        JSON moves while you are still looking at the control you moved -->
-  <aside class="qside esonly" id="q-side" style="display:none">
+  <aside class="qside" id="q-side" style="display:none">
     <details class="qdsl" id="q-dsl-wrap" open>
-      <summary>Query DSL — what the controls build
+      <summary><span id="q-dsl-title">Query DSL — what the controls build</span>
         <button class="btn preset" id="btn-copydsl"
-                title="Copy this body, ready to paste into Dev Tools">copy</button>
+                title="Copy this request, ready to paste into Dev Tools or curl">copy</button>
       </summary>
       <pre id="q-dsl"></pre>
       <div class="desc" id="q-dsl-err" style="display:none"></div>
@@ -1869,13 +1994,34 @@ const ES_QTYPES = [
    "Embed the query with the loaded model and find the nearest vectors, so it can match documents that share no words with the query."],
 ];
 
+/* Field types a value boost can read. Not the same set as NUMERIC_TYPES
+   further down, which decides which comparison operators a condition row
+   offers: a date belongs there, because a range on it is meaningful, but
+   field_value_factor reads its argument as a plain number. Both engines
+   report their own names — Solr's "p" prefix is the point-encoded family,
+   ES spells the widths out — so this covers both. */
+const BOOSTABLE_TYPES = new Set([
+  "int", "long", "float", "double", "short", "byte",
+  "pint", "plong", "pfloat", "pdouble",
+  "integer", "half_float", "scaled_float", "unsigned_long", "rank_feature",
+]);
+
 const SOLR_LABELS = {"q-fq": "Filters (fq) — one per line", "q-rows": "Rows",
                      "q-fl": "Fields to return (fl)",
-                     "q-qf": "Fields to search (qf)", "q-parser": "Parser"};
+                     "q-qf": "Fields to search (qf)", "q-parser": "Parser",
+                     // the same idea in both engines, under each one's name
+                     "q-operator": "q.op — default operator",
+                     "q-msm": "mm — minimum should match",
+                     "q-tiebreak": "tie", "q-slop": "qs — query slop",
+                     "q-from": "start (offset)",
+                     "q-highlight": "hl.fl — highlight fields"};
 const ES_LABELS = {"q-fq": "Raw filters — Lucene syntax, for what the menus cannot say",
                    "q-rows": "size", "q-fl": "_source — fields to return",
                    "q-qf": "fields — with boosts, e.g. title_t^3",
-                   "q-parser": "Query type"};
+                   "q-parser": "Query type", "q-operator": "Operator",
+                   "q-msm": "minimum_should_match", "q-tiebreak": "tie_breaker",
+                   "q-slop": "Slop", "q-from": "From (offset)",
+                   "q-highlight": "Highlight fields"};
 
 function setLabel(id, text) {
   const el = document.querySelector(`label[for="${id}"]`);
@@ -1947,10 +2093,74 @@ const PARAM_HELP = {
   "q-tiebreak": {
     es: ["What the losing fields are worth once best_fields has picked a winner, from 0 to 1. At 0 only the best field scores at all, so a document matching in three fields ranks the same as one matching in the best; raising it lets breadth break ties. 0.2 to 0.3 is the usual starting point.",
          "Solr: tie"],
+    solr: ["Solr's tie, from 0 to 1. dismax scores a document by its single best-matching field; tie decides how much the other fields add back, so at 0 breadth counts for nothing and a document matching everywhere ranks level with one matching in the best field alone. 0.1 to 0.3 is the usual range.",
+           "OS/ES: tie_breaker on multi_match"],
   },
   "q-slop": {
     es: ["How far the phrase's words may drift apart and still count as a phrase. 0 means strictly adjacent; 2 tolerates a word in between, or a pair swapped around. Raise it when phrasing varies but order still carries meaning.",
          "Solr: qs and ps, or the ~N after a quoted phrase"],
+    solr: ["Solr's qs — the slop applied to phrases the user typed in quotes in the query box. It is not the one that usually matters: most people never type quotes, so the phrase that actually gets scored is the one edismax builds from pf, and ps is its slop. Set this when quoted input is common.",
+           "OS/ES: slop on match_phrase, phrase_slop on query_string"],
+  },
+  "q-prefixlen": {
+    es: ["How many leading characters a fuzzy term must get exactly right before any edits are allowed. A fuzzy term is expanded into every indexed term within its edit distance, and anchoring the first character or two collapses that candidate set enormously. The cost is that a typo in the first letter stops matching at all.",
+         "Solr: no equivalent — its ~ operator takes only the distance"],
+  },
+  "q-maxexp": {
+    es: ["A ceiling on how many terms a fuzzy or prefix query is rewritten into. It is applied per shard and keeps whichever terms it reached first, so this is a bound on work rather than a choice about relevance. Raising it costs latency; lowering it drops matches in a way nothing in the response reports.",
+         "Solr: maxBooleanClauses bounds the same rewrite, cluster-wide"],
+  },
+  "q-transpose": {
+    es: ["Whether swapping two adjacent letters counts as one edit or two. On, which is the default, “teh” is one edit from “the” and matches at fuzziness 1; off makes it two and it does not. Leave it on for typo tolerance — transposition is the most common typing mistake there is.",
+         "Solr: its fuzzy operator always allows transpositions"],
+  },
+  "q-boostfield": {
+    es: ["Rank by a number on the document as well as by the text match — popularity, rating, review count. The query still decides what comes back; this only decides how a document's own figures move it within that set. Only numeric fields are offered, because the value is read as a number.",
+         "Solr: bf and boost, written as functions rather than picked"],
+  },
+  "q-boostmod": {
+    es: ["A curve applied to the field's value before it touches the score. Raw values make brutal multipliers — a product with 10,000 reviews would bury everything — so log1p is the usual choice: it keeps the ordering and compresses the range. reciprocal turns small values into strong boosts, which is how an age field becomes a recency boost.",
+         "Solr: the same functions, spelled inside bf, e.g. log(popularity_i)"],
+  },
+  "q-boostmode": {
+    es: ["How the field's contribution meets the text score. multiply scales it, preserving the shape of the relevance ranking; sum adds to it, which lets a popular but barely-matching document climb past a good match; replace throws relevance away and ranks purely by the field. This is the difference between Solr's boost and its bf.",
+         "Solr: boost is multiply, bf is sum"],
+  },
+  "q-pf": {
+    solr: ["The fields where the whole query, matched as a phrase, earns extra score — the reason slop exists at all. Without it a search for running shoes cannot tell a document about running shoes from one that mentions running in one paragraph and shoes in another, because both contain the same two words. Same syntax as qf, and the boost is added on top of the ordinary match rather than replacing it.",
+           "OS/ES: a should clause holding a match_phrase, beside the main query"],
+  },
+  "q-pf2": {
+    solr: ["Like pf, but built from every adjacent pair of query words instead of the whole phrase. A four-word query rarely appears intact anywhere, so pf usually contributes nothing on long queries while pf2 still rewards the pairs that did survive. edismax only — dismax has no pf2.",
+           "OS/ES: no direct equivalent; shingles at index time are the usual answer"],
+  },
+  "q-pf3": {
+    solr: ["The same idea as pf2 for runs of three words, rewarding longer intact stretches more than pairs. Used together, pf3 and pf2 give a gradient — the more of the query that stayed together, the higher the document rises. edismax only.",
+           "OS/ES: no direct equivalent; shingles at index time are the usual answer"],
+  },
+  "q-ps": {
+    solr: ["How far apart the words in the pf phrase may sit and still earn its boost. 0 demands they be adjacent, which is strict enough that a stray adjective between them loses the boost entirely; 2 or 3 usually captures the intent without rewarding coincidence. This is the slop that matters, because pf is the phrase most queries actually get scored against.",
+           "OS/ES: slop on the match_phrase clause you would boost with"],
+  },
+  "q-ps2": {
+    solr: ["The slop for the pairs pf2 builds. Left unset it inherits ps, which is normally what you want — a separate value is for when pairs should tolerate more drift than the full phrase does. edismax only.",
+           "OS/ES: slop on the corresponding phrase clause"],
+  },
+  "q-ps3": {
+    solr: ["The slop for the triples pf3 builds, inheriting ps when unset. Setting it above ps says that a three-word run may be looser than the whole phrase, which is unusual but is how you tune long queries. edismax only.",
+           "OS/ES: slop on the corresponding phrase clause"],
+  },
+  "q-bq": {
+    solr: ["An extra query whose score is added to the main one, so documents matching it rise. It cannot bring in anything the main query missed — it only re-ranks what already matched, which is what makes it safe to add. Ordinary Lucene syntax, boost included: category_s:shoes^2.",
+           "OS/ES: a should clause in bool, which does exactly this job"],
+  },
+  "q-bf": {
+    solr: ["A function of the document's own fields, added to the score — recip(ms(NOW,ts_dt),3.16e-11,1,1) is the standard recency boost. Because it is added rather than multiplied, its value sits on the same scale as the text score, so on a weak match it can dominate the ranking entirely. That is the usual reason a boost misbehaves.",
+           "OS/ES: function_score with boost_mode sum"],
+  },
+  "q-boostfn": {
+    solr: ["The same functions as bf, multiplied into the score instead of added. Multiplying preserves the shape of the relevance ranking — a document twice as popular ranks higher than an equally-relevant one, but never past a far better match — which is why it usually behaves better than bf. edismax only.",
+           "OS/ES: function_score with boost_mode multiply"],
   },
   "q-fq": {
     es: ["Lucene syntax, for the things the condition menus cannot say. It becomes a query_string clause under filter, so it narrows the set without contributing to the score — the same job Solr gives fq.",
@@ -1975,10 +2185,14 @@ const PARAM_HELP = {
   "q-from": {
     es: ["Skip this many hits before the page you want. from + size cannot exceed index.max_result_window, 10,000 by default, because every shard has to build and return that entire prefix for the coordinator to merge. Deep paging is what search_after exists for.",
          "Solr: start, with the same ceiling and cursorMark as the answer"],
+    solr: ["Solr's start — skip this many documents before the page you asked for. Every shard has to build and return the whole prefix for the coordinator to merge, so the cost grows with the offset rather than with rows. Past a few thousand, cursorMark is the answer instead.",
+           "OS/ES: from, with search_after as its deep-paging escape"],
   },
   "q-highlight": {
     es: ["Return the matching fragments with the matched terms marked, so you can see why a document matched rather than guessing. It re-analyses the field for every hit on the page, so it is not free.",
          "Solr: hl.fl"],
+    solr: ["Sets hl.fl, and turns highlighting on. The fragments come back beside the documents rather than on them, with the matched terms marked, so you can see which words earned the hit instead of inferring it. It re-analyses each field for every document on the page, so it costs real time on large fields.",
+           "OS/ES: the highlight block, returned on each hit"],
   },
   "q-minscore": {
     es: ["Drop hits scoring below this. Scores are relative to one query and one index state, not an absolute quality scale, so a cutoff tuned today quietly changes meaning when the query or the data does — useful for exploring, risky in production."],
@@ -2093,17 +2307,36 @@ const PARAM_DOCS = {
   "q-operator": {es: "query-dsl/full-text/match/", solr: "query-guide/standard-query-parser.html"},
   "q-msm":     {es: "query-dsl/minimum-should-match/", solr: "query-guide/edismax-query-parser.html"},
   "q-fuzziness": {es: "query-dsl/full-text/match/"},
-  "q-tiebreak": {es: "query-dsl/full-text/multi-match/"},
-  "q-slop":    {es: "query-dsl/full-text/match-phrase/"},
+  "q-tiebreak": {es: "query-dsl/full-text/multi-match/",
+                 solr: "query-guide/dismax-query-parser.html"},
+  "q-slop":    {es: "query-dsl/full-text/match-phrase/",
+                solr: "query-guide/dismax-query-parser.html"},
+  "q-prefixlen": {es: "query-dsl/term/fuzzy/"},
+  "q-maxexp":  {es: "query-dsl/term/fuzzy/"},
+  "q-transpose": {es: "query-dsl/term/fuzzy/"},
+  "q-boostfield": {es: "query-dsl/compound/function-score/"},
+  "q-boostmod": {es: "query-dsl/compound/function-score/"},
+  "q-boostmode": {es: "query-dsl/compound/function-score/"},
+  "q-pf":      {solr: "query-guide/dismax-query-parser.html"},
+  "q-ps":      {solr: "query-guide/dismax-query-parser.html"},
+  "q-pf2":     {solr: "query-guide/edismax-query-parser.html"},
+  "q-ps2":     {solr: "query-guide/edismax-query-parser.html"},
+  "q-pf3":     {solr: "query-guide/edismax-query-parser.html"},
+  "q-ps3":     {solr: "query-guide/edismax-query-parser.html"},
+  "q-bq":      {solr: "query-guide/dismax-query-parser.html"},
+  "q-bf":      {solr: "query-guide/dismax-query-parser.html"},
+  "q-boostfn": {solr: "query-guide/edismax-query-parser.html"},
   "q-fq":      {es: "query-dsl/full-text/query-string/", solr: "query-guide/common-query-parameters.html"},
   "q-conds":   {es: "query-dsl/compound/bool/"},
   "q-rows":    {es: "search-plugins/searching-data/paginate/", solr: "query-guide/common-query-parameters.html"},
-  "q-from":    {es: "search-plugins/searching-data/paginate/"},
+  "q-from":    {es: "search-plugins/searching-data/paginate/",
+                solr: "query-guide/common-query-parameters.html"},
   "q-sort":    {solr: "query-guide/common-query-parameters.html"},
   "q-sorts":   {es: "search-plugins/searching-data/sort/"},
   "q-fl":      {solr: "query-guide/common-query-parameters.html"},
   "q-src":     {es: "api-reference/search/"},
-  "q-highlight": {es: "search-plugins/searching-data/highlight/"},
+  "q-highlight": {es: "search-plugins/searching-data/highlight/",
+                  solr: "query-guide/highlighting.html"},
   "q-minscore": {es: "api-reference/search/"},
   "q-aggs":    {es: "aggregations/", solr: "query-guide/faceting.html"},
   "q-facet":   {solr: "query-guide/faceting.html"},
@@ -2289,12 +2522,19 @@ function applyEngineToQueryForm() {
   }
   for (const el of document.querySelectorAll(".esonly"))
     el.style.display = es ? "" : "none";
+  for (const el of document.querySelectorAll(".solronly"))
+    el.style.display = es ? "none" : "";
   // the text boxes these replaced would be two ways to say the same thing
   $("q-sort").parentElement.style.display = es ? "none" : "";
   $("q-fl").parentElement.style.display = es ? "none" : "";
   // the terms-only facet picker is subsumed by the aggregation builder
   $("q-facet-row").style.display = es ? "none" : "";
-  $("q-side").style.display = es ? "" : "none";
+  // both engines get the request preview; Solr's is a parameter list rather
+  // than a JSON body, which is exactly the difference worth seeing
+  $("q-side").style.display = "";
+  $("q-dsl-title").textContent = es
+    ? "Query DSL — what the controls build"
+    : "Solr parameters — what the controls send";
   // the same group holds both, and they are not the same idea: Solr's are
   // field counts, ES/OS can nest a metric inside every bucket
   $("q-g-agg-name").textContent = es ? "Aggregations" : "Facets";
@@ -2325,17 +2565,64 @@ function esApplies() {
     fuzziness: (multi && !phrase) || p === "match",
     tieBreaker: multi,
     slop: p === "match_phrase" || phrase,
+    // a fuzzy rewrite is the only thing these bound, so they follow it
+    fuzzyCost: (multi && !phrase) || p === "match" || p === "query_string",
+    fnBoost: p !== "semantic",
+  };
+}
+
+/* The same question on the Solr side. The dismax family reads a pile of
+   parameters the lucene parser silently ignores, so which controls are on
+   screen is which parameters the chosen parser will actually act on —
+   and the ones it would ignore are absent from the request too, rather
+   than sent and quietly dropped. */
+function solrApplies() {
+  const p = $("q-parser").value;
+  const semantic = p === "semantic";
+  const dismax = p === "dismax" || p === "edismax";
+  return {
+    p, semantic, dismax,
+    fields: dismax,
+    // q.op is read by the lucene parser too
+    operator: !semantic,
+    msm: dismax,
+    tieBreaker: dismax,
+    slop: dismax,          // qs — slop on a phrase typed into q
+    phraseFields: dismax,  // pf/ps: the phrase edismax builds for you
+    // pf2/pf3 and the multiplicative boost are edismax's alone
+    edismaxOnly: p === "edismax",
+    boosts: dismax,
   };
 }
 
 function onParserChange() {
   const es = isES();
+  const show = (el, on) => { if (el) el.style.display = on ? "" : "none"; };
   if (!es) {
-    const p = $("q-parser").value, semantic = p === "semantic";
-    $("q-qf-wrap").style.display = (p === "lucene" || semantic) ? "none" : "";
-    $("q-vec-wrap").style.display = semantic ? "" : "none";
-    $("q-model-row").style.display = semantic ? "" : "none";
-    if (semantic) refreshModel();
+    const s = solrApplies();
+    $("q-qf-wrap").style.display = s.fields ? "" : "none";
+    $("q-vec-wrap").style.display = s.semantic ? "" : "none";
+    $("q-model-row").style.display = s.semantic ? "" : "none";
+
+    show($("q-mm-row"), s.operator || s.msm);
+    show($("q-mmtype").parentElement, false);      // no Solr equivalent
+    show($("q-operator").parentElement, s.operator);
+    show($("q-msm").parentElement, s.msm);
+    show($("q-fuzzy-row"), s.tieBreaker || s.slop);
+    show($("q-fuzziness").parentElement, false);   // written as term~ in q
+    show($("q-tiebreak").parentElement, s.tieBreaker);
+    show($("q-slop").parentElement, s.slop);
+    show($("q-fuzzy-cost-row"), false);
+    show($("q-fnboost-row"), false);
+
+    show($("q-pf-row"), s.phraseFields);
+    show($("q-ps-row"), s.phraseFields);
+    show($("q-boost-row"), s.boosts);
+    for (const id of ["q-pf2", "q-pf3", "q-ps2", "q-ps3", "q-boostfn"])
+      show($(id).parentElement, s.edismaxOnly);
+
+    if (s.semantic) refreshModel();
+    scheduleDsl();
     return;
   }
   const a = esApplies();
@@ -2344,7 +2631,6 @@ function onParserChange() {
   $("q-vec-wrap").style.display = a.semantic ? "" : "none";
   $("q-model-row").style.display = a.semantic ? "" : "none";
 
-  const show = (el, on) => { el.style.display = on ? "" : "none"; };
   show($("q-mm-row"), a.mmType || a.operator || a.msm);
   show($("q-mmtype").parentElement, a.mmType);
   show($("q-operator").parentElement, a.operator);
@@ -2353,6 +2639,11 @@ function onParserChange() {
   show($("q-fuzziness").parentElement, a.fuzziness);
   show($("q-tiebreak").parentElement, a.tieBreaker);
   show($("q-slop").parentElement, a.slop);
+  show($("q-fuzzy-cost-row"), a.fuzzyCost);
+  show($("q-fnboost-row"), a.fnBoost);
+  // Solr's rows have no ES counterpart on this form: bq is a should clause
+  // in the condition builder, and pf is a should match_phrase beside it
+  for (const id of ["q-pf-row", "q-ps-row", "q-boost-row"]) show($(id), false);
 
   if (a.semantic) refreshModel();
   scheduleDsl();
@@ -2376,6 +2667,13 @@ async function loadFields(collection) {
     const facetable = out.fields.filter(f => !f.text);
     $("q-facet").innerHTML = `<option value="">choose a field…</option>` +
       facetable.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
+    // a field boost reads the value as a number, so only numeric fields can
+    // carry one — offering the rest would build a query that fails per shard
+    const numeric = out.fields.filter(f => BOOSTABLE_TYPES.has(f.type));
+    const keptBoost = $("q-boostfield").value;
+    $("q-boostfield").innerHTML = `<option value="">no field boost</option>` +
+      numeric.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
+    if (numeric.some(f => f.name === keptBoost)) $("q-boostfield").value = keptBoost;
     const textFields = out.fields.filter(f => f.text).map(f => f.name);
     if (textFields.length && !$("q-qf").value)
       $("q-qf").placeholder = textFields[0] + "^3 " + (textFields[1] || "");
@@ -2394,7 +2692,11 @@ $("q-mmtype").addEventListener("change", onParserChange);
 for (const id of ["q-q", "q-qf", "q-field", "q-fq", "q-rows", "q-sort", "q-fl",
                   "q-vecfield", "q-operator", "q-msm", "q-fuzziness",
                   "q-tiebreak", "q-slop", "q-from", "q-highlight",
-                  "q-minscore", "q-facet-limit", "q-tth"]) {
+                  "q-minscore", "q-facet-limit", "q-tth",
+                  "q-prefixlen", "q-maxexp", "q-transpose",
+                  "q-boostfield", "q-boostmod", "q-boostmode",
+                  "q-pf", "q-pf2", "q-pf3", "q-ps", "q-ps2", "q-ps3",
+                  "q-bq", "q-bf", "q-boostfn"]) {
   const el = $(id);
   if (!el) continue;
   el.addEventListener("input", scheduleDsl);
@@ -2866,8 +3168,35 @@ function queryBody() {
     fq: $("q-fq").value.split("\n"),
     facet_fields: facetFields,
     facet_limit: Number($("q-facet-limit").value),
+    // shared with ES/OS: the same idea under a different parameter name
+    from: $("q-from").value,
+    highlight: $("q-highlight").value,
   };
-  if (!isES()) return body;
+  if (!isES()) {
+    // only what this parser reads — a param it would ignore has no control
+    // on screen, and must not ride along in the request either
+    const s = solrApplies();
+    if (s.operator) body.operator = $("q-operator").value;
+    if (s.msm) body.minimum_should_match = $("q-msm").value;
+    if (s.tieBreaker) body.tie_breaker = $("q-tiebreak").value;
+    if (s.slop) body.qs = $("q-slop").value;
+    if (s.phraseFields) {
+      body.pf = $("q-pf").value;
+      body.ps = $("q-ps").value;
+    }
+    if (s.boosts) {
+      body.bq = $("q-bq").value;
+      body.bf = $("q-bf").value;
+    }
+    if (s.edismaxOnly) {
+      body.pf2 = $("q-pf2").value;
+      body.ps2 = $("q-ps2").value;
+      body.pf3 = $("q-pf3").value;
+      body.ps3 = $("q-ps3").value;
+      body.boost = $("q-boostfn").value;
+    }
+    return body;
+  }
 
   // ES/OS: name the clause outright and carry its own parameters, rather
   // than routing everything through a parser name it does not have. Only
@@ -2892,8 +3221,16 @@ function queryBody() {
   if (a.fuzziness) body.fuzziness = $("q-fuzziness").value;
   if (a.tieBreaker) body.tie_breaker = $("q-tiebreak").value;
   if (a.slop) body.slop = $("q-slop").value;
-  body.from = $("q-from").value;
-  body.highlight = $("q-highlight").value;
+  if (a.fuzzyCost) {
+    body.prefix_length = $("q-prefixlen").value;
+    body.max_expansions = $("q-maxexp").value;
+    body.fuzzy_transpositions = $("q-transpose").checked;
+  }
+  if (a.fnBoost) {
+    body.boost_field = $("q-boostfield").value;
+    body.boost_modifier = $("q-boostmod").value;
+    body.boost_mode = $("q-boostmode").value;
+  }
   body.min_score = $("q-minscore").value;
   body.track_total_hits = $("q-tth").checked;
   return body;
@@ -2907,13 +3244,25 @@ function queryBody() {
 let dslTimer = null;
 
 function scheduleDsl() {
-  if (!isES()) return;
   clearTimeout(dslTimer);
   dslTimer = setTimeout(refreshDsl, 250);   // per keystroke, so debounce it
 }
 
+/* Solr takes parameters, not a body, so the preview is the query string it
+   would send — which is the form you can paste after /select and run, and
+   the form the docs are written in. */
+function solrParamText(params) {
+  const lines = [];
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "wt") continue;             // always json here; it is noise
+    for (const one of Array.isArray(value) ? value : [value])
+      lines.push(`${key}=${one}`);
+  }
+  return lines.join("\n&");
+}
+
 async function refreshDsl() {
-  if (!isES() || demo) return;
+  if (demo) return;
   try {
     const out = await post("/api/query/preview", queryBody());
     const err = $("q-dsl-err");
@@ -2925,7 +3274,9 @@ async function refreshDsl() {
       return;
     }
     err.style.display = "none";
-    $("q-dsl").textContent = JSON.stringify(out.request, null, 2);
+    $("q-dsl").textContent = out.kind === "params"
+      ? solrParamText(out.request)
+      : JSON.stringify(out.request, null, 2);
   } catch (e) { /* keep whatever is on screen */ }
 }
 
@@ -3015,6 +3366,17 @@ function renderQueryResult(out) {
     });
   }
 
+  /* Both engines wrap the matched terms in <em>. The fragment is document
+     text, so it is escaped like everything else — and then that one tag is
+     put back, because the marks are the whole reason to ask for it. */
+  const hl = out.highlights || {};
+  const fragments = id => Object.entries(hl[id] || {}).map(([field, frags]) =>
+    `<div class="qhl"><span class="qhlf">${esc(field)}</span>` +
+    [].concat(frags).map(f =>
+      esc(String(f)).replaceAll("&lt;em&gt;", "<mark>")
+                    .replaceAll("&lt;/em&gt;", "</mark>")).join(" … ") +
+    `</div>`).join("");
+
   // one expandable record per document, rather than a table too wide to read
   const docs = out.docs || [];
   $("q-results").innerHTML = docs.map(d => {
@@ -3026,7 +3388,7 @@ function renderQueryResult(out) {
     return `<details class="qdoc"><summary>
       <span class="qid">${esc(id)}</span>
       <span class="qpreview">${esc(preview)}</span>
-    </summary><pre>${esc(JSON.stringify(d, null, 2))}</pre></details>`;
+    </summary>${fragments(id)}<pre>${esc(JSON.stringify(d, null, 2))}</pre></details>`;
   }).join("");
 
   // foldable detail panels

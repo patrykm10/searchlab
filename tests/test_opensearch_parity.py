@@ -1100,3 +1100,132 @@ def test_range_buckets_are_named_by_their_bounds():
     facets, _ = query_os._read_aggs({"bands": {"buckets": [
         {"from": 0.0, "to": 100.0, "doc_count": 4}]}})
     assert facets["bands"][0]["value"] == "0.0–100.0"
+
+
+# ------------------------------------------- fuzzy cost and value boosting ---
+
+def test_fuzzy_expansion_is_boundable():
+    """A fuzzy term is rewritten into every indexed term within its edit
+    distance; these are the two bounds on how big that rewrite gets."""
+    body = query_os.build_body({
+        "q": "runing", "qtype": "multi_match", "fields": "title",
+        "fuzziness": "AUTO", "prefix_length": 2, "max_expansions": 50})
+    clause = body["query"]["multi_match"]
+    assert clause["prefix_length"] == 2 and clause["max_expansions"] == 50
+
+
+def test_the_fuzzy_bounds_are_refused_without_fuzziness():
+    """On their own they are controls that change nothing, which reads as a
+    setting that did not help rather than one that never applied."""
+    with pytest.raises(ValueError, match="set fuzziness first"):
+        query_os.build_body({"q": "a", "qtype": "match", "field": "title",
+                             "prefix_length": 2})
+
+
+def test_transpositions_only_appear_when_turned_off():
+    """On is the default, so sending it is noise in the previewed body."""
+    base = {"q": "teh", "qtype": "match", "field": "title", "fuzziness": "1"}
+    on = query_os.build_body({**base, "fuzzy_transpositions": True})
+    assert "fuzzy_transpositions" not in on["query"]["match"]["title"]
+    off = query_os.build_body({**base, "fuzzy_transpositions": False})
+    assert off["query"]["match"]["title"]["fuzzy_transpositions"] is False
+
+
+def test_query_string_takes_the_fuzzy_prefixed_spellings():
+    """Its fuzziness is written inline as term~, so the same options carry a
+    fuzzy_ prefix rather than being keys on a fuzziness setting."""
+    clause = query_os.build_body({
+        "q": "runing~1", "qtype": "query_string",
+        "prefix_length": 1, "max_expansions": 20,
+        "slop": 2})["query"]["query_string"]
+    assert clause["fuzzy_prefix_length"] == 1
+    assert clause["fuzzy_max_expansions"] == 20
+    # phrase_slop, not slop: it applies to phrases quoted inside the query
+    assert clause["phrase_slop"] == 2
+
+
+def test_a_field_value_can_rank_alongside_the_text_match():
+    """Solr's bf and boost, as the one wrapper clause ES spells them with."""
+    body = query_os.build_body({
+        "q": "shoes", "qtype": "multi_match", "fields": "title",
+        "boost_field": "popularity", "boost_modifier": "log1p",
+        "boost_mode": "multiply", "boost_factor": 1.5})
+    fs = body["query"]["function_score"]
+    assert "multi_match" in fs["query"]
+    assert fs["field_value_factor"] == {"field": "popularity",
+                                        "modifier": "log1p", "factor": 1.5,
+                                        "missing": 1}
+    assert fs["boost_mode"] == "multiply"
+
+
+def test_the_boost_wraps_the_filters_rather_than_sitting_beside_them():
+    """Filters narrow first and the field value only re-ranks what survived —
+    the other way round would let a popular document past a must_not."""
+    body = query_os.build_body({
+        "q": "shoes", "boost_field": "popularity",
+        "clauses": [{"field": "in_stock", "op": "is", "value": "true",
+                     "occur": "filter"}]})
+    assert "bool" in body["query"]["function_score"]["query"]
+
+
+def test_a_missing_boost_field_still_scores_rather_than_failing_the_shard():
+    factor = query_os.build_body(
+        {"q": "a", "boost_field": "popularity"})["query"]["function_score"]
+    assert factor["field_value_factor"]["missing"] == 1
+
+
+def test_boost_settings_without_a_field_are_refused():
+    with pytest.raises(ValueError, match="need a field to read"):
+        query_os.build_body({"q": "a", "boost_mode": "multiply"})
+    with pytest.raises(ValueError, match="Boost mode must be"):
+        query_os.build_body({"q": "a", "boost_field": "p", "boost_mode": "up"})
+    with pytest.raises(ValueError, match="Boost modifier must be"):
+        query_os.build_body({"q": "a", "boost_field": "p",
+                             "boost_modifier": "curve"})
+
+
+def test_no_boost_field_leaves_the_query_unwrapped():
+    body = query_os.build_body({"q": "shoes", "qtype": "match", "field": "t"})
+    assert "function_score" not in body["query"]
+
+
+def test_query_string_takes_minimum_should_match():
+    clause = query_os.build_body({"q": "a b c", "qtype": "query_string",
+                                  "minimum_should_match": "2"})["query"]
+    assert clause["query_string"]["minimum_should_match"] == "2"
+
+
+# --------------------------------------------------------- highlighting ------
+
+@pytest.fixture
+async def mock_hl(aiohttp_server):
+    async def search(request):
+        return web.json_response({"took": 3, "hits": {
+            "total": {"value": 1},
+            "hits": [{"_id": "d1", "_score": 1.2,
+                      "_source": {"title": "running shoes"},
+                      "highlight": {"title": ["<em>running</em> shoes"]}}],
+        }})
+
+    app = web.Application()
+    app.router.add_post("/shop/_search", search)
+    return await aiohttp_server(app)
+
+
+async def test_highlight_fragments_come_back_keyed_by_id(mock_hl):
+    """ES hangs the fragments off each hit and Solr returns one block keyed
+    by id. Re-keying here is what lets one renderer serve both — and asking
+    for highlighting and then discarding the answer is how this looked like
+    a setting that did nothing."""
+    spec = ClusterSpec(engine="opensearch", base_port=mock_hl.port)
+    out = await asyncio.to_thread(
+        query_os.run_query, spec, "shop", {"q": "running", "highlight": "title"})
+    assert out["ok"] is True
+    assert out["highlights"] == {"d1": {"title": ["<em>running</em> shoes"]}}
+
+
+def test_no_highlighting_asked_for_leaves_the_key_out():
+    """Absent, not an empty block — the previewed body should show what was
+    actually asked for."""
+    body = query_os.build_body({"q": "shoes"})
+    assert "highlight" not in body
