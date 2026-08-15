@@ -134,9 +134,16 @@ def test_highlight_fragments_are_rendered(html):
     """Highlighting was requested and the answer thrown away, which reads as
     a setting that does nothing."""
     assert "out.highlights" in html
-    # the marks are the point, so that one tag survives escaping
-    assert '.replaceAll("&lt;em&gt;", "<mark>")' in html
     assert re.search(r"\.qhl mark \{", html)
+
+
+def test_highlight_marks_survive_escaping_without_guessing_entities(html):
+    """esc() encodes & and < but not >, so escaping the fragment first and
+    swapping the entity back leaves &lt;em> on screen — the fragment renders,
+    the marks do not. Splitting on the raw tag and escaping only the text
+    between them does not care which characters esc() encodes."""
+    assert "&lt;em&gt;" not in html.split("function renderQueryResult")[1]
+    assert re.search(r"split\(/\(<em>\|<\\/em>\)/\)", html)
 
 
 def test_no_top_level_identifier_is_declared_twice(html):

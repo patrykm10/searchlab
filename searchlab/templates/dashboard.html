@@ -3367,15 +3367,18 @@ function renderQueryResult(out) {
   }
 
   /* Both engines wrap the matched terms in <em>. The fragment is document
-     text, so it is escaped like everything else — and then that one tag is
-     put back, because the marks are the whole reason to ask for it. */
+     text and has to be escaped like everything else, but the marks are the
+     whole reason to ask for highlighting — so it is split on those two tags
+     and only the pieces between them are escaped. Escaping first and putting
+     the tag back afterwards would couple this to exactly which characters
+     esc() encodes, which is a smaller set than it looks. */
+  const marked = frag => String(frag).split(/(<em>|<\/em>)/)
+    .map(part => part === "<em>" ? "<mark>"
+               : part === "</em>" ? "</mark>" : esc(part)).join("");
   const hl = out.highlights || {};
   const fragments = id => Object.entries(hl[id] || {}).map(([field, frags]) =>
     `<div class="qhl"><span class="qhlf">${esc(field)}</span>` +
-    [].concat(frags).map(f =>
-      esc(String(f)).replaceAll("&lt;em&gt;", "<mark>")
-                    .replaceAll("&lt;/em&gt;", "</mark>")).join(" … ") +
-    `</div>`).join("");
+    [].concat(frags).map(marked).join(" … ") + `</div>`).join("");
 
   // one expandable record per document, rather than a table too wide to read
   const docs = out.docs || [];
