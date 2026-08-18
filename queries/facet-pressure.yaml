@@ -1,0 +1,34 @@
+# Facet pressure, Solr. Three templates in one mix so the report's per-template
+# breakdown IS the lesson: the same cluster, the same docs, three costs.
+#
+#   facet_high_cardinality  facets a near-unique field  -> the pathology
+#   facet_low_cardinality   facets a 20-value field     -> the control
+#   plain_search            no faceting at all          -> the baseline
+#
+# Read `per template` in the load summary: p99 should separate by an order of
+# magnitude. That gap, not the absolute number, is the thing being taught.
+queries:
+  - name: facet_high_cardinality
+    weight: 6
+    params:
+      q: "*:*"
+      rows: 0
+      facet: "true"
+      facet.field: "user_id_s"     # 16-char random strings: effectively unique
+      facet.limit: 100
+      facet.mincount: 1
+
+  - name: facet_low_cardinality
+    weight: 2
+    params:
+      q: "*:*"
+      rows: 0
+      facet: "true"
+      facet.field: "event_s"       # cardinality 20, zipf-skewed: cheap
+      facet.limit: 20
+
+  - name: plain_search
+    weight: 2
+    params:
+      q: "payload_t:{RAND_WORD}"
+      rows: 10

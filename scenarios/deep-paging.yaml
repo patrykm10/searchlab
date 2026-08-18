@@ -1,0 +1,44 @@
+name: deep-paging
+title: Deep paging cliff
+about: |
+  "Page 1 is fast, so pagination is fine" is the assumption this breaks. To
+  return rows 99,000-99,010 the engine ranks and holds 99,010 candidates on
+  every shard, then discards all but ten. Cost grows with `start`, not with
+  `rows`, and it grows on every shard at once — so it gets worse as you add
+  shards, which is the opposite of what people expect scaling to do.
+
+  Shallow and deep run side by side in one mix, identical but for the offset,
+  so the per-template p99s are directly comparable.
+
+  The engines disagree here and the disagreement is worth more than the
+  numbers. Solr pages to row 99,000 and says nothing. ES/OS refuse past
+  `index.max_result_window` (default 10,000), so the shipped ES template stops
+  at 9,900. The refusal is the better behaviour — the cost is the same on both,
+  ES simply declines to pay it silently. Raise the ES `from` above 10,000 to
+  watch every deep request fail instead of merely crawl.
+
+cluster:
+  nodes: 2
+
+data:
+  collection: products
+  profile: profiles/default.yaml
+  count: 100000
+  seed: 42
+
+load:
+  rps: 20
+  duration: 90
+  ramp: 10
+
+queries:
+  solr: queries/deep-paging.yaml
+  es: queries/deep-paging-es.yaml
+
+watch:
+  - "per-template p99: page_deep against page_shallow — the cliff, on one screen"
+  - "the gap widens with shard count: re-run on a 1-shard collection and compare"
+  - "errors stay at 0 on Solr; on ES/OS raise `from` past 10,000 and they will not"
+  - "cursorMark (Solr) or search_after / PIT (ES/OS) is the fix — both are stateless per page"
+
+report: deep-paging

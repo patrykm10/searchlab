@@ -1,0 +1,251 @@
+"""Named reproductions: the repro recipes, as things the tool actually does.
+
+The README has always described how to reproduce a facet-pressure heap problem
+or a merge storm. The description was six commands ending in "now facet on
+user_id_s and watch the GC logs" — which is homework, with the interesting part
+left as an exercise. A scenario is that recipe as an object: the data shape, the
+query mix, the cluster it wants, the faults to inject, and — the part that makes
+it a lesson rather than a run — what to look at while it happens.
+
+    searchlab scenario list
+    searchlab scenario show facet-pressure
+    searchlab scenario run facet-pressure
+
+Everything below is configuration handling: parsing, validating, resolving
+against whatever cluster is actually running, and translating into the drill
+config that `drill.run_drill` already knows how to execute. No new execution
+machinery — a scenario is a drill someone else already worked out for you.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import yaml
+
+from .engines import get_engine
+
+_REQUIRED = ("name", "title", "data", "load")
+_DATA_REQUIRED = ("collection", "profile")
+
+# Query files are picked per engine family: Solr's params and the ES/OS query
+# DSL are different languages, and a scenario that ships only one of them is
+# the silent-no-op-on-the-other-engine bug this codebase keeps rediscovering.
+_FAMILY = {"solr": "solr", "elasticsearch": "es", "opensearch": "es"}
+
+
+def catalog_dirs() -> list[Path]:
+    """Where scenarios are looked for: your own directory first, then the ones
+    in the checkout.
+
+    Scenarios reference `profiles/` and `queries/` by repo-relative path, the
+    same way the README's commands do, so they belong to the checkout rather
+    than the wheel. $SEARCHLAB_SCENARIOS points at your own set — a team's
+    onboarding scenarios are a directory of text files.
+    """
+    dirs = []
+    if os.environ.get("SEARCHLAB_SCENARIOS"):
+        dirs.append(Path(os.environ["SEARCHLAB_SCENARIOS"]))
+    dirs.append(Path("scenarios"))
+    return dirs
+
+
+def catalog() -> list[dict]:
+    """Every scenario that parses, sorted by name. A file that fails to parse
+    is listed with its error rather than skipped — a broken scenario the user
+    can see beats one that silently is not there."""
+    found: dict[str, dict] = {}
+    for d in catalog_dirs():
+        if not d.is_dir():
+            continue
+        for path in sorted(d.glob("*.yaml")):
+            if path.stem in found:
+                continue  # first directory wins
+            try:
+                cfg = yaml.safe_load(path.read_text()) or {}
+                found[path.stem] = {
+                    "name": cfg.get("name", path.stem),
+                    "title": cfg.get("title", ""),
+                    "about": cfg.get("about", ""),
+                    "path": path,
+                    "error": None,
+                }
+            except yaml.YAMLError as e:
+                found[path.stem] = {"name": path.stem, "title": "", "about": "",
+                                    "path": path, "error": str(e)}
+    return [found[k] for k in sorted(found)]
+
+
+def find(name: str) -> Path:
+    """A scenario name, or a path to a YAML file. Names win over paths, so a
+    typo'd name reports the catalog rather than a file-not-found."""
+    for d in catalog_dirs():
+        candidate = d / f"{name}.yaml"
+        if candidate.is_file():
+            return candidate
+    as_path = Path(name)
+    if as_path.is_file():
+        return as_path
+    known = ", ".join(s["name"] for s in catalog()) or "none found"
+    sys.exit(f"searchlab: no scenario '{name}' — available: {known}")
+
+
+def load(name: str) -> dict:
+    path = find(name)
+    try:
+        cfg = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        sys.exit(f"searchlab: scenario {path} is not valid YAML — {e}")
+    return validate(cfg, path)
+
+
+def validate(cfg: dict, source: str | Path) -> dict:
+    if not isinstance(cfg, dict):
+        sys.exit(f"searchlab: scenario {source} must be a YAML mapping")
+    for key in _REQUIRED:
+        if key not in cfg:
+            sys.exit(f"searchlab: scenario {source} needs a '{key}' section")
+    for key in _DATA_REQUIRED:
+        if key not in cfg["data"]:
+            sys.exit(f"searchlab: scenario {source} data section needs '{key}'")
+    load_cfg = cfg["load"]
+    for key in ("rps", "duration"):
+        if key not in load_cfg:
+            sys.exit(f"searchlab: scenario {source} load section needs '{key}'")
+    for step in cfg.get("chaos") or []:
+        if "at" not in step or "action" not in step or "node" not in step:
+            sys.exit(f"searchlab: scenario {source} chaos step {step} needs at/action/node")
+        if float(step["at"]) >= float(load_cfg["duration"]):
+            sys.exit(f"searchlab: scenario {source} chaos step at t={step['at']} is "
+                     f"outside the {load_cfg['duration']}s load window")
+    cfg.setdefault("watch", [])
+    cfg.setdefault("chaos", [])
+    return cfg
+
+
+def queries_for(cfg: dict, engine: str) -> str | None:
+    """The query file for this engine, or None to fall back to engine defaults.
+
+    Accepts a bare path (all engines) or a mapping keyed by engine name, by
+    family (`solr` / `es`), or `default`.
+    """
+    q = cfg.get("queries")
+    if q is None or isinstance(q, str):
+        return q
+    if not isinstance(q, dict):
+        sys.exit("searchlab: scenario 'queries' must be a path or a mapping of engine -> path")
+    engine = get_engine(engine).name
+    for key in (engine, _FAMILY.get(engine, engine), "default"):
+        if key in q:
+            return q[key]
+    sys.exit(f"searchlab: scenario has no query file for engine '{engine}' — "
+             f"it declares: {', '.join(sorted(q))}")
+
+
+def resolve_node(node: str, spec) -> str:
+    """`node2` -> whatever the running engine calls its second node.
+
+    Nodes are solr2 on Solr, es2 on Elasticsearch, os2 on OpenSearch. A
+    scenario written against one engine's names does nothing on the others —
+    it fails looking for a container that was never going to exist — so
+    scenarios say `nodeN` and the name is resolved here, against the cluster
+    that is actually up. Literal names still pass through untouched.
+    """
+    node = str(node)
+    if not (node.startswith("node") and node[4:].isdigit()):
+        return node
+    index = int(node[4:])
+    names = get_engine(spec.engine).node_names(spec)
+    data_nodes = [n for n in names if not n.startswith("zk")]
+    if not 1 <= index <= len(data_nodes):
+        sys.exit(f"searchlab: scenario wants {node} but the cluster has "
+                 f"{len(data_nodes)} node(s): {', '.join(data_nodes)}")
+    return data_nodes[index - 1]
+
+
+def resolved_chaos(cfg: dict, spec) -> list[dict]:
+    return [{**step, "node": resolve_node(step["node"], spec)}
+            for step in cfg.get("chaos", [])]
+
+
+def cluster_warnings(cfg: dict, spec) -> list[str]:
+    """What differs between the cluster this scenario wants and the one that is
+    running. Advisory on purpose: re-provisioning costs minutes, and a scenario
+    that reproduces weakly is still worth watching — as long as you were told.
+    """
+    want = cfg.get("cluster") or {}
+    out = []
+    if "engine" in want and want["engine"] not in ("any", spec.engine):
+        out.append(f"wants engine {want['engine']}, running {spec.engine}")
+    if "heap" in want and want["heap"] != spec.heap:
+        out.append(f"wants heap {want['heap']}, running {spec.heap} — "
+                   f"a larger heap absorbs the pressure and may hide the effect")
+    if "nodes" in want and int(want["nodes"]) != int(spec.solr_nodes):
+        out.append(f"wants {want['nodes']} node(s), running {spec.solr_nodes}")
+    # solr_opts is a Solr-only concept; repeating it at an OpenSearch cluster
+    # would be exactly the cross-engine nonsense the UI is supposed to avoid.
+    if "solr_opts" in want and spec.engine == "solr":
+        if want["solr_opts"] not in (spec.solr_opts or ""):
+            out.append(f"wants {want['solr_opts']!r}, which the running cluster "
+                       f"does not set — the effect will be weaker")
+    elif "solr_opts" in want:
+        out.append("the commit-interval settings this wants are Solr flags; on "
+                   "ES/OS the equivalent is index.refresh_interval, set per index")
+    return out
+
+
+def to_drill_cfg(cfg: dict, spec) -> dict:
+    """A scenario is a drill with the thinking already done."""
+    load_cfg = dict(cfg["load"])
+    queries = queries_for(cfg, spec.engine)
+    if queries:
+        load_cfg["queries"] = queries
+    return {
+        "collection": cfg["data"]["collection"],
+        "seed": cfg["data"].get("seed"),
+        "load": load_cfg,
+        "chaos": resolved_chaos(cfg, spec),
+        "report": cfg.get("report", cfg["name"]),
+        "assert": cfg.get("assert", []),
+    }
+
+
+def missing_files(cfg: dict, spec) -> list[str]:
+    """Referenced files that are not there.
+
+    Scenarios point at `profiles/` and `queries/` relative to the checkout, so
+    running one from elsewhere fails on the first file it needs. Naming all of
+    them up front beats a traceback from inside the generator on the file that
+    happened to be needed first.
+    """
+    referenced = [cfg["data"]["profile"]]
+    q = queries_for(cfg, spec.engine)
+    if q:
+        referenced.append(q)
+    return [f for f in referenced if not Path(f).is_file()]
+
+
+def plan(cfg: dict, spec) -> dict:
+    """Everything `run` would do, without doing any of it."""
+    data = cfg["data"]
+    load_cfg = cfg["load"]
+    return {
+        "name": cfg["name"],
+        "title": cfg["title"],
+        "engine": spec.engine,
+        "collection": data["collection"],
+        "profile": data["profile"],
+        "count": int(data.get("count", 10_000)),
+        "seed": data.get("seed"),
+        "queries": queries_for(cfg, spec.engine) or "(engine defaults)",
+        "rps": load_cfg["rps"],
+        "duration": load_cfg["duration"],
+        "index_rps": load_cfg.get("index_rps", 0),
+        "chaos": resolved_chaos(cfg, spec),
+        "warnings": cluster_warnings(cfg, spec),
+        "missing": missing_files(cfg, spec),
+        "watch": cfg.get("watch", []),
+        "report": cfg.get("report", cfg["name"]),
+    }

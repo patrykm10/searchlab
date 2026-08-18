@@ -22,6 +22,7 @@ from . import recall as rc
 from . import replay as rpl
 from . import report as rp
 from . import schema as sc
+from . import scenarios as scn
 from . import sweep as sw
 
 
@@ -688,6 +689,168 @@ def report_html(report_json, out):
     out = out or report_json.rsplit(".", 1)[0] + ".html"
     rp.html_report(report_json, out)
     click.echo(f"HTML report written to {out}")
+
+
+# --------------------------------------------------------------- scenario ---
+
+def _scenario_spec():
+    """The running cluster, or Solr defaults so `list`/`show` work offline."""
+    if (cl.WORKDIR / "spec.json").exists():
+        return cl.load_spec(), True
+    return cl.ClusterSpec(), False
+
+
+def _echo_watch(watch):
+    if not watch:
+        return
+    click.echo("\nwhat to watch:")
+    for w in watch:
+        click.echo(f"  - {w}")
+
+
+@main.group("scenario")
+def scenario_grp():
+    """Named reproductions: a data shape, a query mix, faults, and what to watch.
+
+    A scenario is a repro recipe as an object — the recipes the README used to
+    describe in prose, runnable in one command.
+    """
+
+
+@scenario_grp.command("list")
+def scenario_list():
+    """List the available scenarios."""
+    items = scn.catalog()
+    if not items:
+        click.echo("searchlab: no scenarios found — expected a ./scenarios directory")
+        return
+    width = max(len(s["name"]) for s in items)
+    for s in items:
+        if s["error"]:
+            click.echo(f"  {s['name']:<{width}}  (unreadable: {s['error']})")
+        else:
+            click.echo(f"  {s['name']:<{width}}  {s['title']}")
+    click.echo(f"\n{len(items)} scenario(s) — searchlab scenario show <name> for detail")
+
+
+@scenario_grp.command("show")
+@click.argument("name")
+def scenario_show(name):
+    """Explain a scenario: what it does, what it wants, and what to watch."""
+    spec, live = _scenario_spec()
+    cfg = scn.load(name)
+    p = scn.plan(cfg, spec)
+
+    click.echo(f"{p['name']} — {p['title']}\n")
+    if cfg.get("about"):
+        click.echo(cfg["about"].rstrip())
+    click.echo(f"\nengine:     {p['engine']}" + ("" if live else "  (no cluster up — showing defaults)"))
+    click.echo(f"collection: {p['collection']}")
+    click.echo(f"data:       {p['count']:,} docs from {p['profile']}"
+               + (f", seed {p['seed']}" if p["seed"] is not None else ""))
+    click.echo(f"queries:    {p['queries']}")
+    click.echo(f"load:       {p['rps']} rps for {p['duration']}s"
+               + (f", plus {p['index_rps']} doc/s indexing" if p["index_rps"] else ""))
+    if p["chaos"]:
+        click.echo("chaos:")
+        for step in p["chaos"]:
+            click.echo(f"  t={step['at']:>4}s  {step['action']} {step['node']}")
+    if live and p["warnings"]:
+        click.echo("\ncluster mismatch:")
+        for w in p["warnings"]:
+            click.echo(f"  ! {w}")
+    if p["missing"]:
+        click.echo("\nmissing files (scenarios reference the checkout's "
+                   "profiles/ and queries/):")
+        for f in p["missing"]:
+            click.echo(f"  ? {f}")
+    _echo_watch(p["watch"])
+
+
+@scenario_grp.command("run")
+@click.argument("name")
+@click.option("--collection", default=None, help="Override the scenario's collection name.")
+@click.option("--count", default=None, type=int, help="Override the document count.")
+@click.option("--skip-setup", is_flag=True, help="Reuse what is already indexed; go straight to load.")
+@click.option("--dry-run", is_flag=True, help="Print the plan and touch nothing.")
+@click.option("--out", default=None, help="Report basename (default: the scenario's `report`).")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.option("--assert", "assertions", multiple=True, metavar="EXPR",
+              help="Extra regression gate; combined with the scenario's `assert:` list.")
+def scenario_run(name, collection, count, skip_setup, dry_run, out, yes, assertions):
+    """Run a named scenario end to end and write an annotated report."""
+    cfg = scn.load(name)
+    if collection:
+        cfg["data"]["collection"] = collection
+    if count is not None:
+        cfg["data"]["count"] = count
+
+    if not (cl.WORKDIR / "spec.json").exists():
+        if not dry_run:
+            raise SystemExit("searchlab: no cluster — run `searchlab up` first "
+                             "(or `searchlab scenario run --dry-run` to see the plan)")
+        spec = cl.ClusterSpec()
+    else:
+        spec = cl.load_spec()
+    p = scn.plan(cfg, spec)
+
+    click.echo(f"{p['name']} — {p['title']}\n")
+    if cfg.get("about"):
+        click.echo(cfg["about"].rstrip() + "\n")
+    for w in p["warnings"]:
+        click.echo(f"  ! {w}")
+
+    blocking = [f for f in p["missing"]
+                if not (skip_setup and f == p["profile"])]
+    if blocking:
+        raise SystemExit(
+            "searchlab: scenario references files that are not here: "
+            + ", ".join(blocking)
+            + "\n  scenarios point at profiles/ and queries/ relative to the "
+              "repo checkout — run from there, or set $SEARCHLAB_SCENARIOS to "
+              "your own scenario directory")
+
+    setup_line = ("reusing what is already in the collection"
+                  if skip_setup else
+                  f"index {p['count']:,} docs from {p['profile']} into '{p['collection']}'")
+    click.echo(f"\nplan: {setup_line}, then {p['rps']} rps for {p['duration']}s"
+               + (f" with {len(p['chaos'])} chaos step(s)" if p["chaos"] else "")
+               + f" against {p['engine']}")
+
+    if dry_run:
+        _echo_watch(p["watch"])
+        click.echo(f"\ndry run — nothing was touched. Report would be written to {p['report']}.json/.html")
+        return
+
+    if not yes:
+        click.confirm("continue?", abort=True, default=True)
+
+    if not skip_setup:
+        click.echo(f"\n[1/3] collection '{p['collection']}'...")
+        try:
+            cl.create_collection(spec, p["collection"], shards=spec.solr_nodes, replicas=1)
+        except Exception as e:  # already there is the common, harmless case
+            click.echo(f"      (using the existing collection: {e})")
+        data_path = cl.WORKDIR / f"scenario-{p['name']}.jsonl"
+        click.echo(f"[2/3] generating {p['count']:,} docs -> {data_path}...")
+        datagen.generate_to_file(p["profile"], p["count"], data_path, seed=p["seed"])
+        stats = asyncio.run(indexer.index_file(spec.base_url(), p["collection"], data_path,
+                                               threads=4, engine=spec.engine))
+        click.echo(f"      {stats.summary()}")
+    click.echo("[3/3] load" + (" with chaos" if p["chaos"] else "") + "...")
+
+    _echo_watch(p["watch"])
+    click.echo("")
+
+    outcome = asyncio.run(dr.run_drill(spec, scn.to_drill_cfg(cfg, spec), log=click.echo))
+    click.echo("\n" + outcome["result"].summary())
+
+    base = out or p["report"]
+    json_path, html_path = dr.save_drill(outcome, base,
+                                         title=f"searchlab scenario · {p['name']}")
+    click.echo(f"\nreport written to {json_path} and {html_path}")
+    _echo_watch(p["watch"])
+    _check_gates(outcome["result"], list(assertions) + list(cfg.get("assert", [])))
 
 
 if __name__ == "__main__":
