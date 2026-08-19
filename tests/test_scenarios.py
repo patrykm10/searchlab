@@ -373,3 +373,107 @@ def test_shipped_scenarios_use_real_actions(name):
     from searchlab import chaos as ch
     for step in scn.load(name).get("chaos", []):
         assert step["action"] in ch._ACTIONS
+
+
+# ------------------------------------------------------------- redundancy ---
+
+def base_cfg(**over):
+    cfg = {"name": "x", "title": "t",
+           "data": {"collection": "c", "profile": "profiles/default.yaml"},
+           "load": {"rps": 1, "duration": 60}}
+    cfg.update(over)
+    return cfg
+
+
+def test_faults_without_redundancy_are_flagged():
+    """Killing a node in a collection with one copy of each shard demonstrates
+    data loss, not failover. Both engines take `replicas` as copies-per-shard,
+    so 1 leaves nothing to fail over to on either."""
+    cfg = base_cfg(chaos=[{"at": 10, "action": "kill", "node": "node1"}])
+    assert any("fail over" in w for w in scn.cluster_warnings(cfg, spec("solr")))
+
+
+def test_faults_with_redundancy_are_not_flagged():
+    cfg = base_cfg(chaos=[{"at": 10, "action": "kill", "node": "node1"}])
+    cfg["data"]["replicas"] = 2
+    assert not any("fail over" in w for w in scn.cluster_warnings(cfg, spec("solr")))
+
+
+def test_no_redundancy_warning_without_faults():
+    assert not any("fail over" in w for w in scn.cluster_warnings(base_cfg(), spec("solr")))
+
+
+def test_node_loss_asks_for_redundancy():
+    """The flagship fault scenario must actually have something to fail over
+    to, or both fault types collapse into 'half the index is gone'."""
+    assert scn.plan(scn.load("node-loss"), spec("solr", solr_nodes=2))["replicas"] >= 2
+
+
+def test_node_loss_does_not_gate_on_dropped():
+    """A 60s SIGSTOP at 50 rps saturates the in-flight cap by design, so
+    asserting dropped=0 would fail the run precisely when it worked."""
+    assert not any(a.startswith("dropped") for a in scn.load("node-loss").get("assert", []))
+
+
+def test_replicas_defaults_to_one():
+    assert scn.plan(base_cfg(), spec("solr"))["replicas"] == 1
+
+
+# ---------------------------------------------------------------- durations ---
+
+@pytest.mark.parametrize("value,seconds", [("2m", 120), ("90s", 90), (90, 90), ("1h30m", 5400)])
+def test_duration_accepts_what_the_rest_of_the_tool_accepts(value, seconds):
+    """`searchlab load` and `sweep` both take 2m via gates.parse_duration;
+    scenarios were the one place that demanded raw seconds."""
+    cfg = base_cfg()
+    cfg["load"]["duration"] = value
+    assert scn.validate(cfg, "test")["load"]["duration"] == value
+
+
+def test_chaos_window_is_checked_against_the_parsed_duration():
+    cfg = base_cfg(chaos=[{"at": 150, "action": "kill", "node": "node1"}])
+    cfg["load"]["duration"] = "2m"          # 120s, so t=150 is outside
+    with pytest.raises(SystemExit, match="outside"):
+        scn.validate(cfg, "test")
+    cfg["load"]["duration"] = "3m"          # 180s, so t=150 is inside
+    assert scn.validate(cfg, "test")
+
+
+@pytest.mark.parametrize("key", ["rps", "duration"])
+def test_empty_nested_value_gets_a_sentence_not_a_typeerror(key):
+    """Same trap as an empty section, one level down: present, None, and
+    TypeError at the first float()."""
+    cfg = base_cfg(chaos=[{"at": 1, "action": "kill", "node": "node1"}])
+    cfg["load"][key] = None
+    with pytest.raises(SystemExit, match=key):
+        scn.validate(cfg, "test")
+
+
+def test_non_numeric_rps_is_refused():
+    cfg = base_cfg()
+    cfg["load"]["rps"] = "fast"
+    with pytest.raises(SystemExit, match="rps must be a number"):
+        scn.validate(cfg, "test")
+
+
+def test_empty_nested_data_value_is_refused():
+    cfg = base_cfg()
+    cfg["data"]["profile"] = None
+    with pytest.raises(SystemExit, match="profile"):
+        scn.validate(cfg, "test")
+
+
+# ------------------------------------------------------------ preflight ---
+
+def test_missing_index_profile_is_caught_before_the_corpus_is_indexed():
+    """index_profile drives the concurrent write stream, so a typo there
+    previously survived --dry-run and failed only once the load started —
+    after the whole corpus had been indexed."""
+    cfg = base_cfg()
+    cfg["load"]["index_profile"] = "nope/typo.yaml"
+    assert "nope/typo.yaml" in scn.missing_files(cfg, spec("solr"))
+
+
+@pytest.mark.parametrize("name", SHIPPED)
+def test_shipped_index_profiles_exist(name):
+    assert scn.missing_files(scn.load(name), spec("solr")) == []

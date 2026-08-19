@@ -813,7 +813,9 @@ def scenario_run(name, collection, count, skip_setup, dry_run, out, yes, asserti
     setup_line = ("reusing what is already in the collection"
                   if skip_setup else
                   f"index {p['count']:,} docs from {p['profile']} into '{p['collection']}'")
-    click.echo(f"\nplan: {setup_line}, then {p['rps']} rps for {p['duration']}s"
+    click.echo(f"\nplan: {setup_line} ({p['replicas']} cop"
+               f"{'y' if p['replicas'] == 1 else 'ies'} per shard), "
+               f"then {p['rps']} rps for {p['duration']}s"
                + (f" with {len(p['chaos'])} chaos step(s)" if p["chaos"] else "")
                + f" against {p['engine']}")
 
@@ -828,7 +830,8 @@ def scenario_run(name, collection, count, skip_setup, dry_run, out, yes, asserti
     if not skip_setup:
         click.echo(f"\n[1/3] collection '{p['collection']}'...")
         try:
-            cl.create_collection(spec, p["collection"], shards=spec.solr_nodes, replicas=1)
+            cl.create_collection(spec, p["collection"], shards=spec.solr_nodes,
+                                 replicas=p["replicas"])
         except Exception as e:  # already there is the common, harmless case
             click.echo(f"      (using the existing collection: {e})")
         data_path = cl.WORKDIR / f"scenario-{p['name']}.jsonl"

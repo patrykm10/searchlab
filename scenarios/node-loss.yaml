@@ -25,6 +25,11 @@ data:
   profile: profiles/default.yaml
   count: 50000
   seed: 42
+  # Copies per shard, not extra copies: 1 means a single copy and nothing to
+  # fail over to, which turns this scenario into a data-loss demo instead of a
+  # failover one. Solr reads it as replicationFactor, ES/OS as
+  # number_of_replicas + 1, so 2 means redundancy on either engine.
+  replicas: 2
 
 load:
   rps: 50
@@ -51,5 +56,14 @@ watch:
 
 report: node-loss
 
+# No gate on `dropped`. A 60s SIGSTOP at 50 rps schedules ~3,000 requests
+# against a 500-request in-flight cap, so a textbook run of this scenario
+# drops thousands — asserting dropped=0 would fail the run precisely when the
+# scenario worked. Drops ARE the finding here, not the defect.
+#
+# Nor is there a good aggregate gate for "it recovered": the report's metrics
+# are whole-run figures, and an incident followed by a clean recovery averages
+# out to look like mild sickness throughout. Read the timeline instead. The one
+# gate worth having is that the load survived the incident at all.
 assert:
-  - "dropped=0"
+  - "requests>2000"

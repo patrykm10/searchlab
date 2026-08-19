@@ -25,6 +25,7 @@ from pathlib import Path
 
 import yaml
 
+from . import gates
 from .engines import get_engine
 
 _REQUIRED = ("name", "title", "data", "load")
@@ -123,12 +124,22 @@ def validate(cfg: dict, source: str | Path) -> dict:
             sys.exit(f"searchlab: scenario {source} '{key}' must be a mapping, "
                      f"got {type(cfg[key]).__name__}")
     for key in _DATA_REQUIRED:
-        if key not in cfg["data"]:
+        if cfg["data"].get(key) is None:
             sys.exit(f"searchlab: scenario {source} data section needs '{key}'")
     load_cfg = cfg["load"]
     for key in ("rps", "duration"):
-        if key not in load_cfg:
+        # `duration:` with no value is the same trap as an empty section, one
+        # level down: present, None, and TypeError at the first float().
+        if load_cfg.get(key) is None:
             sys.exit(f"searchlab: scenario {source} load section needs '{key}'")
+    # `2m` and `1h30m` work everywhere else in this tool; parse them the same
+    # way here rather than making scenarios the one place that wants seconds.
+    duration = gates.parse_duration(load_cfg["duration"])
+    try:
+        float(load_cfg["rps"])
+    except (TypeError, ValueError):
+        sys.exit(f"searchlab: scenario {source} load rps must be a number, "
+                 f"got {load_cfg['rps']!r}")
     if not isinstance(cfg.get("chaos") or [], list):
         sys.exit(f"searchlab: scenario {source} 'chaos' must be a list of steps")
     for step in cfg.get("chaos") or []:
@@ -149,9 +160,9 @@ def validate(cfg: dict, source: str | Path) -> dict:
         if step["action"] not in _chaos_actions():
             sys.exit(f"searchlab: scenario {source} has unknown chaos action "
                      f"'{step['action']}' — valid: {', '.join(sorted(_chaos_actions()))}")
-        if float(step["at"]) >= float(load_cfg["duration"]):
+        if gates.parse_duration(step["at"]) >= duration:
             sys.exit(f"searchlab: scenario {source} chaos step at t={step['at']} is "
-                     f"outside the {load_cfg['duration']}s load window")
+                     f"outside the {load_cfg['duration']} load window")
     cfg.setdefault("watch", [])
     cfg.setdefault("chaos", [])
     return cfg
@@ -218,6 +229,14 @@ def cluster_warnings(cfg: dict, spec) -> list[str]:
         out.append(f"wants {want['nodes']} node(s), running {spec.solr_nodes}")
     # solr_opts is a Solr-only concept; repeating it at an OpenSearch cluster
     # would be exactly the cross-engine nonsense the UI is supposed to avoid.
+    # Killing a node in a collection with one copy of each shard does not
+    # demonstrate failover, it demonstrates data loss. Both engines take
+    # `replicas` as copies-per-shard here (Solr replicationFactor; ES/OS
+    # number_of_replicas + 1), so 1 means no redundancy on either.
+    if cfg.get("chaos") and int((cfg.get("data") or {}).get("replicas", 1)) < 2:
+        out.append("this scenario injects faults but asks for 1 copy of each "
+                   "shard — there is nothing to fail over to, so a killed node "
+                   "loses data rather than shedding load")
     if "solr_opts" in want and spec.engine == "solr":
         if want["solr_opts"] not in (spec.solr_opts or ""):
             out.append(f"wants {want['solr_opts']!r}, which the running cluster "
@@ -256,6 +275,11 @@ def missing_files(cfg: dict, spec) -> list[str]:
     q = queries_for(cfg, spec.engine)
     if q:
         referenced.append(q)
+    # index_profile drives the concurrent write stream. Missing it fails only
+    # once the load starts, i.e. after the whole corpus has been indexed.
+    index_profile = (cfg.get("load") or {}).get("index_profile")
+    if index_profile:
+        referenced.append(index_profile)
     return [f for f in referenced if not Path(f).is_file()]
 
 
@@ -270,6 +294,7 @@ def plan(cfg: dict, spec) -> dict:
         "collection": data["collection"],
         "profile": data["profile"],
         "count": int(data.get("count", 10_000)),
+        "replicas": int(data.get("replicas", 1)),
         "seed": data.get("seed"),
         "queries": queries_for(cfg, spec.engine) or "(engine defaults)",
         "rps": load_cfg["rps"],
