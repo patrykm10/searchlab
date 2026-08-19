@@ -72,7 +72,7 @@ def catalog() -> list[dict]:
                     "path": path,
                     "error": None,
                 }
-            except yaml.YAMLError as e:
+            except (yaml.YAMLError, OSError, UnicodeDecodeError) as e:
                 found[path.stem] = {"name": path.stem, "title": "", "about": "",
                                     "path": path, "error": str(e)}
     return [found[k] for k in sorted(found)]
@@ -98,6 +98,8 @@ def load(name: str) -> dict:
         cfg = yaml.safe_load(path.read_text()) or {}
     except yaml.YAMLError as e:
         sys.exit(f"searchlab: scenario {path} is not valid YAML — {e}")
+    except (OSError, UnicodeDecodeError) as e:
+        sys.exit(f"searchlab: scenario {path} could not be read — {e}")
     return validate(cfg, path)
 
 
@@ -105,8 +107,14 @@ def validate(cfg: dict, source: str | Path) -> dict:
     if not isinstance(cfg, dict):
         sys.exit(f"searchlab: scenario {source} must be a YAML mapping")
     for key in _REQUIRED:
-        if key not in cfg:
+        if cfg.get(key) is None:
+            # `data:` with nothing indented under it is valid YAML yielding
+            # None, so presence is not enough — ask for the value.
             sys.exit(f"searchlab: scenario {source} needs a '{key}' section")
+    for key in ("data", "load"):
+        if not isinstance(cfg[key], dict):
+            sys.exit(f"searchlab: scenario {source} '{key}' must be a mapping, "
+                     f"got {type(cfg[key]).__name__}")
     for key in _DATA_REQUIRED:
         if key not in cfg["data"]:
             sys.exit(f"searchlab: scenario {source} data section needs '{key}'")
@@ -114,6 +122,8 @@ def validate(cfg: dict, source: str | Path) -> dict:
     for key in ("rps", "duration"):
         if key not in load_cfg:
             sys.exit(f"searchlab: scenario {source} load section needs '{key}'")
+    if not isinstance(cfg.get("chaos") or [], list):
+        sys.exit(f"searchlab: scenario {source} 'chaos' must be a list of steps")
     for step in cfg.get("chaos") or []:
         if "at" not in step or "action" not in step or "node" not in step:
             sys.exit(f"searchlab: scenario {source} chaos step {step} needs at/action/node")

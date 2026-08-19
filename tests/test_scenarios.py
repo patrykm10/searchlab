@@ -262,3 +262,55 @@ def test_own_scenarios_shadow_the_shipped_ones(tmp_path, monkeypatch):
         "load: {rps: 1, duration: 10}\n")
     monkeypatch.setenv("SEARCHLAB_SCENARIOS", str(tmp_path))
     assert scn.load("deep-paging")["title"] == "Mine instead"
+
+
+# ------------------------------------------------ malformed but valid YAML ---
+
+@pytest.mark.parametrize("section", ["data", "load", "name", "title"])
+def test_empty_section_gets_the_clean_message_not_a_typeerror(section):
+    """`data:` with nothing indented under it is valid YAML yielding None.
+    Presence is not enough — every other path here exits with a sentence, and
+    this one used to raise TypeError from inside the membership test."""
+    cfg = {"name": "x", "title": "t", "data": {"collection": "c", "profile": "p"},
+           "load": {"rps": 1, "duration": 1}}
+    cfg[section] = None
+    with pytest.raises(SystemExit, match=section):
+        scn.validate(cfg, "test")
+
+
+@pytest.mark.parametrize("section", ["data", "load"])
+def test_scalar_where_a_mapping_belongs_is_refused(section):
+    cfg = {"name": "x", "title": "t", "data": {"collection": "c", "profile": "p"},
+           "load": {"rps": 1, "duration": 1}}
+    cfg[section] = "oops"
+    with pytest.raises(SystemExit, match="must be a mapping"):
+        scn.validate(cfg, "test")
+
+
+def test_chaos_must_be_a_list():
+    cfg = {"name": "x", "title": "t", "data": {"collection": "c", "profile": "p"},
+           "load": {"rps": 1, "duration": 1}, "chaos": {"at": 1}}
+    with pytest.raises(SystemExit, match="list of steps"):
+        scn.validate(cfg, "test")
+
+
+def test_one_unreadable_file_does_not_take_down_the_listing(tmp_path, monkeypatch):
+    """catalog() promises a broken scenario the user can see over one that
+    silently is not there. It caught YAMLError only, so a file that is not
+    valid UTF-8 raised out of the loop and killed the whole listing."""
+    (tmp_path / "fine.yaml").write_text(
+        "name: fine\ntitle: Fine\ndata: {collection: c, profile: p}\n"
+        "load: {rps: 1, duration: 1}\n")
+    (tmp_path / "binary.yaml").write_bytes(b"\xff\xfe\x00\x01 not utf-8")
+    monkeypatch.setenv("SEARCHLAB_SCENARIOS", str(tmp_path))
+
+    listed = {s["name"]: s for s in scn.catalog()}
+    assert "fine" in listed and listed["fine"]["error"] is None
+    assert "binary" in listed and listed["binary"]["error"]
+
+
+def test_unparseable_yaml_is_listed_with_its_error(tmp_path, monkeypatch):
+    (tmp_path / "broken.yaml").write_text("name: broken\n  bad: [indent\n")
+    monkeypatch.setenv("SEARCHLAB_SCENARIOS", str(tmp_path))
+    entry = next(s for s in scn.catalog() if s["name"] == "broken")
+    assert entry["error"]
