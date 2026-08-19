@@ -36,6 +36,13 @@ _DATA_REQUIRED = ("collection", "profile")
 _FAMILY = {"solr": "solr", "elasticsearch": "es", "opensearch": "es"}
 
 
+def _chaos_actions() -> dict:
+    """The one real registry of fault actions, imported late to keep this
+    module importable without the docker-facing code."""
+    from . import chaos
+    return chaos._ACTIONS
+
+
 def catalog_dirs() -> list[Path]:
     """Where scenarios are looked for: your own directory first, then the ones
     in the checkout.
@@ -134,6 +141,14 @@ def validate(cfg: dict, source: str | Path) -> dict:
                      f"a mapping with at/action/node")
         if "at" not in step or "action" not in step or "node" not in step:
             sys.exit(f"searchlab: scenario {source} chaos step {step} needs at/action/node")
+        # Having an `action` is not the same as having a real one. A scenario
+        # goes to run_drill() through to_drill_cfg(), so load_drill()'s own
+        # check never runs on this path — without this, `unpuase` costs a
+        # collection, 150k indexed documents and the start of a load test
+        # before failing as a bare KeyError from inside the chaos thread.
+        if step["action"] not in _chaos_actions():
+            sys.exit(f"searchlab: scenario {source} has unknown chaos action "
+                     f"'{step['action']}' — valid: {', '.join(sorted(_chaos_actions()))}")
         if float(step["at"]) >= float(load_cfg["duration"]):
             sys.exit(f"searchlab: scenario {source} chaos step at t={step['at']} is "
                      f"outside the {load_cfg['duration']}s load window")

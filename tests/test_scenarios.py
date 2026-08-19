@@ -330,3 +330,46 @@ def test_chaos_step_that_is_not_a_mapping_is_refused(step):
            "load": {"rps": 1, "duration": 60}, "chaos": [step]}
     with pytest.raises(SystemExit, match="must be a mapping|needs at/action/node"):
         scn.validate(cfg, "test")
+
+
+# ------------------------------------------------------ unknown chaos action ---
+
+def test_unknown_chaos_action_is_refused_before_anything_is_touched():
+    """A scenario reaches run_drill() via to_drill_cfg(), so load_drill()'s own
+    action check never runs on this path. Without a check here, `unpuase` costs
+    a collection, 150k indexed docs and the start of a load test before failing
+    as a bare KeyError from inside the chaos thread."""
+    cfg = {"name": "x", "title": "t", "data": {"collection": "c", "profile": "p"},
+           "load": {"rps": 1, "duration": 60},
+           "chaos": [{"at": 10, "action": "explode", "node": "node1"}]}
+    with pytest.raises(SystemExit, match="unknown chaos action"):
+        scn.validate(cfg, "test")
+
+
+def test_the_typo_that_motivated_it():
+    cfg = {"name": "x", "title": "t", "data": {"collection": "c", "profile": "p"},
+           "load": {"rps": 1, "duration": 60},
+           "chaos": [{"at": 10, "action": "unpuase", "node": "node1"}]}
+    with pytest.raises(SystemExit, match="unpuase"):
+        scn.validate(cfg, "test")
+
+
+@pytest.mark.parametrize("action", ["kill", "pause", "unpause", "start", "restart"])
+def test_every_real_action_is_accepted(action):
+    cfg = {"name": "x", "title": "t", "data": {"collection": "c", "profile": "p"},
+           "load": {"rps": 1, "duration": 60},
+           "chaos": [{"at": 10, "action": action, "node": "node1"}]}
+    assert scn.validate(cfg, "test")["chaos"][0]["action"] == action
+
+
+def test_scenarios_and_drill_agree_on_what_an_action_is():
+    """Three places now state this rule; they must all read one registry."""
+    from searchlab import chaos as ch
+    assert set(scn._chaos_actions()) == set(ch._ACTIONS)
+
+
+@pytest.mark.parametrize("name", SHIPPED)
+def test_shipped_scenarios_use_real_actions(name):
+    from searchlab import chaos as ch
+    for step in scn.load(name).get("chaos", []):
+        assert step["action"] in ch._ACTIONS
