@@ -314,3 +314,19 @@ def test_unparseable_yaml_is_listed_with_its_error(tmp_path, monkeypatch):
     monkeypatch.setenv("SEARCHLAB_SCENARIOS", str(tmp_path))
     entry = next(s for s in scn.catalog() if s["name"] == "broken")
     assert entry["error"]
+
+
+@pytest.mark.parametrize("step", [
+    "at action node",   # contains all three keys AS SUBSTRINGS: the crash case
+    "pause node2",      # contains none: exited cleanly even before the fix
+    ["at", "action"],
+    42,
+])
+def test_chaos_step_that_is_not_a_mapping_is_refused(step):
+    """`"at" not in step` is a substring test on a string, so a step reading
+    "at action node" satisfied all three key guards and crashed on step["at"].
+    The plausible wording was the one that broke; the implausible one did not."""
+    cfg = {"name": "x", "title": "t", "data": {"collection": "c", "profile": "p"},
+           "load": {"rps": 1, "duration": 60}, "chaos": [step]}
+    with pytest.raises(SystemExit, match="must be a mapping|needs at/action/node"):
+        scn.validate(cfg, "test")

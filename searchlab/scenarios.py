@@ -125,6 +125,13 @@ def validate(cfg: dict, source: str | Path) -> dict:
     if not isinstance(cfg.get("chaos") or [], list):
         sys.exit(f"searchlab: scenario {source} 'chaos' must be a list of steps")
     for step in cfg.get("chaos") or []:
+        # `"at" not in step` is a SUBSTRING test when step is a string, not a
+        # key test — so the plausible-looking `- "at action node"` satisfied all
+        # three guards and then crashed on step["at"], while `- "pause node2"`
+        # exited cleanly. Same authoring mistake, opposite outcomes.
+        if not isinstance(step, dict):
+            sys.exit(f"searchlab: scenario {source} chaos step {step!r} must be "
+                     f"a mapping with at/action/node")
         if "at" not in step or "action" not in step or "node" not in step:
             sys.exit(f"searchlab: scenario {source} chaos step {step} needs at/action/node")
         if float(step["at"]) >= float(load_cfg["duration"]):
