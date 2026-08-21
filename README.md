@@ -68,6 +68,7 @@ searchlab is **open-loop**: requests fire on a fixed wall-clock schedule derived
 | `chaos kill/pause/unpause/start/restart` | Fault injection on individual nodes |
 | `chaos run scenario.yaml` | Timed fault steps only (see `examples/chaos-node-loss.yaml`) |
 | `drill drill.yaml` | Full orchestrated drill: load + chaos + metrics, one annotated report |
+| `scenario list/show/run` | Named reproductions — a data shape, a query mix, faults, and what to watch |
 | `sweep sweep.yaml` | One workload x a config matrix, fresh cluster per cell, comparison table |
 | `dashboard` | The control panel: drive the cluster, tune it live, build queries, read the incident timeline (`--demo` to preview) |
 | `schema` | Explicit schema fields derived from a data profile (`--dry-run` to inspect) |
@@ -134,6 +135,21 @@ On ES/OS the builder speaks the query DSL rather than Solr's params, and **rende
 Parameters are gated to the clauses that accept them, so a control that is hidden is also absent from the request; where the engine would reject a combination outright — fuzziness on a phrase type — it is refused up front with the reason instead of arriving as a shard failure. Faceted buckets stay clickable to drill in, and a raw filter box remains as the escape hatch for what the menus cannot say.
 
 Solr keeps its own parsers, wording, and text boxes.
+
+## Semantic search — vectors as a relevance problem
+
+The other use of the same technology, and it is worth keeping the two apart:
+this half asks "did it return the right documents", which needs real text and a
+judgement about what *right* means. Synthetic vectors cannot answer it, and the
+[ANN tuning](#ann-tuning--vectors-as-a-performance-problem) loop below cannot either — that one measures speed and recall against
+brute force, not whether an answer was any good. Confusing the two is the fastest
+way to conclude that semantic search is either magic or broken.
+
+**From the control panel**, for an index you already have: load an embedding model (MiniLM, BGE small/base, or Nomic — `pip install 'searchlab[embed]'`), pick a text field, and press **Embed documents**. It reads every document back, embeds the field, and writes the vector on — which is also exactly what a real re-embedding migration looks like, so it is worth watching and timing. After that, **semantic** mode in the query builder searches by meaning, next to the lexical query you just built.
+
+Two things it tells you rather than hides. Re-embedding with a differently sized model is refused up front, because a mapped vector dimension cannot be changed. And on OpenSearch, an index that was not built for vectors has to be closed, reconfigured and reopened to enable `index.knn` — briefly unavailable, which is reported because on a real cluster it is an outage to plan for. (Lab-created indexes already set it, so they skip that.)
+
+The model lives in the dashboard process, so restarting the server drops it and the **Embed documents** button disables itself until one is loaded again.
 
 ## Solr and OpenSearch are not the same shape
 
@@ -239,13 +255,14 @@ searchlab explain --collection products "q=title_t:Merging&fq=category_s:x"
 
 `explain` runs the query with `debug=true` and translates: what your query *became* after the analysis chain (the "you wrote / solr ran" diff makes stemming and synonyms visible), where the time went per search component with the dominant one flagged, and the top document's score tree pruned to the readable part.
 
-## Vector search
+## ANN tuning — vectors as a performance problem
 
-**From the control panel**, for an index you already have: load an embedding model (MiniLM, BGE small/base, or Nomic — `pip install 'searchlab[embed]'`), pick a text field, and press **Embed documents**. It reads every document back, embeds the field, and writes the vector on — which is also exactly what a real re-embedding migration looks like, so it is worth watching and timing. After that, **semantic** mode in the query builder searches by meaning.
-
-Two things it tells you rather than hides. Re-embedding with a differently sized model is refused up front, because a mapped vector dimension cannot be changed. And on OpenSearch, an index that was not built for vectors has to be closed, reconfigured and reopened to enable `index.knn` — briefly unavailable, which is reported because on a real cluster it is an outage to plan for. (Lab-created indexes already set it, so they skip that.)
-
-**From the CLI**, the full loop for dense vectors on all three engines:
+This half asks "how fast, and how wrong?" The vectors are meaningless on
+purpose: HNSW does not care what a vector means, only how the vectors are
+distributed, so synthetic ones are the right tool and real embeddings would
+only slow the loop down. If your question is instead "did it return the right
+documents", you want [semantic search](#semantic-search--vectors-as-a-relevance-problem)
+— different question, different data, further up this page.
 
 ```
 searchlab up --heap 2g
@@ -337,20 +354,47 @@ Assertions are validated before the run starts (typos fail fast, not after two m
 
 ## Repro recipes
 
-**GC pressure from faceting:**
+The pathologies people talk about, as things the tool does rather than
+instructions you follow:
+
 ```
-searchlab up --heap 512m --gc-logs
-searchlab create-collection events
-searchlab gen --profile profiles/high-cardinality.yaml --count 500000 --out events.jsonl
-searchlab index --collection events --file events.jsonl --threads 8
-# facet on user_id_s at load, watch GC logs / Grafana
+searchlab scenario list
+searchlab scenario show facet-pressure     # what it does, and what to look at
+searchlab scenario run facet-pressure      # --dry-run to see the plan first
 ```
 
-**Commit storm:** set `--solr-opts "-Dsolr.autoSoftCommit.maxTime=500"` and run `load` with `--index-rps 50`.
+| Scenario | What it reproduces |
+|---|---|
+| `facet-pressure` | Faceting a near-unique field: cost scales with distinct values, not hits |
+| `merge-storm` | Merges landing on the disk your queries are using — the p99 sawtooth |
+| `deep-paging` | The offset cliff, and why page 1 tells you nothing about page 9,900 |
+| `node-loss` | A frozen node (SIGSTOP) against a killed one — usually the freeze hurts more |
 
-**Version regression:** run the identical `gen`/`index`/`load` sequence (same `--seed`) against `--solr-version 8.11.2` and `9.6`, then `searchlab compare v8.json v9.json --html regression.html`.
+A scenario declares the data shape, the query mix, the cluster it wants, any
+faults to inject, and — the part that makes it a lesson rather than a run —
+**what to watch while it happens**, printed before the load starts and again
+next to the report.
 
-**Node failure under load:** start a long `load` run, `chaos pause solr2` mid-run, and read the story in the report timeline (p99 spike, error dots) plus `metrics --watch 5`.
+Two details that make them portable. Query mixes are per engine family, because
+Solr speaks params and ES/OS speak a JSON body; a scenario that shipped only one
+would fail as a run of uniform errors, which reads as a broken cluster. And
+chaos steps name `node2` rather than `solr2`, resolved against whatever is
+actually running — a drill written on Solr that silently does nothing on
+OpenSearch is the failure this codebase keeps rediscovering.
+
+Each mix deliberately runs the pathological query *next to* its cheap
+equivalent, so the per-template breakdown in the report is the finding:
+`facet_high_cardinality` against `facet_low_cardinality`, `page_deep` against
+`page_shallow`, on identical documents at the same moment.
+
+Scenarios are plain YAML in `scenarios/`; writing one for your own workload is a
+text file away. They run on `drill`, so every scenario produces the same
+annotated HTML report and accepts the same `--assert` gates.
+
+**Version regression** is the one recipe that stays manual, because it spans two
+clusters: run the identical `gen`/`index`/`load` sequence (same `--seed`) against
+`--solr-version 8.11.2` and `9.6`, then
+`searchlab compare v8.json v9.json --html regression.html`.
 
 ## Tests
 

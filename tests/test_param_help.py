@@ -106,7 +106,11 @@ def test_the_params_worth_translating_are_covered(help_entries):
     """The ones whose names differ between engines are exactly the ones
     someone coming from the other engine goes looking for."""
     for key in ["q-msm", "q-tiebreak", "q-slop", "q-fuzziness", "q-operator",
-                "q-qf", "q-rows", "q-fq", "q-from"]:
+                "q-qf", "q-rows", "q-fq", "q-from", "q-highlight",
+                # the proximity and boosting knobs: the same three ideas
+                # either side, under names that share not one letter
+                "q-pf", "q-ps", "q-bf", "q-boostfn", "q-boostfield",
+                "q-boostmode"]:
         assert key in help_entries, key
         variants = help_entries[key]
         assert any(len(e) > 1 for e in variants.values()), (
@@ -114,13 +118,46 @@ def test_the_params_worth_translating_are_covered(help_entries):
 
 
 def test_solr_only_and_es_only_params_are_not_given_both(help_entries):
-    """tie_breaker and slop have no Solr control on this form; offering
-    Solr text for them would describe a box that is not there."""
-    for key in ["q-mmtype", "q-tiebreak", "q-slop", "q-fuzziness", "q-tth",
-                "q-from", "q-minscore", "q-src", "q-conds"]:
+    """Help for a control the running engine does not show would describe a
+    box that is not there. So a parameter one engine genuinely lacks gets
+    text for the other engine only — the cross-engine line is where its
+    absence gets explained instead."""
+    es_only = [
+        "q-mmtype",          # Solr picks a parser, not a combining strategy
+        "q-fuzziness",       # Solr writes it inline, as term~1
+        "q-prefixlen", "q-maxexp", "q-transpose",   # ~ takes no such options
+        "q-boostfield", "q-boostmod", "q-boostmode",  # Solr writes functions
+        "q-tth", "q-minscore", "q-src", "q-conds",
+    ]
+    solr_only = [
+        # the pf family builds a phrase query out of the query words; ES has
+        # no parameter for it, you write the clause yourself
+        "q-pf", "q-pf2", "q-pf3", "q-ps", "q-ps2", "q-ps3",
+        "q-bq", "q-bf", "q-boostfn",
+        "q-sort", "q-fl", "q-facet", "q-facet-limit",
+    ]
+    for key in es_only:
         assert "solr" not in help_entries[key], key
-    for key in ["q-sort", "q-fl", "q-facet", "q-facet-limit"]:
+    for key in solr_only:
         assert "es" not in help_entries[key], key
+
+
+def test_the_proximity_family_is_all_present(help_entries):
+    """Phrase boosting is the half of edismax that slop exists for: ps with
+    no pf is slop on a phrase query that was never built. Documenting one
+    without the other is what left this form looking like it had no
+    proximity controls at all."""
+    for key in ["q-pf", "q-ps", "q-pf2", "q-ps2", "q-pf3", "q-ps3"]:
+        assert key in help_entries, key
+    assert "pf" in help_entries["q-ps"]["solr"][0]
+
+
+def test_both_engines_can_rank_by_a_field_value(help_entries):
+    """bf/boost and function_score are the same feature, and the one thing
+    worth carrying across is which of them multiplies and which adds."""
+    assert "multiply" in help_entries["q-boostmode"]["es"][0]
+    assert "bf" in help_entries["q-boostmode"]["es"][1]
+    assert "multiplied" in help_entries["q-boostfn"]["solr"][0]
 
 
 def test_doc_links_point_at_the_official_documentation(doc_roots):

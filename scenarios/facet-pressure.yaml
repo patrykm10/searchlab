@@ -1,0 +1,43 @@
+name: facet-pressure
+title: High-cardinality facet pressure
+about: |
+  Faceting on a near-unique field is the classic way to turn a healthy cluster
+  into a heap problem. The engine has to build and hold a per-value structure
+  across every matching document, so cost scales with the number of DISTINCT
+  values, not with the number of documents you get back — a facet that returns
+  100 buckets can still touch 150,000 of them to decide which 100 to send.
+
+  The workload faces three ways at once: a facet over an effectively unique
+  field, a facet over a 20-value field, and a plain search. Same cluster, same
+  documents, same moment. Read `per template` in the summary — the gap between
+  those three p99s is the whole lesson, and it is a gap you cannot see if you
+  only ever run the pathological query on its own.
+
+  Pair with a small heap to make it bite: the cost is memory before it is time.
+
+cluster:
+  heap: 512m
+  nodes: 2
+
+data:
+  collection: events
+  profile: profiles/high-cardinality.yaml
+  count: 150000
+  seed: 42
+
+load:
+  rps: 30
+  duration: 120
+  ramp: 15
+
+queries:
+  solr: queries/facet-pressure.yaml
+  es: queries/facet-pressure-es.yaml
+
+watch:
+  - "per-template p99: facet_high_cardinality against facet_low_cardinality — expect an order of magnitude, on identical documents"
+  - "heap climbs and stays climbed; the facet structure is held, not streamed"
+  - "cache hit ratio stays low no matter how long you run — every facet is rebuilt, there is nothing to reuse"
+  - "if p99 is flat, the field is not unique enough: raise `length` on user_id_s in the profile, or raise count"
+
+report: facet-pressure

@@ -1,6 +1,13 @@
-# Vector search lab profile: 500k of these at dims 384 gives HNSW something
-# real to chew on. Vectors are generated around 16 centroids (clustered like
-# real embeddings — uniform random vectors are pathological for ANN).
+# ANN tuning profile — vectors as a PERFORMANCE problem. 500k of these at
+# dims 384 gives HNSW something real to chew on. Vectors are generated around
+# 16 centroids (clustered like real embeddings — uniform random vectors are
+# pathological for ANN).
+#
+# These vectors mean nothing, on purpose: HNSW cares how vectors are
+# distributed, not what they represent, so synthetic ones measure speed and
+# recall honestly. They cannot tell you whether an answer was any GOOD — for
+# that you need real text and the dashboard's semantic search, which is a
+# different question with a different setup.
 fields:
   id:
     type: id

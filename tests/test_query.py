@@ -32,7 +32,18 @@ def test_parser_and_qf_only_sent_for_dismax_family():
 def test_blank_inputs_are_dropped_not_sent_empty():
     p = build_params({"q": "  ", "sort": "  ", "fl": "", "fq": ["", "  "]})
     assert p["q"] == "*:*"             # blank query means match all
-    assert "sort" not in p and "fl" not in p and "fq" not in p
+    assert "sort" not in p and "fq" not in p
+    # fl is the exception: it always asks for the score, which Solr otherwise
+    # withholds, and "*" keeps the everything-by-default it would have had
+    assert p["fl"] == "*,score"
+
+
+def test_the_score_is_always_asked_for():
+    """Solr returns it only when fl names it, unlike ES which puts _score on
+    every hit. Without it the boosting parameters are invisible — you can see
+    the order change but not by how much, which is the half worth reading."""
+    assert build_params({"q": "boots", "fl": "id,title_t"})["fl"] == \
+        "id,title_t,score"
 
 
 def test_repeated_filters_are_preserved_as_a_list():
@@ -87,6 +98,10 @@ async def mock_solr(aiohttp_server):
             ]},
             "facet_counts": {"facet_fields": {"category_s": ["books", 12, "toys", 3]}},
         }
+        if request.rel_url.query.get("hl") == "true":
+            # Solr returns one block keyed by id, beside the documents
+            body["highlighting"] = {"a": {"title_t": ["<em>One</em> boot"]},
+                                    "b": {}}
         if request.rel_url.query.get("debug") == "true":
             body["debug"] = {
                 "rawquerystring": "boot",
@@ -210,3 +225,95 @@ async def test_solr_errors_come_back_readable_with_the_url(mock_solr):
     assert out["ok"] is False
     assert "undefined field nope" in out["error"]
     assert "select" in out["url"]
+
+
+# ------------------------------------------- proximity, boosting and paging ---
+
+def test_the_dismax_family_scoring_params_reach_solr():
+    p = build_params({
+        "q": "running shoes", "parser": "edismax", "qf": "title_t^3 body_t",
+        "operator": "and", "minimum_should_match": "75%", "tie_breaker": 0.3,
+        "qs": 1, "pf": "title_t^5", "ps": 2, "pf2": "title_t^3", "ps2": 1,
+        "pf3": "title_t^2", "ps3": 0, "bq": "category_s:shoes^2",
+        "bf": "log(popularity_i)", "boost": "recip(rord(ts_dt),1,1000,1000)",
+    })
+    assert p["q.op"] == "AND"          # accepted lowercase, sent as Solr wants
+    assert (p["mm"], p["tie"], p["qs"]) == ("75%", 0.3, 1)
+    assert (p["pf"], p["ps"]) == ("title_t^5", 2)
+    assert (p["pf2"], p["ps2"], p["pf3"], p["ps3"]) == ("title_t^3", 1, "title_t^2", 0)
+    assert p["bq"] == "category_s:shoes^2"
+    assert p["bf"] == "log(popularity_i)"
+    assert p["boost"] == "recip(rord(ts_dt),1,1000,1000)"
+
+
+def test_q_op_is_sent_for_lucene_too():
+    """q.op is read by the standard parser, unlike the rest of them."""
+    p = build_params({"q": "boots", "parser": "lucene", "operator": "AND"})
+    assert p["q.op"] == "AND" and "defType" not in p
+
+
+def test_a_param_the_parser_would_ignore_is_refused_not_dropped():
+    """Solr answers an unknown param by ignoring it, so mm under lucene looks
+    like it worked and changes nothing. Silence is the failure mode worth
+    guarding against — the form should say so instead."""
+    with pytest.raises(ValueError, match="dismax and edismax"):
+        build_params({"q": "boots", "parser": "lucene",
+                      "minimum_should_match": "2"})
+
+
+def test_edismax_only_params_are_refused_on_dismax():
+    for key in ("pf2", "pf3"):
+        with pytest.raises(ValueError, match="edismax"):
+            build_params({"q": "boots", "parser": "dismax", key: "title_t"})
+    with pytest.raises(ValueError, match="edismax"):
+        build_params({"q": "boots", "parser": "dismax", "boost": "log(x_i)"})
+
+
+def test_phrase_slop_without_phrase_fields_is_refused():
+    """ps is the slop on the phrase pf builds; alone it is a control that
+    silently does nothing, which is the whole bug class this guards."""
+    with pytest.raises(ValueError, match="changes nothing"):
+        build_params({"q": "boots", "parser": "edismax", "ps": 2})
+    # with pf present it is exactly what you want
+    p = build_params({"q": "boots", "parser": "edismax", "pf": "title_t", "ps": 2})
+    assert p["ps"] == 2
+
+
+def test_slop_and_tie_are_range_checked():
+    with pytest.raises(ValueError, match="tie must be between"):
+        build_params({"q": "b", "parser": "edismax", "tie_breaker": 2})
+    with pytest.raises(ValueError, match="qs must be between"):
+        build_params({"q": "b", "parser": "edismax", "qs": 500})
+    with pytest.raises(ValueError, match="must be a number"):
+        build_params({"q": "b", "parser": "edismax", "tie_breaker": "half"})
+
+
+def test_start_and_highlighting_are_built():
+    p = build_params({"q": "boots", "start": 20, "highlight": "title_t, body_t"})
+    assert p["start"] == 20
+    # hl.fl alone does nothing without hl=true, which is easy to forget
+    assert p["hl"] == "true" and p["hl.fl"] == "title_t,body_t"
+    assert "hl" not in build_params({"q": "boots"})
+
+
+def test_start_is_capped_at_the_deep_paging_wall():
+    with pytest.raises(ValueError, match="Start must be between"):
+        build_params({"q": "boots", "start": 50_000})
+
+
+async def test_highlight_fragments_are_returned_beside_the_documents(mock_solr):
+    """Solr keys them by id rather than hanging them off each document, so
+    they are passed through in that shape — the ES side is re-keyed to match,
+    and one renderer serves both."""
+    spec = ClusterSpec(base_port=mock_solr.port)
+    out = await asyncio.to_thread(run_query, spec, "products",
+                                  {"q": "boot", "highlight": "title_t"})
+    assert out["highlights"]["a"] == {"title_t": ["<em>One</em> boot"]}
+
+
+async def test_no_highlighting_asked_for_means_an_empty_block(mock_solr):
+    """An empty dict rather than a missing key, so the renderer never has to
+    tell "not asked for" from "asked for and nothing matched"."""
+    spec = ClusterSpec(base_port=mock_solr.port)
+    out = await asyncio.to_thread(run_query, spec, "products", {"q": "boot"})
+    assert out["highlights"] == {}

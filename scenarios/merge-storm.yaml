@@ -1,0 +1,51 @@
+name: merge-storm
+title: Merge storm under mixed load
+about: |
+  Merges are invisible until they are not. Sustained indexing produces a stream
+  of small segments; the merge policy keeps consolidating them in the
+  background, and background is fine — until a large merge lands on the same
+  disk and CPU your queries are using. Query latency then develops a sawtooth
+  that has nothing to do with the queries.
+
+  This scenario runs queries and indexing at the same time, on purpose. Neither
+  alone reproduces it: index-only shows merge cost with no victim, query-only
+  shows a flat line. The pathology lives in the overlap, which is why the load
+  generator can drive both from one schedule.
+
+  Aggressive commit intervals make it far worse, because each commit closes the
+  current segment and starts a new one. That knob is a JVM/index setting rather
+  than a query parameter, so the scenario declares the cluster it wants and
+  warns if yours differs. On ES/OS the same lever is `index.refresh_interval`,
+  which is a per-index setting rather than a JVM flag — the dashboard's commit sliders can also drive it live
+  while this runs, which is the more instructive way to watch it.
+
+cluster:
+  heap: 1g
+  nodes: 2
+  solr_opts: "-Dsolr.autoSoftCommit.maxTime=500 -Dsolr.autoCommit.maxTime=5000"
+
+data:
+  collection: products
+  profile: profiles/default.yaml
+  count: 50000
+  seed: 42
+
+load:
+  rps: 40
+  duration: 180
+  ramp: 15
+  index_rps: 40
+  index_profile: profiles/default.yaml
+
+queries:
+  solr: queries/default.yaml
+  es: queries/es-default.yaml
+
+watch:
+  - "p99 sawtooth in the timeline — peaks are merges landing, not slow queries"
+  - "segment count climbing then dropping in steps; each drop is a merge completing"
+  - "the metrics diff after the run: merges started against merges completed, and time spent merging"
+  - "cache hit ratio collapsing on every commit — a new searcher throws the old caches away"
+  - "turn the soft commit slider down in the dashboard mid-run and watch the sawtooth get denser"
+
+report: merge-storm

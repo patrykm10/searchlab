@@ -1,0 +1,29 @@
+# Facet pressure, elasticsearch/opensearch. Same three-way contrast as the Solr
+# file: a terms aggregation over a near-unique keyword, over a 20-value keyword,
+# and no aggregation at all.
+#
+# Note the `.keyword` suffix. Dynamic mapping makes a string field `text` (for
+# matching) with a `keyword` subfield (for exact values); aggregating on the
+# analysed half fails outright, which is its own useful lesson.
+queries:
+  - name: facet_high_cardinality
+    weight: 6
+    body:
+      size: 0
+      aggs:
+        by_user:
+          terms: { field: user_id_s.keyword, size: 100 }
+
+  - name: facet_low_cardinality
+    weight: 2
+    body:
+      size: 0
+      aggs:
+        by_event:
+          terms: { field: event_s.keyword, size: 20 }
+
+  - name: plain_search
+    weight: 2
+    body:
+      query: { match: { payload_t: "{RAND_WORD}" } }
+      size: 10

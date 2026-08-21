@@ -1,0 +1,23 @@
+# Deep paging, Solr. Two templates, identical except for `start`, so the
+# report's per-template p99 shows the cliff directly.
+#
+# Why it costs: to return rows 99000-99010 the engine still ranks and holds
+# 99010 candidates per shard, then throws almost all of them away. Cost grows
+# with `start`, not with `rows` — which is why page 1 is free and page 9900
+# is not. cursorMark is the fix, and it is stateless on Solr.
+queries:
+  - name: page_shallow
+    weight: 5
+    params:
+      q: "*:*"
+      sort: "id asc"
+      start: "{RAND_INT:0:100}"
+      rows: 10
+
+  - name: page_deep
+    weight: 5
+    params:
+      q: "*:*"
+      sort: "id asc"
+      start: "{RAND_INT:50000:99000}"
+      rows: 10

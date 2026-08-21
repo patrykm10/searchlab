@@ -1,0 +1,27 @@
+# Deep paging, elasticsearch/opensearch — and a genuine engine difference.
+#
+# Solr will page to row 99,000 without complaint (see queries/deep-paging.yaml).
+# ES/OS refuse past `index.max_result_window`, which defaults to 10,000, so the
+# deep template here stops at 9,900. The refusal is the BETTER behaviour: the
+# cost is identical on both engines, ES just declines to pay it quietly. Solr
+# charges you and says nothing.
+#
+# To see the refusal itself rather than the latency, raise `from` above 10000
+# and re-run: every deep request fails, and the error is the lesson. The
+# supported way to go further is search_after (or PIT), not a bigger window.
+queries:
+  - name: page_shallow
+    weight: 5
+    body:
+      query: { match_all: {} }
+      sort: [{ _doc: asc }]
+      from: "{RAND_INT:0:100}"
+      size: 10
+
+  - name: page_deep
+    weight: 5
+    body:
+      query: { match_all: {} }
+      sort: [{ _doc: asc }]
+      from: "{RAND_INT:8000:9900}"
+      size: 10

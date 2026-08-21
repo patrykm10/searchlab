@@ -1,0 +1,69 @@
+name: node-loss
+title: Node loss and recovery under load
+about: |
+  Two different failures wearing the same word. `pause` is SIGSTOP: the JVM
+  freezes in place, holding its ZooKeeper session and its socket, answering
+  nothing. That is what a monster GC pause or a hung process looks like from
+  the outside, and it is the harder one — the cluster has to decide the node is
+  gone rather than being told. `kill` is SIGKILL: the connection drops, the
+  session dies, and failover starts almost immediately.
+
+  Watch which one hurts more. Most people expect the hard kill; it is usually
+  the freeze, because a frozen node still looks alive for as long as the
+  session timeout allows, and requests keep being routed to it the whole time.
+
+  Node names differ by engine (solr2, es2, os2), so the chaos steps below say
+  `node2` and the runner resolves it against whatever is actually running.
+  A drill written on Solr that silently does nothing on OpenSearch is the
+  recurring failure in this codebase; generic names are the fix.
+
+cluster:
+  nodes: 2
+
+data:
+  collection: products
+  profile: profiles/default.yaml
+  count: 50000
+  seed: 42
+  # Copies per shard, not extra copies: 1 means a single copy and nothing to
+  # fail over to, which turns this scenario into a data-loss demo instead of a
+  # failover one. Solr reads it as replicationFactor, ES/OS as
+  # number_of_replicas + 1, so 2 means redundancy on either engine.
+  replicas: 2
+
+load:
+  rps: 50
+  duration: 240
+  ramp: 15
+  index_rps: 10
+  index_profile: profiles/default.yaml
+
+chaos:
+  - { at: 60,  action: pause,   node: node2 }   # the freeze: cluster must infer it
+  - { at: 120, action: unpause, node: node2 }
+  - { at: 150, action: kill,    node: node2 }   # the clean break: failover is fast
+  - { at: 200, action: start,   node: node2 }
+
+queries:
+  solr: queries/default.yaml
+  es: queries/es-default.yaml
+
+watch:
+  - "compare the two events: the pause at t=60 against the kill at t=150 — which produced the worse tail?"
+  - "server-rejected against client-dropped: the cluster refusing work and the cluster being slow are different failures"
+  - "recovery after t=200 — replicas come back before they are caught up; watch for the second, smaller latency bump"
+  - "errors during the freeze but not the kill is the expected shape, not a bug"
+
+report: node-loss
+
+# No gate on `dropped`. A 60s SIGSTOP at 50 rps schedules ~3,000 requests
+# against a 500-request in-flight cap, so a textbook run of this scenario
+# drops thousands — asserting dropped=0 would fail the run precisely when the
+# scenario worked. Drops ARE the finding here, not the defect.
+#
+# Nor is there a good aggregate gate for "it recovered": the report's metrics
+# are whole-run figures, and an incident followed by a clean recovery averages
+# out to look like mild sickness throughout. Read the timeline instead. The one
+# gate worth having is that the load survived the incident at all.
+assert:
+  - "requests>2000"
