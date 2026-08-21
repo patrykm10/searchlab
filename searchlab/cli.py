@@ -632,6 +632,33 @@ def recall_cmd(collection, profile_path, data_path, n_queries, k, candidates, se
         click.echo(f"results written to {report}")
 
 
+@main.command("relevance")
+@click.option("--collection", required=True)
+@click.option("--model", "model_name", default="minilm", show_default=True,
+              help="Embedding model; must be the one the vec field was built with.")
+@click.option("--k", default=10, show_default=True)
+@click.option("--vector-field", default="vec", show_default=True)
+@click.option("--report", default=None, help="Write results JSON to this path.")
+def relevance_cmd(collection, model_name, k, vector_field, report):
+    """Score term matching against vector search on the catalogue's own
+    ground truth — needs an index built from profiles/catalog.yaml."""
+    from . import embeddings as emb
+    from . import relevance as rel
+
+    spec = cl.load_spec()
+    if spec.engine == "solr":
+        raise SystemExit("searchlab: relevance is OpenSearch/Elasticsearch only "
+                         "for now — it issues a knn query in the ES DSL")
+    click.echo(f"loading {model_name} (first use downloads the weights)...")
+    model = emb.Embedder(model_name)
+    click.echo("running every benchmark query twice, both ways...")
+    result = rel.compare(spec, collection, model, k=k, vector_field=vector_field)
+    click.echo("\n" + rel.format_report(result))
+    if report:
+        Path(report).write_text(json.dumps(result, indent=2))
+        click.echo(f"\nresults written to {report}")
+
+
 @main.command("learn")
 @click.argument("lesson", default="")
 def learn_cmd(lesson):

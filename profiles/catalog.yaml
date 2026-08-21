@@ -1,0 +1,24 @@
+# A product catalogue in real English, for measuring relevance rather than
+# throughput. Documents are about something — running shoes, espresso
+# machines — so a query can be right or wrong about them, which the random
+# wordlists in the other profiles cannot be.
+#
+# Use this one to demonstrate semantic search and to score recall:
+#
+#   searchlab gen --profile profiles/catalog.yaml --count 20000 --out catalog.jsonl
+#   searchlab index --file catalog.jsonl --collection products
+#   searchlab semantic-recall --collection products --model minilm
+#
+# Prefer the other profiles for load work: this vocabulary is deliberately
+# small and repetitive, which is honest English but not a realistic term
+# distribution for index-size or cardinality experiments.
+source: catalog
+
+# The catalogue supplies id, title_t, body_t, category_s, department_s,
+# brand_s, price_f, stock_i, active_b and tags_ss. Anything declared here is
+# layered on top, so the fields the catalogue has no opinion about still come
+# from the ordinary generators.
+fields:
+  created_dt:
+    type: date
+    days_back: 730
