@@ -358,6 +358,29 @@ def make_handler(spec: ClusterSpec, demo: bool,
                                           str(body.get("type", "NRT")))
             if path == "/api/segments":
                 return runner.segments(coll, str(body.get("core", "")))
+            if path == "/api/writepath/snapshot":
+                return runner.writepath_snapshot(coll, str(body.get("core", "")))
+            if path == "/api/writepath/diff":
+                return runner.writepath_diff(coll, str(body.get("core", "")))
+            if path == "/api/writepath/analyze":
+                return runner.writepath_analyze(coll, str(body.get("field", "")),
+                                                str(body.get("value", "")))
+            if path == "/api/writepath/submit":
+                return runner.writepath_submit(coll, str(body.get("field", "")),
+                                               str(body.get("value", "")))
+            if path == "/api/writepath/visibility":
+                return runner.writepath_visibility(coll, str(body.get("id", "")))
+            if path == "/api/schema":
+                return runner.schema(coll)
+            if path == "/api/config":
+                return runner.config(coll)
+            if path == "/api/config/set":
+                return runner.config_set(coll, str(body.get("path", "")), body.get("value"),
+                                         bool(body.get("reset")), bool(body.get("dry_run")))
+            if path == "/api/schema/set":
+                return runner.schema_set(coll, str(body.get("kind", "")),
+                                         str(body.get("name", "")), str(body.get("prop", "")),
+                                         bool(body.get("value")), bool(body.get("dry_run")))
             if path == "/api/shard/split":
                 return runner.split_shard(coll, str(body.get("shard", "")))
             if path == "/api/index/split":

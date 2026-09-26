@@ -99,3 +99,24 @@ def replica_segments(spec: ClusterSpec, core: str, node: int = 0,
             "lucene": info.get("commitLuceneVersion"),
         },
     }
+
+
+def diff_segments(before: list[dict], after: list[dict]) -> dict:
+    """What changed between two `replica_segments()["segments"]` snapshots.
+
+    Keyed by segment name, since a name that disappears was merged away and
+    a name that appears is new — either a flush or the result of a merge,
+    told apart by its own `source`. This is the write-path walkthrough's
+    whole trick: watch a real segment appear and read what Solr called it.
+    """
+    before_by_name = {s["name"]: s for s in before}
+    after_by_name = {s["name"]: s for s in after}
+
+    new = [s for name, s in after_by_name.items() if name not in before_by_name]
+    gone = [s for name, s in before_by_name.items() if name not in after_by_name]
+
+    by_source: dict[str, int] = {}
+    for s in new:
+        by_source[s["source"]] = by_source.get(s["source"], 0) + 1
+
+    return {"new": new, "gone": gone, "by_source": by_source}
