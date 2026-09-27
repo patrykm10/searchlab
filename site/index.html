@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Searchlab: a workshop for search engines</title>
-<meta name="description" content="Start throwaway SolrCloud, Elasticsearch, or OpenSearch clusters on your laptop. Shape the data yourself, put honest load on it, turn the knobs, and see what changed.">
+<title>Searchlab: learn search engines by experiment</title>
+<meta name="description" content="A lab for learning how Solr, Elasticsearch and OpenSearch really work. Start a throwaway cluster on your laptop, look inside it, change one thing, and watch what moves.">
 
 <!--
   Self-hosting note: this page uses system font stacks so it works offline with
@@ -406,6 +406,30 @@ input[type=range]::-moz-range-thumb{
 .verdict .good{color:var(--trace-rate)}
 .verdict em{font-style:normal;color:var(--muted);font-size:11px;margin-left:auto;text-align:right}
 
+/* ============================================================ LOOK INSIDE */
+.path{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);
+  overflow:hidden;box-shadow:var(--shadow);
+}
+@media(max-width:760px){.path{grid-template-columns:1fr 1fr}}
+@media(max-width:420px){.path{grid-template-columns:1fr}}
+.stage{padding:16px 18px 18px;display:flex;flex-direction:column;gap:6px;position:relative}
+.stage + .stage{border-left:1px solid var(--line-soft)}
+@media(max-width:760px){
+  .stage:nth-child(3){border-left:0}
+  .stage:nth-child(n+3){border-top:1px solid var(--line-soft)}
+}
+@media(max-width:420px){.stage + .stage{border-left:0;border-top:1px solid var(--line-soft)}}
+.stage__n{font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--signal)}
+.stage__name{font-family:var(--font-display);font-size:14.5px;font-weight:700;color:var(--text-strong);letter-spacing:-.02em}
+.stage p{color:var(--muted);font-size:13.5px;line-height:1.5}
+.stage__ask{font-family:var(--font-mono);font-size:11.5px;color:var(--text-strong);
+  border-top:1px dashed var(--line);padding-top:8px;margin-top:auto}
+.path__cap{margin-top:12px;font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.bento--inside{margin-top:26px}
+
 /* ============================================================ BENTO */
 .bento{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
 .tile{
@@ -542,10 +566,10 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
     </a>
     <span class="pill">v0.14.0</span>
     <div class="nav__links">
-      <a href="#instrument">Try it</a>
-      <a href="#honest">Honest load</a>
-      <a href="#do">What it does</a>
+      <a href="#inside">Look inside</a>
+      <a href="#do">Experiment</a>
       <a href="#see">Dashboard</a>
+      <a href="#honest">Honest numbers</a>
       <a href="#commands">Commands</a>
     </div>
     <div class="nav__end">
@@ -576,13 +600,14 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
     <div class="hero__copy">
       <span class="badge"><span class="dot"></span> <b>Free &amp; open source</b> · Apache&#8209;2.0</span>
 
-      <h1>Turn the knobs on a&nbsp;<span class="accent">real</span> search cluster.</h1>
+      <h1>Learn search by taking a&nbsp;<span class="accent">real</span> cluster apart.</h1>
 
       <p class="lede">
         Searchlab starts a throwaway <strong>SolrCloud</strong>, <strong>Elasticsearch</strong>,
-        or <strong>OpenSearch</strong> cluster on your laptop, fills it with data you've
-        <em>shaped</em> yourself, and puts honest load on it. Change one setting, run it
-        again, see what moved. It's a workshop, not a benchmark.
+        or <strong>OpenSearch</strong> cluster on your laptop and lets you look inside it.
+        Follow one document from analyzer to segment, see where every schema property comes
+        from, change a setting and watch what moves. It's a lab for finding out how
+        things work, and it's fine to break things in it.
       </p>
 
       <div class="cmdbox">
@@ -599,11 +624,11 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
       </div>
 
       <div class="ctas">
-        <a class="btn btn--primary" href="#see">
-          See the dashboard
+        <a class="btn btn--primary" href="#inside">
+          Look inside
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
         </a>
-        <a class="btn btn--ghost" href="#instrument">Play with the panel</a>
+        <a class="btn btn--ghost" href="#instrument">Try an experiment</a>
       </div>
 
       <p class="hero__note">You'll need Docker and Python 3.10+. That's it, and nothing leaves your machine.</p>
@@ -612,7 +637,7 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
     <!-- ── the instrument ── -->
     <div class="rig" id="instrument">
       <div class="rig__bar">
-        <span class="rig__title">Load panel</span>
+        <span class="rig__title">Experiment · load</span>
         <div class="rig__stat">
           <span>p99 <b id="s-p99">&#8230;</b></span>
           <span>rps <b id="s-rps">&#8230;</b></span>
@@ -666,9 +691,10 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
     <div class="head" style="margin-bottom:26px">
       <span class="eyebrow">Three engines · one CLI</span>
       <p class="prose" style="max-width:70ch">
-        Generate, index, load, measure, compare, dashboard: all of it works the same way on
-        all three. The cluster remembers which engine it is, so you don't have to. Run the same
-        seed and the same workload against two of them, then diff the reports.
+        Learn one engine properly, then find out where the others differ. Generating, indexing,
+        loading, measuring and the dashboard work the same way on all three. Run the same seed and
+        the same workload against two of them and diff the reports, and where the engines really
+        are different, the panel says so instead of pretending they're the same.
       </p>
     </div>
     <div class="engines">
@@ -688,15 +714,193 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
   </div>
 </section>
 
-<!-- ═══════════════════════════════ HONEST LOAD ═══════════════════════════════ -->
-<section class="band" id="honest">
+<!-- ═══════════════════════════════ LOOK INSIDE ═══════════════════════════════ -->
+<section class="band" id="inside">
   <div class="wrap">
     <div class="head">
-      <span class="eyebrow">Why the numbers differ</span>
-      <h2>Most load tools flinch when the server slows down.</h2>
+      <span class="eyebrow">Look inside · Solr</span>
+      <h2>Don't read about the write path. Watch one.</h2>
       <p class="prose">
-        A closed-loop tool waits for each response before sending the next request. So when the
-        server slows down, the tool slows down with it. It sends <em>fewer</em> requests at exactly
+        Docs tell you what's supposed to happen. The control panel shows you what actually happened
+        on your cluster. It asks Solr at each step, so every stage here is something you can check,
+        not a diagram someone drew.
+      </p>
+    </div>
+
+    <div class="path">
+      <div class="stage">
+        <span class="stage__n">01 · Analyze</span>
+        <span class="stage__name">Text becomes terms</span>
+        <p>Type a value and see every tokenizer and filter step that turns it into indexed terms.</p>
+        <span class="stage__ask">Is this the term I think I'm searching for?</span>
+      </div>
+      <div class="stage">
+        <span class="stage__n">02 · Buffer</span>
+        <span class="stage__name">Written, not searchable</span>
+        <p>Index one document. Real-time get finds it straight away, but search doesn't, yet.</p>
+        <span class="stage__ask">Why can't my query see it?</span>
+      </div>
+      <div class="stage">
+        <span class="stage__n">03 · Segment</span>
+        <span class="stage__name">A commit writes a file</span>
+        <p>Snapshot the segments, commit, and diff them. A new segment appears, marked as a flush.</p>
+        <span class="stage__ask">What did that commit really do?</span>
+      </div>
+      <div class="stage">
+        <span class="stage__n">04 · Merge</span>
+        <span class="stage__name">Small segments fold together</span>
+        <p>Keep writing and watch the merge policy fold segments together, with each merge labelled.</p>
+        <span class="stage__ask">Where did my segments go?</span>
+      </div>
+    </div>
+    <p class="path__cap">Snapshot, then "what changed?", works after any write, not just this walkthrough.</p>
+
+    <div class="bento bento--inside">
+      <article class="tile">
+        <span class="tile__verb">Schema</span>
+        <h3>Where did that property come from?</h3>
+        <p>The managed schema laid out the way you'd read it, with every property labelled by where
+        it's set: the <strong>field</strong>, its <strong>type</strong>, or the built-in default.
+        You also see what each segment actually holds on disk.</p>
+      </article>
+      <article class="tile">
+        <span class="tile__verb">Schema edits</span>
+        <h3>See the call, and what it breaks</h3>
+        <p>Every edit shows you the exact Schema API request before it runs. It also warns when a
+        change will make the <strong>next write fail</strong> on data that's already indexed. That
+        was tested against Solr 9.6, not taken from memory.</p>
+      </article>
+      <article class="tile">
+        <span class="tile__verb">Config</span>
+        <h3>The solrconfig that's actually in effect</h3>
+        <p>Values set by the overlay or by lab properties are marked. Change commit timing or cache
+        sizes through the Config API, then reset them back to what the file says.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ WHAT IT DOES ═══════════════════════════════ -->
+<section class="band band--alt" id="do">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Experiment</span>
+      <h2>Have a hunch? Test it the same afternoon.</h2>
+      <p class="prose">
+        Every "what happens if…" becomes something you can run. Change one thing, keep everything
+        else the same, and compare what you get. When you're done, throw the cluster away and start
+        again.
+      </p>
+    </div>
+
+    <div class="bento">
+      <article class="tile">
+        <span class="tile__verb">Learn by doing</span>
+        <h3>Lessons that check your work</h3>
+        <p>A lesson gives you something real to do in another terminal, then waits until it can see
+        the cluster react. You can't finish one just by reading it.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Read the query</span>
+        <h3>What you wrote vs. what it ran</h3>
+        <p>See what your text turned into after analysis, where the time actually went, and why
+        the top result beat the others.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Change one thing</span>
+        <h3>Sweep a matrix, get a table</h3>
+        <p>Try a range of heap sizes, GC flags, versions or engines at once. Every cell gets its
+        own <strong>fresh cluster</strong>, so nothing leaks from one run into the next.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Shape the data</span>
+        <h3>Performance comes from shape, not row count</h3>
+        <p>Set the cardinality, the skew, how long documents run, how vectors cluster, and see for
+        yourself why a field with millions of distinct values behaves nothing like a yes/no flag.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Break it on purpose</span>
+        <h3>Watch a failure unfold</h3>
+        <p>Stop, freeze or restart a node while load is running, and watch leaders move, replicas
+        recover and latency react. It's a far better place to learn this than an incident.</p>
+      </article>
+
+      <article class="tile">
+        <span class="tile__verb">Vectors, honestly</span>
+        <h3>Latency without recall is meaningless</h3>
+        <p>Check <strong>recall@k</strong> against the exact answers, worked out on your own
+        machine, then sweep candidate counts to see where the tradeoff sits.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ THE DASHBOARD ═══════════════════════════════ -->
+<section class="band" id="see">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">The dashboard</span>
+      <h2>Watch it happen, live.</h2>
+      <p class="prose">
+        One command opens a control panel on your cluster, where the explorers above live next to
+        the live signals. It refreshes every two seconds, with nothing to wire up first, and hover
+        help explains each chart as you go. These are real screenshots, not mockups.
+      </p>
+    </div>
+
+    <figure class="shot">
+      <img src="img/dashboard-signals.png" width="2200" height="2023" loading="lazy"
+           alt="The live signals panel: load-test latency as the client sees it, query latency per
+                node as the server sees it, JVM heap sawtooths for three nodes, query rate, time
+                lost to garbage collection, index segments, and a table of node health.">
+      <figcaption>Six signals over the same five minutes, plus every node's heap and GC.</figcaption>
+    </figure>
+
+    <div class="notes">
+      <div class="note">
+        <span class="note__k">It reads the charts for you</span>
+        <p>The line above the panels is written from the numbers underneath it. Here it says there's
+        no meaningful queueing, because the client sees 30ms against 47ms of work on the server.</p>
+      </div>
+      <div class="note">
+        <span class="note__k">One pen per node</span>
+        <p>Every node gets its own trace, so one sick replica stands out instead of disappearing
+        into an average. Those heap sawtooths are garbage collection, drawn as it happens.</p>
+      </div>
+      <div class="note">
+        <span class="note__k">Both sides of the story</span>
+        <p>Latency as your client experiences it sits next to latency as the server reports it.
+        The gap between those two numbers is usually the thing you're looking for.</p>
+      </div>
+    </div>
+
+    <figure class="shot shot--wide">
+      <img src="img/dashboard-query.png" width="2200" height="1235" loading="lazy"
+           alt="The query panel: a query box, parser picker, filter list, rows, sort, fields to
+                return, facets, a run button with an explain checkbox, and a control to fire the
+                same query as a load test.">
+      <figcaption>
+        Build a query, run it once with <strong>explain</strong> to see how it parsed and scored,
+        then fire that exact query as a load test instead of the built-in mix.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ HONEST LOAD ═══════════════════════════════ -->
+<section class="band band--alt" id="honest">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">Why you can trust what you see</span>
+      <h2>An experiment is only as good as its measurements.</h2>
+      <p class="prose">
+        If the tool doing the measuring bends the result, you learn the wrong lesson. A closed-loop
+        load tool waits for each response before sending the next request, so when the server slows
+        down, the tool slows down with it. It sends <em>fewer</em> requests at exactly
         the moment things are going wrong, and the worst latencies never get measured. That's
         coordinated omission. It's why a run comes back green while people are waiting seconds.
       </p>
@@ -740,117 +944,8 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
   </div>
 </section>
 
-<!-- ═══════════════════════════════ WHAT IT DOES ═══════════════════════════════ -->
-<section class="band band--alt" id="do">
-  <div class="wrap">
-    <div class="head">
-      <span class="eyebrow">What you can actually do with it</span>
-      <h2>Ask a question, get an answer the same afternoon.</h2>
-      <p class="prose">
-        All of this works today. Anything you can generate, you can load. Anything you can
-        load, you can measure and compare.
-      </p>
-    </div>
-
-    <div class="bento">
-      <article class="tile">
-        <span class="tile__verb">Shape the data</span>
-        <h3>Performance comes from shape, not row count</h3>
-        <p>Set the cardinality, the skew, how long documents run, how vectors cluster. A field
-        with millions of distinct values behaves nothing like a yes/no flag.</p>
-      </article>
-
-      <article class="tile">
-        <span class="tile__verb">Change one thing</span>
-        <h3>Sweep a matrix, get a table</h3>
-        <p>Try a range of heap sizes, GC flags, versions or engines at once. Every cell gets its
-        own <strong>fresh cluster</strong>, so nothing leaks from one run into the next.</p>
-      </article>
-
-      <article class="tile">
-        <span class="tile__verb">Learn by doing</span>
-        <h3>Lessons that run against your cluster</h3>
-        <p>A lesson asks you to go do something real in another terminal, then waits until it can
-        see the cluster react to it.</p>
-      </article>
-
-      <article class="tile">
-        <span class="tile__verb">Read the query</span>
-        <h3>What you wrote vs. what it ran</h3>
-        <p>See what your text turned into after analysis, where the time actually went, and why
-        the top result beat the others.</p>
-      </article>
-
-      <article class="tile">
-        <span class="tile__verb">Vectors, honestly</span>
-        <h3>Latency without recall is meaningless</h3>
-        <p>Check <strong>recall@k</strong> against the exact answers, worked out on your own
-        machine, then sweep candidate counts to find where the tradeoff sits.</p>
-      </article>
-
-      <article class="tile">
-        <span class="tile__verb">Replay last Tuesday</span>
-        <h3>Your traffic, not a synthetic guess</h3>
-        <p>Give it a real request log and replay it at the original speed, faster, or at a rate
-        you pick. You get the same reports, so you can diff two versions.</p>
-      </article>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════════════════════ THE DASHBOARD ═══════════════════════════════ -->
-<section class="band" id="see">
-  <div class="wrap">
-    <div class="head">
-      <span class="eyebrow">The dashboard</span>
-      <h2>Watch it happen, live.</h2>
-      <p class="prose">
-        One command opens a recorder on your cluster. It refreshes every two seconds and there's
-        nothing else to set up or wire together first. These are real screenshots, not mockups.
-      </p>
-    </div>
-
-    <figure class="shot">
-      <img src="img/dashboard-signals.png" width="2200" height="2023" loading="lazy"
-           alt="The live signals panel: load-test latency as the client sees it, query latency per
-                node as the server sees it, JVM heap sawtooths for three nodes, query rate, time
-                lost to garbage collection, index segments, and a table of node health.">
-      <figcaption>Six signals over the same five minutes, plus every node's heap and GC.</figcaption>
-    </figure>
-
-    <div class="notes">
-      <div class="note">
-        <span class="note__k">It reads the charts for you</span>
-        <p>The line above the panels is written from the numbers underneath it. Here it says there's
-        no meaningful queueing, because the client sees 30ms against 47ms of work on the server.</p>
-      </div>
-      <div class="note">
-        <span class="note__k">One pen per node</span>
-        <p>Every node gets its own trace, so one sick replica stands out instead of disappearing
-        into an average. Those heap sawtooths are garbage collection, drawn as it happens.</p>
-      </div>
-      <div class="note">
-        <span class="note__k">Both sides of the story</span>
-        <p>Latency as your client experiences it sits next to latency as the server reports it.
-        The gap between those two numbers is usually the thing you're looking for.</p>
-      </div>
-    </div>
-
-    <figure class="shot shot--wide">
-      <img src="img/dashboard-query.png" width="2200" height="1235" loading="lazy"
-           alt="The query panel: a query box, parser picker, filter list, rows, sort, fields to
-                return, facets, a run button with an explain checkbox, and a control to fire the
-                same query as a load test.">
-      <figcaption>
-        Build a query, run it once with <strong>explain</strong> to see how it parsed and scored,
-        then fire that exact query as a load test instead of the built-in mix.
-      </figcaption>
-    </figure>
-  </div>
-</section>
-
 <!-- ═══════════════════════════════ DETERMINISM ═══════════════════════════════ -->
-<section class="band band--tight band--alt">
+<section class="band band--tight">
   <div class="wrap">
     <div class="head" style="margin-bottom:28px">
       <span class="eyebrow">Why you can trust the second run</span>
@@ -945,16 +1040,16 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
           </li>
           <li>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5 9 17.5 20 6.5"/></svg>
-            <span><b>Issues and PRs welcome.</b> New data profiles, query templates and lessons are all plain YAML, so that's the easiest place to start.</span>
+            <span><b>Issues and PRs welcome.</b> Lessons, data profiles and query templates are all plain YAML. A new lesson is the easiest way to contribute.</span>
           </li>
         </ul>
       </div>
 
       <aside class="coffee">
-        <h3>If it saved you an afternoon</h3>
+        <h3>If it taught you something</h3>
         <p>
           Searchlab is a nights-and-weekends project, and it'll stay free and Apache-licensed
-          either way. But if it saved you from another afternoon of guessing at production,
+          either way. But if it finally made segments, merges or scoring click for you,
           a coffee is a really nice thing to get.
         </p>
         <a class="btn btn--primary coffee__cta" href="COFFEE_URL">
