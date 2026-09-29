@@ -269,6 +269,7 @@ Lessons run against your **live cluster**, not a slideshow. The engine's signatu
 |---|---|
 | **cluster-anatomy** | nodes, shards, replicas and ZooKeeper, against your real topology |
 | **analysis-chain** | what the index actually stores: every stage of `text_en` and `text_general`, token by token, and why `runs` finds "running" but `ran` doesn't. Ends with you indexing a document the lesson's query has to find |
+| **scoring** | BM25 on five tiny documents: term frequency saturating (eight mentions score 10% above two), length normalization, and a document that never says "solr" outranking one that says it eight times, because the other term is rarer. Ends with you editing a document until it outranks another |
 | **commits-and-visibility** | the classic "I indexed it, where is it?" surprise, reproduced then resolved — and real-time get finding the document search can't see yet |
 | **segments-and-merges** | an update is a delete plus an add: `delCount` appearing, a fully deleted segment vanishing, and a merge you trigger yourself (the lesson waits until one shows up) |
 | **schema-changes** | the Schema API accepts `docValues=true` on a populated field, then the next ordinary write fails; deleting every document doesn't fix it, a reload does. Also why editing a shared configset changes every collection on it |

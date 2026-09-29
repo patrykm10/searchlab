@@ -276,4 +276,19 @@ def test_explain_report_sections():
 
 def test_timing_and_explain_edge_cases():
     assert "not present" in format_timing({})
+
+
+def test_debug_component_is_never_the_optimization_target():
+    # debug=true is how this report gets its data; on a small index the debug
+    # component is most of the time, and must not be named the thing to fix
+    timing = {"timing": {"time": 13.0,
+                         "prepare": {"time": 0.0, "query": {"time": 0.0}},
+                         "process": {"time": 12.0, "query": {"time": 1.0},
+                                     "debug": {"time": 11.0}}}}
+    out = format_timing(timing)
+    assert "'debug' dominates" not in out
+    assert "cost of producing this report" in out and "about 2 ms" in out
+    # with debug set aside, a component that really dominates is still named
+    timing["timing"]["process"]["facet"] = {"time": 1.5}
+    assert ">> 'facet' dominates" in format_timing(timing)
     assert "no matching documents" in format_explain({"debug": {}, "response": {"docs": []}})

@@ -1,6 +1,6 @@
 title: "Schema changes on live data: accepted, then broken"
 engine: solr
-order: 5
+order: 6
 requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
 intro: |
   The Schema API changes the schema. It doesn't change the index. Documents

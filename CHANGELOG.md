@@ -19,7 +19,12 @@
   **analysis-chain**, **segments-and-merges** (with a merge the learner
   triggers and the lesson waits for) and **schema-changes** (an accepted
   schema change that breaks the next write, and why deleting everything
-  doesn't fix it). `searchlab learn` lists all six as a course
+  doesn't fix it), and **scoring** (BM25's three levers on five documents,
+  ending with the learner re-ranking one). `searchlab learn` lists all
+  seven as a course
+- `explain` no longer names the `debug` component "your optimization
+  target": it only runs because the report asked for it. It's set aside
+  when judging the query, and called out when it is most of the time
 - Control panel: **Lessons** section — the same lessons, a step at a time
   in the browser, with click-to-answer questions, wait steps that poll the
   cluster, and cleanup on stop or tab close. The server runs steps by lesson

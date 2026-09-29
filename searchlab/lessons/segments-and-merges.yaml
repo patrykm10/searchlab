@@ -1,6 +1,6 @@
 title: "Segments: why an update is a delete plus an add"
 engine: solr
-order: 4
+order: 5
 requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
 intro: |
   A Lucene index isn't one file you edit. It's a set of SEGMENTS, each a

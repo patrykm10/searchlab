@@ -1,6 +1,6 @@
 title: "Commits: why your document isn't searchable yet"
 engine: solr
-order: 3
+order: 4
 requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
 intro: |
   The most common Solr surprise: you indexed a document, queried, and it
