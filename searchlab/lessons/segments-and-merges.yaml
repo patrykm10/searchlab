@@ -120,8 +120,8 @@ steps:
             -H 'content-type: application/json' -d "[{\"id\":\"loop$i\"}]" > /dev/null
         done
 
-      (Or open the control panel, pick lesson-lab, and use the segment view's
-      Snapshot and "what changed?" between writes to watch it happen.)
+      (To watch it happen, pick lesson-lab in the control panel and use the
+      segment view's Snapshot and "what changed?" between writes.)
     url: "/lesson-lab/admin/segments"
     params: { wt: json }
     until: { path: "segments.*.source", op: has_value, value: merge }

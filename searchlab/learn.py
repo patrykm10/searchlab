@@ -32,6 +32,7 @@ lesson ends, Ctrl-C included, so a scratch collection never outlives it.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -173,6 +174,44 @@ def builtin_lessons() -> dict[str, dict]:
     return out
 
 
+def http_request(base_url: str, method: str, path: str, params: dict | None = None,
+                 json: Any = None) -> dict:
+    url = path if path.startswith("http") else base_url + path
+    try:
+        r = httpx.request(method, url, timeout=30, params=params, json=json)
+    except httpx.HTTPError as e:
+        # a traceback here reads as a broken tool; this reads as the
+        # cluster being unreachable, which is what it is
+        return {"_error": f"{type(e).__name__}: {e}"}
+    try:
+        return r.json()
+    except ValueError:
+        return {"_status": r.status_code, "_text": r.text[:500]}
+
+
+def run_shell(cmd: str) -> str:
+    # Lessons run `searchlab …`. The venv's bin sits next to this interpreter
+    # and is often not on PATH (searchlab started by full path, or by the
+    # dashboard), so put it first rather than fail with "command not found".
+    env = dict(os.environ, PATH=os.path.dirname(sys.executable) + os.pathsep
+               + os.environ.get("PATH", ""))
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env, timeout=120)
+    return r.stdout + (r.stderr if r.returncode else "")
+
+
+def request_line(spec: dict) -> str:
+    # the request is half the lesson: show what was asked, minus the
+    # response-format plumbing every call carries
+    params = "&".join(f"{k}={v}" for k, v in (spec.get("params") or {}).items()
+                      if k not in ("wt", "json.nl"))
+    return f"{spec.get('method', 'GET')} {spec['path']}" + (f"?{params}" if params else "")
+
+
+def shown(spec: dict, body: dict) -> str:
+    """What an http step prints for a response."""
+    return render(dig(body, spec["show"]) if spec.get("show") else body, spec.get("fields"))
+
+
 class IO:
     """Terminal interaction; tests inject a scripted replacement."""
 
@@ -210,39 +249,19 @@ def run_lesson(
         sys.exit(f"searchlab: this lesson is written against {lesson['engine']}'s API; "
                  f"the running cluster is {engine}")
 
-    def _http(method: str, path: str, **kw) -> dict:
-        url = path if path.startswith("http") else base_url + path
-        try:
-            r = httpx.request(method, url, timeout=30, **kw)
-        except httpx.HTTPError as e:
-            # a traceback here reads as a broken tool; this reads as the
-            # cluster being unreachable, which is what it is
-            return {"_error": f"{type(e).__name__}: {e}"}
-        try:
-            return r.json()
-        except ValueError:
-            return {"_status": r.status_code, "_text": r.text[:500]}
-
-    http = http or _http
-    shell = shell or (lambda cmd: subprocess.run(
-        cmd, shell=True, capture_output=True, text=True).stdout)
+    http = http or (lambda method, path, **kw: http_request(base_url, method, path, **kw))
+    shell = shell or run_shell
 
     asked = correct = 0
 
     def http_step(spec: dict) -> dict:
-        # the request is half the lesson: show what was asked, minus the
-        # response-format plumbing every call carries
-        shown_params = "&".join(f"{k}={v}" for k, v in (spec.get("params") or {}).items()
-                                if k not in ("wt", "json.nl"))
-        io.say(f"\n-> {spec.get('method', 'GET')} {spec['path']}"
-               + (f"?{shown_params}" if shown_params else ""))
+        io.say(f"\n-> {request_line(spec)}")
         body = http(spec.get("method", "GET"), spec["path"],
                     params=spec.get("params"), json=spec.get("json"))
         if isinstance(body, dict) and "_error" in body:
             io.say(f"!! {body['_error']}")
             return body
-        shown = dig(body, spec["show"]) if spec.get("show") else body
-        io.say(render(shown, spec.get("fields")))
+        io.say(shown(spec, body))
         return body
 
     io.say(f"\n=== {lesson['title']} ===")
@@ -299,3 +318,82 @@ def run_lesson(
     io.say(f"\n=== done: {correct}/{asked} questions correct ===" if asked
            else "\n=== done ===")
     return {"asked": asked, "correct": correct}
+
+
+# ------------------------------------------------------------ in a browser ---
+# The control panel runs the same lessons one step at a time. It names a
+# built-in lesson and a step number, never a request: the server looks the
+# step up and runs it, so the panel can't be used to send arbitrary calls.
+
+
+def lesson_catalog(engine: str | None) -> list[dict]:
+    out = []
+    for name, les in builtin_lessons().items():
+        mismatch = bool(engine and les.get("engine") and les["engine"] != engine)
+        out.append({"name": name, "title": les["title"], "requires": les.get("requires", ""),
+                    "intro": les.get("intro", ""), "order": les.get("order", 99),
+                    "engine": les.get("engine"), "steps": len(les["steps"]),
+                    "runnable": not mismatch,
+                    "why_not": (f"Written against {les['engine']}'s API; this cluster is "
+                                f"{engine}.") if mismatch else ""})
+    return sorted(out, key=lambda x: (x["order"], x["name"]))
+
+
+def _step(name: str, index: int, cleanup: bool = False) -> dict | None:
+    lessons = builtin_lessons()
+    if name not in lessons:
+        raise KeyError(f"no lesson '{name}'")
+    lesson = lessons[name]
+    steps = (lesson.get("cleanup") or []) if cleanup else lesson["steps"]
+    return steps[index] if 0 <= index < len(steps) else None
+
+
+def web_step(name: str, index: int, base_url: str, cleanup: bool = False,
+             http: Callable | None = None, shell: Callable | None = None) -> dict:
+    """Run one step and describe it for the page. An ask step is sent without
+    its answer; the page asks web_answer once the learner has chosen."""
+    http = http or (lambda method, path, **kw: http_request(base_url, method, path, **kw))
+    shell = shell or run_shell
+    step = _step(name, index, cleanup)
+    if step is None:
+        return {"kind": "end"}
+    if "say" in step:
+        return {"kind": "say", "text": step["say"]}
+    if "pause" in step:
+        return {"kind": "pause"}
+    if "run" in step:
+        return {"kind": "run", "command": step["run"], "output": shell(step["run"]).rstrip()}
+    if "http" in step:
+        spec = step["http"]
+        body = http(spec.get("method", "GET"), spec["path"],
+                    params=spec.get("params"), json=spec.get("json"))
+        out = {"kind": "http", "request": request_line(spec)}
+        if isinstance(body, dict) and "_error" in body:
+            out["error"] = body["_error"]
+            return out
+        out["output"] = shown(spec, body)
+        if "expect" in spec:
+            out["unexpected"] = not check_condition(body, spec["expect"])
+        return out
+    if "wait" in step:
+        return {"kind": "wait", "text": step["wait"]}
+    return {"kind": "ask", "question": step["ask"], "options": step["options"]}
+
+
+def web_poll(name: str, index: int, base_url: str, http: Callable | None = None) -> dict:
+    http = http or (lambda method, path, **kw: http_request(base_url, method, path, **kw))
+    step = _step(name, index)
+    if not step or "wait" not in step:
+        raise KeyError(f"step {index + 1} of '{name}' is not a wait step")
+    body = http("GET", step["url"], params=step.get("params"))
+    if isinstance(body, dict) and "_error" in body:
+        return {"met": False, "error": body["_error"]}
+    return {"met": bool(check_condition(body, step["until"]))}
+
+
+def web_answer(name: str, index: int, choice: int) -> dict:
+    step = _step(name, index)
+    if not step or "ask" not in step:
+        raise KeyError(f"step {index + 1} of '{name}' is not a question")
+    return {"correct": choice == step["answer"], "right": step["options"][step["answer"]],
+            "why": step.get("why", "")}

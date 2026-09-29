@@ -135,6 +135,8 @@ Three panels that treat the cluster as something to learn from rather than somet
 
 Hover explanations on all three follow the header's help toggle.
 
+**Lessons** sit next to them: the same lessons as `searchlab learn` (below), run a step at a time in the page. Requests and responses show as they happen, questions are answered with a click, a lesson that asks you to do something waits until the cluster shows you did, and its scratch collection is removed however it ends, including when you close the tab. The page only ever names a lesson and a step number; the server looks the step up in the lesson file, so it can't be used to send arbitrary requests.
+
 ## Query builder
 
 The exploring half, next to the load testing. Build one query from menus and watch it run — then hand the same query to the load generator with **Run this as a load test**, so the thing you just tuned becomes the workload instead of the built-in mix.
@@ -261,7 +263,7 @@ searchlab learn                     # list lessons
 searchlab learn leader-election     # run one
 ```
 
-Lessons run against your **live cluster**, not a slideshow. The engine's signature move is the `wait` step: the lesson tells you to go do something real — `searchlab chaos kill solr2` in another terminal — then polls actual cluster state until ZooKeeper notices, and continues the story from what just happened. Multiple-choice questions (scored, with explanations either way) check the mental model along the way. `searchlab learn` lists the built-ins in a suggested order, each leaning on the ones before it:
+Lessons run against your **live cluster**, not a slideshow. The engine's signature move is the `wait` step: the lesson tells you to go do something real — `searchlab chaos kill solr2` in another terminal — then polls actual cluster state until ZooKeeper notices, and continues the story from what just happened. Multiple-choice questions (scored, with explanations either way) check the mental model along the way. `searchlab learn` lists the built-ins in a suggested order, each leaning on the ones before it. The control panel's **Lessons** section runs the same ones in the browser:
 
 | Lesson | What you find out by doing it |
 |---|---|

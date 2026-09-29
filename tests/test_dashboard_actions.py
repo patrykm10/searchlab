@@ -293,3 +293,90 @@ def test_post_unknown_path_and_bad_body(demo_server):
     except urllib.error.HTTPError as e:
         status = e.code
     assert status == 400
+
+
+# ------------------------------------------------------------ lessons API ---
+
+@pytest.fixture
+def lesson_server(monkeypatch):
+    """A live-mode handler (a stand-in runner, so controls are enabled) whose
+    lesson requests go to a recorder instead of a cluster."""
+    import searchlab.learn as ln
+    sent = []
+
+    def fake_http(base_url, method, path, params=None, json=None):
+        sent.append((method, path, (params or {}).get("action")))
+        if path.endswith("/admin/segments"):
+            return {"segments": {"_0": {"size": 3, "delCount": 0, "source": "merge"}}}
+        return {"responseHeader": {"status": 0}}
+
+    monkeypatch.setattr(ln, "http_request", fake_http)
+
+    def start(engine="solr"):
+        handler = make_handler(ClusterSpec(engine=engine), demo=False, runner=object(), logs=None)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    servers = []
+    yield start, sent
+    for s in servers:
+        s.shutdown()
+
+
+def test_lessons_listed_in_course_order(demo_server):
+    status, out = _get(demo_server + "/api/lessons")
+    assert status == 200 and out["demo"] is True and out["engine"] == "solr"
+    names = [x["name"] for x in out["lessons"]]
+    assert names[:2] == ["cluster-anatomy", "analysis-chain"] and len(names) == 6
+    # demo mode lists them, but running one is a control like any other
+    status, out = _post(demo_server + "/api/lesson/step", {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "demo" in out["error"]
+
+
+def test_lesson_steps_run_server_side_and_questions_keep_their_answer(lesson_server):
+    start, sent = lesson_server
+    url = start()
+    status, out = _post(url + "/api/lesson/step", {"name": "segments-and-merges", "index": 0})
+    assert status == 200 and out["kind"] == "http"
+    assert out["request"] == "GET /admin/collections?action=DELETE&name=lesson-lab"
+    assert sent == [("GET", "/admin/collections", "DELETE")]
+    # the page gets the question and options, never the answer
+    lesson = __import__("searchlab.learn", fromlist=["x"]).builtin_lessons()["segments-and-merges"]
+    ask = next(i for i, s in enumerate(lesson["steps"]) if "ask" in s)
+    status, out = _post(url + "/api/lesson/step", {"name": "segments-and-merges", "index": ask})
+    assert out["kind"] == "ask" and "answer" not in out and "why" not in out
+    status, out = _post(url + "/api/lesson/answer",
+                        {"name": "segments-and-merges", "index": ask, "choice": 2})
+    assert out["correct"] is True and out["why"]
+    # a wait step is polled; the fake segments report a merge, so it's met
+    wait = next(i for i, s in enumerate(lesson["steps"]) if "wait" in s)
+    status, out = _post(url + "/api/lesson/poll", {"name": "segments-and-merges", "index": wait})
+    assert out == {"ok": True, "met": True}
+    status, out = _post(url + "/api/lesson/step",
+                        {"name": "segments-and-merges", "index": len(lesson["steps"])})
+    assert out["kind"] == "end"
+
+
+def test_lesson_cleanup_runs_every_cleanup_step_in_one_call(lesson_server):
+    start, sent = lesson_server
+    status, out = _post(start() + "/api/lesson/cleanup", {"name": "schema-changes", "index": 0})
+    assert status == 200 and [s["kind"] for s in out["steps"]] == ["http", "say"]
+    assert sent == [("GET", "/admin/collections", "DELETE")]
+
+
+def test_lesson_api_refuses_what_the_lesson_file_does_not_say(lesson_server):
+    start, sent = lesson_server
+    url = start()
+    status, out = _post(url + "/api/lesson/step", {"name": "../../etc", "index": 0})
+    assert status == 409 and "no lesson" in out["error"]
+    status, out = _post(url + "/api/lesson/poll", {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "not a wait step" in out["error"]
+    status, out = _post(url + "/api/lesson/answer", {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "not a question" in out["error"]
+    # a Solr lesson on an OpenSearch cluster is refused before anything is sent
+    status, out = _post(start("opensearch") + "/api/lesson/step",
+                        {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "opensearch" in out["error"]
+    assert sent == []

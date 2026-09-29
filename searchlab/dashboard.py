@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from . import learn as ln
 from . import metrics as m
 from .actions import ActionRunner
 from .cluster import WORKDIR, ClusterSpec, cluster_overview
@@ -279,6 +280,9 @@ def make_handler(spec: ClusterSpec, demo: bool,
                     self._json(200, runner.read_tuning(coll))
                 except (SystemExit, Exception) as e:  # noqa: BLE001
                     self._json(500, {"ok": False, "error": str(e) or type(e).__name__})
+            elif path == "/api/lessons":
+                self._json(200, {"ok": True, "demo": demo, "engine": spec.engine,
+                                 "lessons": ln.lesson_catalog(spec.engine)})
             elif path == "/api/traffic":
                 if logs is None:
                     return self._json(200, {"latest": 0, "rows": []})
@@ -387,9 +391,42 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 # ES/OS: a whole-index copy into more shards, not Solr's
                 # per-shard split
                 return runner.split_index(coll, body.get("shards"))
+            if path.startswith("/api/lesson/"):
+                return self._lesson_post(path, body)
             if path == "/api/replica/remove":
                 return runner.remove_replica(coll, str(body.get("shard", "")),
                                              str(body.get("replica", "")))
+            return {"ok": False, "error": f"unknown action: {path}"}
+
+        def _lesson_post(self, path: str, body: dict) -> dict:
+            name = str(body.get("name", ""))
+            try:
+                index = int(body.get("index", -1))
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "index must be a number"}
+            entry = next((x for x in ln.lesson_catalog(spec.engine) if x["name"] == name), None)
+            if entry is None:
+                return {"ok": False, "error": f"no lesson '{name}'"}
+            if not entry["runnable"]:
+                return {"ok": False, "error": entry["why_not"]}
+            base = spec.base_url()
+            try:
+                if path == "/api/lesson/step":
+                    return {"ok": True, **ln.web_step(name, index, base)}
+                if path == "/api/lesson/poll":
+                    return {"ok": True, **ln.web_poll(name, index, base)}
+                if path == "/api/lesson/answer":
+                    return {"ok": True, **ln.web_answer(name, index, int(body.get("choice", -1)))}
+                if path == "/api/lesson/cleanup":
+                    # all of it in one call: this is also what the page sends
+                    # as a beacon when the tab closes mid-lesson
+                    done, i = [], 0
+                    while (out := ln.web_step(name, i, base, cleanup=True))["kind"] != "end":
+                        done.append(out)
+                        i += 1
+                    return {"ok": True, "steps": done}
+            except KeyError as e:
+                return {"ok": False, "error": str(e.args[0])}
             return {"ok": False, "error": f"unknown action: {path}"}
 
         def do_POST(self):

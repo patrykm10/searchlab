@@ -20,6 +20,10 @@
   triggers and the lesson waits for) and **schema-changes** (an accepted
   schema change that breaks the next write, and why deleting everything
   doesn't fix it). `searchlab learn` lists all six as a course
+- Control panel: **Lessons** section — the same lessons, a step at a time
+  in the browser, with click-to-answer questions, wait steps that poll the
+  cluster, and cleanup on stop or tab close. The server runs steps by lesson
+  name and number, never a request the page supplies
 - Lesson engine: `*` wildcards in paths, a `has_value` condition, readable
   rendering of token chains and segment tables (`fields` picks columns),
   each request shown with its parameters, `engine:` checked against the
