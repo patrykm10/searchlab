@@ -1,22 +1,33 @@
 title: "Commits: why your document isn't searchable yet"
 engine: solr
 order: 3
-requires: "a cluster with a collection named 'products' (quickstart makes one)"
+requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
 intro: |
   The most common Solr surprise: you indexed a document, queried, and it
   isn't there. Nothing is wrong — you just met the commit model. Let's
   reproduce the surprise on purpose.
 steps:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - http:
+      path: "/admin/collections"
+      params: { action: CREATE, name: lesson-lab, numShards: 1, replicationFactor: 1, wt: json }
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
   - say: |
+      (A 400 from the DELETE just means there was no leftover lesson-lab to remove.)
+
       We'll add a document WITHOUT committing, then search for it.
   - http:
       method: POST
-      path: "/products/update"
+      path: "/lesson-lab/update"
       params: { wt: json }
       json: [ { id: "lesson-doc-1", title_t: "the invisible document" } ]
       show: "responseHeader.status"
   - http:
-      path: "/products/select"
+      path: "/lesson-lab/select"
       params: { q: "id:lesson-doc-1", wt: json }
       show: "response.numFound"
   - say: |
@@ -25,6 +36,19 @@ steps:
       search runs against a SEARCHER: an immutable view opened over the index
       files at some earlier moment. Until a new searcher opens, new documents
       are invisible.
+
+      Invisible to search, that is. Ask for it by id with real-time get:
+  - http:
+      path: "/lesson-lab/get"
+      params: { id: "lesson-doc-1", wt: json }
+      show: "doc"
+      expect: { path: "doc.id", op: eq, value: "lesson-doc-1" }
+  - say: |
+      Found. Real-time get doesn't use the searcher: it looks in the update
+      log first, so it sees every acknowledged write straight away. That's
+      how an app can read back what it just wrote while search is still
+      catching up. (The control panel's write-path explorer runs both
+      checks side by side.)
   - ask: "What makes the document searchable?"
     options:
       - "flushing the transaction log"
@@ -38,11 +62,11 @@ steps:
       visibility by itself.
   - say: "Commit and look again:"
   - http:
-      path: "/products/update"
+      path: "/lesson-lab/update"
       params: { commit: "true", wt: json }
       show: "responseHeader.status"
   - http:
-      path: "/products/select"
+      path: "/lesson-lab/select"
       params: { q: "id:lesson-doc-1", wt: json }
       show: "response.numFound"
       expect: { path: "response.numFound", op: eq, value: 1 }
@@ -52,10 +76,9 @@ steps:
       (openSearcher=false) gives durability, and explicit commits from
       clients are usually a bug. That's also why searchlab's indexer uses
       commitWithin instead of hammering commit.
+cleanup:
   - http:
-      method: POST
-      path: "/products/update"
-      params: { commit: "true", wt: json }
-      json: { delete: { id: "lesson-doc-1" } }
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
       show: "responseHeader.status"
-  - say: "(cleaned up after ourselves.)"
+  - say: "(removed the lesson-lab collection.)"

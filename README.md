@@ -267,12 +267,12 @@ Lessons run against your **live cluster**, not a slideshow. The engine's signatu
 |---|---|
 | **cluster-anatomy** | nodes, shards, replicas and ZooKeeper, against your real topology |
 | **analysis-chain** | what the index actually stores: every stage of `text_en` and `text_general`, token by token, and why `runs` finds "running" but `ran` doesn't. Ends with you indexing a document the lesson's query has to find |
-| **commits-and-visibility** | the classic "I indexed it, where is it?" surprise, reproduced then resolved |
+| **commits-and-visibility** | the classic "I indexed it, where is it?" surprise, reproduced then resolved — and real-time get finding the document search can't see yet |
 | **segments-and-merges** | an update is a delete plus an add: `delCount` appearing, a fully deleted segment vanishing, and a merge you trigger yourself (the lesson waits until one shows up) |
 | **schema-changes** | the Schema API accepts `docValues=true` on a populated field, then the next ordinary write fails; deleting every document doesn't fix it, a reload does. Also why editing a shared configset changes every collection on it |
 | **leader-election** | you kill a node; the lesson notices |
 
-Every answer in these lessons was checked against Solr 9.6 rather than written from memory. The three newest make a scratch `lesson-lab` collection with a private copy of `_default` and remove it however the lesson ends, Ctrl-C included, so they're safe on any cluster.
+Every answer in these lessons was checked against Solr 9.6 rather than written from memory. Every lesson from analysis-chain to schema-changes makes a scratch `lesson-lab` collection with a private copy of `_default` and remove it however the lesson ends, Ctrl-C included, so they're safe on any cluster.
 
 Lessons are plain YAML — writing your own for a team onboarding is a text file away. An `http` step's `show` takes a dot path where `*` fans out over a list or an object (`analysis.field_types.text_en.index.*.*.text` is every stage's tokens), `fields` narrows a table to the columns worth reading, `engine:` stops a Solr lesson from running against OpenSearch, and `cleanup:` steps always run.
 
