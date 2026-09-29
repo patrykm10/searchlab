@@ -810,9 +810,11 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
 
       <article class="tile">
         <span class="tile__verb">Change one thing</span>
-        <h3>Sweep a matrix, get a table</h3>
-        <p>Try a range of heap sizes, GC flags, versions or engines at once. Every cell gets its
-        own <strong>fresh cluster</strong>, so nothing leaks from one run into the next.</p>
+        <h3>One knob live, or a whole matrix</h3>
+        <p><code>experiment</code> changes one setting on the running cluster and measures it
+        A, B, then A again, so you know how big the <strong>noise</strong> is before you believe
+        a result. For heap sizes, GC flags, versions or engines, <code>sweep</code> gives every
+        cell its own fresh cluster.</p>
       </article>
 
       <article class="tile">
@@ -957,7 +959,7 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
       </p>
     </div>
     <div class="facts">
-      <div class="fact"><span class="fact__n">25</span><span class="fact__l">commands</span></div>
+      <div class="fact"><span class="fact__n">28</span><span class="fact__l">commands</span></div>
       <div class="fact"><span class="fact__n">3</span><span class="fact__l">engines</span></div>
       <div class="fact"><span class="fact__n">0</span><span class="fact__l">telemetry calls</span></div>
       <div class="fact"><span class="fact__n">4</span><span class="fact__l">python deps</span></div>
@@ -980,7 +982,7 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
     </div>
 
     <details class="reveal">
-      <summary>Show all 25 commands</summary>
+      <summary>Show all 28 commands</summary>
       <div class="tablewrap">
       <table>
         <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
@@ -988,7 +990,7 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
           <tr><td class="cmd">doctor</td><td class="desc">Preflight: docker, compose plugin, ports, disk, leftover state</td></tr>
           <tr><td class="cmd">up / down</td><td class="desc">Render compose and start the cluster; tear it down (<code>--volumes</code> wipes data)</td></tr>
           <tr><td class="cmd">status</td><td class="desc">Live nodes, replica states, collection health</td></tr>
-          <tr><td class="cmd">create-collection</td><td class="desc">Collections and indices, with shard and replica counts</td></tr>
+          <tr><td class="cmd">create-collection / delete-collection</td><td class="desc">Collections and indices, with shard and replica counts</td></tr>
           <tr><td class="cmd">gen</td><td class="desc">Generate JSONL documents from a YAML profile, seeded</td></tr>
           <tr><td class="cmd">schema</td><td class="desc">Explicit fields or index mappings derived from the same profile</td></tr>
           <tr><td class="cmd">index</td><td class="desc">Async bulk indexing with <code>--threads</code> and <code>--batch</code></td></tr>
@@ -1003,7 +1005,10 @@ footer{border-top:1px solid var(--line-soft);background:var(--surface)}
           <tr><td class="cmd">gclog</td><td class="desc">GC pause percentiles, throughput lost, Full GC detection</td></tr>
           <tr><td class="cmd">chaos</td><td class="desc">Stop, freeze, resume, or restart one node while load is running</td></tr>
           <tr><td class="cmd">drill</td><td class="desc">One YAML: load plus timed node events plus metrics, in a single annotated report</td></tr>
+          <tr><td class="cmd">experiment</td><td class="desc">Change one knob on the live cluster: A, B, then A again, with the noise measured and the knob put back</td></tr>
           <tr><td class="cmd">sweep</td><td class="desc">One workload across a config matrix, fresh cluster per cell, comparison table</td></tr>
+          <tr><td class="cmd">scenario</td><td class="desc">Named reproductions: a data shape, a query mix, faults, and what to watch</td></tr>
+          <tr><td class="cmd">relevance</td><td class="desc">Term matching vs vector search on the catalogue's ground truth, precision@k</td></tr>
           <tr><td class="cmd">compare</td><td class="desc">Diff two JSON reports across versions, configs, or engines</td></tr>
           <tr><td class="cmd">report-html</td><td class="desc">Render any JSON report as a dependency-free page with SVG charts</td></tr>
           <tr><td class="cmd">k8s</td><td class="desc">Export the operator manifest that mirrors your running cluster</td></tr>

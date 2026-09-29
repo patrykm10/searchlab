@@ -69,6 +69,7 @@ searchlab is **open-loop**: requests fire on a fixed wall-clock schedule derived
 | `chaos run scenario.yaml` | Timed fault steps only (see `examples/chaos-node-loss.yaml`) |
 | `drill drill.yaml` | Full orchestrated drill: load + chaos + metrics, one annotated report |
 | `scenario list/show/run` | Named reproductions — a data shape, a query mix, faults, and what to watch |
+| `experiment` | Change one tuning knob on the live cluster, A/B/A: noise measured, bursts told apart from shifts, knob put back |
 | `sweep sweep.yaml` | One workload x a config matrix, fresh cluster per cell, comparison table |
 | `dashboard` | The control panel: drive the cluster, tune it live, build queries, read the incident timeline (`--demo` to preview) |
 | `schema` | Explicit schema fields derived from a data profile (`--dry-run` to inspect) |
@@ -386,6 +387,31 @@ searchlab schema --collection events --profile profiles/high-cardinality.yaml
 ```
 
 Text maps to `text_general`; string/numeric/date fields get `docValues: true` by default. Override per field with a `solr:` block in the profile — e.g. `solr: { docValues: false }` on a facet field reproduces fieldCache heap pressure on demand.
+
+## Experiments: change one thing, honestly
+
+```
+searchlab experiment --collection products --knob result_cache --to 64
+```
+
+The quick question, "what does this knob do?", answered on the cluster you already have. Three phases replay the same seeded queries at the same rate: **A** with the knob as it is, **B** with `--to`, then **A′**, back as it was. Two things make it a fair comparison, and both are easy to get wrong by hand:
+
+- **Every phase starts from a reload, with a warm-up thrown away.** Turning a knob reloads the core, and a reload empties its caches. Measure "before" on warm caches and "after" on cold ones and you've measured a cache flush.
+- **A and A′ have the same setting, so the gap between them is the noise.** B only counts as a change when it moves more than twice that. p99 is also recomputed without each phase's worst second: a single stall (GC, a merge, another collection reloading) can make p99 jump 30x in one phase, and the report calls that a burst, not an effect. This check exists because it happened while building it.
+
+```
+                                  A          B         A′   B vs A      noise (A′ vs A)
+  latency p50 (ms)              6.6        6.8        6.4     +3.7%       4.3%   within noise
+  latency p99 (ms)              9.0        9.5        9.8     +1.1%       8.1%   within noise
+    without worst second        9.0        9.3        9.2     +2.4%       2.8%   within noise
+  queryResultCache hits        0.66       0.54       0.66
+
+  p50: B moved +3.7%: no measurable change.
+  queryResultCache hit ratio fell from 0.66 to 0.54, and latency didn't notice: on this
+  index and workload, a miss costs about what a hit does.
+```
+
+Cache hit ratios and GC per phase sit next to the latency, and when a cache clearly moved the report says whether latency moved with it. The knob always goes back as it was found, on Ctrl-C too: as an override if it was one, or to `solrconfig.xml` if it wasn't, and collections sharing the configset are named up front, since they change with it. Knob names are the control panel's (an unknown one lists what the collection has). Solr only for now. For changes a live cluster can't take (heap, GC flags, versions), use a sweep:
 
 ## Config sweeps
 

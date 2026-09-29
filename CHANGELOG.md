@@ -25,6 +25,15 @@
 - `explain` no longer names the `debug` component "your optimization
   target": it only runs because the report asked for it. It's set aside
   when judging the query, and called out when it is most of the time
+- `experiment`: change one tuning knob on the live cluster, A/B/A. Each
+  phase starts from a reload with a discarded warm-up (a knob change empties
+  the caches, so a naive before/after measures the flush) and replays the
+  same seeded queries. The A/A′ gap is the noise floor; p99 is also judged
+  without each phase's worst second, so a one-off stall is reported as a
+  burst rather than an effect. Cache hit ratios and GC per phase, read
+  against latency. The knob goes back exactly as found (override or file),
+  even on Ctrl-C, and collections sharing the configset are named
+- Landing page: the command list covers all 28 commands
 - Control panel: **Lessons** section — the same lessons, a step at a time
   in the browser, with click-to-answer questions, wait steps that poll the
   cluster, and cleanup on stop or tab close. The server runs steps by lesson

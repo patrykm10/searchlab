@@ -682,6 +682,43 @@ def learn_cmd(lesson):
     ln.run_lesson(ln.load_lesson(lessons[lesson]), spec.base_url(), engine=spec.engine)
 
 
+@main.command("experiment")
+@click.option("--collection", required=True)
+@click.option("--knob", required=True,
+              help="Tuning knob to change, as the control panel names it (e.g. filter_cache, "
+                   "soft_commit_s). An unknown name lists the ones this collection has.")
+@click.option("--to", "to_value", required=True, type=float, help="The value to try (B).")
+@click.option("--rps", default=50.0, show_default=True, help="Query rate in every phase.")
+@click.option("--duration", default="30", show_default=True, help="Measured time per phase.")
+@click.option("--warmup", default="10", show_default=True,
+              help="Load run and discarded at the start of each phase.")
+@click.option("--queries", "queries_path", default=None, type=click.Path(exists=True),
+              help="YAML query templates (default: queries/default.yaml if present).")
+@click.option("--seed", default=7, show_default=True, type=int,
+              help="Same seed in every phase, so every phase sends the same queries.")
+@click.option("--report", default=None, help="Also write the results as JSON.")
+def experiment_cmd(collection, knob, to_value, rps, duration, warmup, queries_path, seed, report):
+    """Change one knob and measure it honestly: A (current value), B (--to),
+    then A again. Every phase starts from a core reload with a discarded
+    warm-up, and replays the same seeded queries; how far the two A runs
+    differ is the noise, and B's change is only reported as real when it is
+    bigger than that. The knob is always put back. Solr only."""
+    from . import experiment as xp
+
+    spec = cl.load_spec()
+    if queries_path is None and Path("queries/default.yaml").exists():
+        queries_path = "queries/default.yaml"
+    res = xp.run_experiment(spec, collection, knob, to_value, rps=rps,
+                            duration=gates.parse_duration(duration),
+                            warmup=gates.parse_duration(warmup), seed=seed,
+                            queries_path=queries_path, say=click.echo)
+    click.echo("")
+    click.echo(xp.format_report(res))
+    if report:
+        Path(report).write_text(json.dumps(res, indent=2))
+        click.echo(f"\nreport: {report}")
+
+
 @main.command("explain")
 @click.argument("query_string")
 @click.option("--collection", required=True)
