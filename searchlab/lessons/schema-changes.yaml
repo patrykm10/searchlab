@@ -1,0 +1,161 @@
+title: "Schema changes on live data: accepted, then broken"
+engine: solr
+order: 5
+requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
+intro: |
+  The Schema API changes the schema. It doesn't change the index. Documents
+  already written keep the shape they were written with, and Lucene
+  refuses to let a field have two shapes at once. The API won't warn you:
+  the failure shows up later, on a write that has nothing wrong with it.
+  Let's walk into it on purpose.
+steps:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - http:
+      path: "/admin/collections"
+      params: { action: CREATE, name: lesson-lab, numShards: 1, replicationFactor: 1, wt: json }
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
+  - say: |
+      (A 400 from the DELETE just means there was no leftover lesson-lab to remove.)
+
+      One thing first. The CREATE named no configset, so Solr copied
+      _default into a private one called lesson-lab.AUTOCREATED. That
+      matters here: the Schema API edits the configset, not the collection.
+      Had we said collection.configName=_default, every change below would
+      land in the shared _default, and in every collection created from it
+      afterwards.
+  - http:
+      path: "/admin/collections"
+      params: { action: CLUSTERSTATUS, collection: lesson-lab, wt: json }
+      show: "cluster.collections.lesson-lab.configName"
+  - ask: "Two collections share one configset, and you add a field to one of them through the Schema API. What does the other one see?"
+    options:
+      - "nothing: each collection has its own schema"
+      - "the new field, straight away"
+    answer: 1
+    why: >
+      The schema lives in the configset in ZooKeeper, and every collection
+      using that configset watches the same file: checked here, the other
+      collection could write to the new field two seconds later, with no
+      reload. The control panel's schema
+      explorer lists the other collections sharing a configset for this
+      reason.
+  - say: "Now a field for star ratings, deliberately without docValues:"
+  - http:
+      method: POST
+      path: "/lesson-lab/schema"
+      json: { add-field: { name: rating, type: pint, indexed: true, stored: true, docValues: false } }
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: p1, rating: 4 }, { id: p2, rating: 2 }, { id: p3, rating: 5 } ]
+      show: "responseHeader.status"
+  - say: |
+      Now someone wants results sorted by rating. Sorting reads docValues
+      (a column-oriented copy of the field), so the fix looks like one line:
+      turn docValues on.
+  - ask: "What does the Schema API say to docValues=true on a field that already holds data?"
+    options:
+      - "it refuses: the field is populated"
+      - "it accepts the change"
+    answer: 1
+    why: >
+      The Schema API checks the new definition is valid, not whether it
+      matches the data already indexed.
+  - http:
+      method: POST
+      path: "/lesson-lab/schema"
+      json: { replace-field: { name: rating, type: pint, indexed: true, stored: true, docValues: true } }
+      show: "responseHeader.status"
+  - say: "Status 0: accepted. Now write one more document, a perfectly ordinary one:"
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: p4, rating: 3 } ]
+      show: "error.msg"
+      expect: { path: "responseHeader.status", op: eq, value: 400 }
+  - say: |
+      Rejected. Lucene records each field's docValues type in the segments
+      that contain it, and a field can't be "no docValues" in old segments
+      and "numeric docValues" in new ones. The schema change was accepted
+      a moment ago, and the write that pays for it is this unrelated one.
+  - ask: "Delete every document, so no segment holds the field any more. Does the write work then?"
+    options:
+      - "yes: no data, no conflict"
+      - "no"
+    answer: 1
+    why: >
+      The open IndexWriter keeps a map of every field it has seen and its
+      type, for as long as it's open. Emptying the index doesn't reset it.
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: { delete: { query: "*:*" } }
+      show: "responseHeader.status"
+  - http:
+      path: "/lesson-lab/admin/segments"
+      params: { wt: json }
+      show: "segments"
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: p4, rating: 3 } ]
+      show: "error.msg"
+      expect: { path: "responseHeader.status", op: eq, value: 400 }
+  - say: |
+      No segments at all, and still rejected. A RELOAD closes the core's
+      IndexWriter and opens a new one, which starts with no memory of the
+      old field:
+  - http:
+      path: "/admin/collections"
+      params: { action: RELOAD, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: p4, rating: 3 }, { id: p5, rating: 5 } ]
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "*:*", sort: "rating desc", fl: "id,rating", wt: json }
+      show: "response.docs"
+  - say: |
+      Writes work, and the sort works, but only because the index was
+      empty. With real data, you don't delete it and reload. You build a
+      NEW collection with the new schema, reindex into it, and move an
+      alias (CREATEALIAS) from the old collection to the new one, so
+      clients never see the switch.
+
+      Flipping indexed, changing the type (string to text_general, say), or
+      flipping multiValued on a field with docValues all do the same thing.
+      So does turning docValues back off once new segments have it. The
+      control panel's schema explorer warns you before you press the button:
+      each of its warnings was checked this way.
+  - ask: "Which schema change is safe on a populated field, with no reindex?"
+    options:
+      - "docValues false -> true"
+      - "changing the type from string to text_general"
+      - "stored true -> false"
+    answer: 2
+    why: >
+      stored only decides whether new documents keep their original value
+      to return in results. Lucene doesn't need it to be consistent across
+      segments, so writes keep working. Old documents still return the
+      value until they're reindexed.
+cleanup:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - say: "(removed the lesson-lab collection.)"

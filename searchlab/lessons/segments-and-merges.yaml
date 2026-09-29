@@ -1,0 +1,156 @@
+title: "Segments: why an update is a delete plus an add"
+engine: solr
+order: 4
+requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
+intro: |
+  A Lucene index isn't one file you edit. It's a set of SEGMENTS, each a
+  small index of its own, and a segment is never changed once it's written.
+  Everything odd about indexing follows from that: updates that grow the
+  index, deleted documents that still take up space, and merges running in
+  the background. Let's make some segments and watch.
+steps:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - http:
+      path: "/admin/collections"
+      params: { action: CREATE, name: lesson-lab, numShards: 1, replicationFactor: 1, wt: json }
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
+  - say: |
+      (A 400 from the DELETE just means there was no leftover lesson-lab to remove.)
+
+      Three documents in one request, then a commit:
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: b1, title_t: "first batch" }, { id: b2, title_t: "first batch" },
+              { id: b3, title_t: "first batch" } ]
+      show: "responseHeader.status"
+  - http:
+      path: "/lesson-lab/admin/segments"
+      params: { wt: json }
+      show: "segments"
+      fields: [size, delCount, source]
+  - say: |
+      One segment holding three documents. "flush" means it was written from
+      the in-memory buffer, as opposed to made by a merge.
+  - ask: "Now two more documents, each sent with its own commit. How many segments after that?"
+    options: ["1: they get added to the existing segment", "2", "3"]
+    answer: 2
+    why: >
+      A written segment is never modified, so each commit flushes whatever is
+      in the buffer into a new segment. Two commits make two new segments.
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: s1, title_t: "on its own" } ]
+      show: "responseHeader.status"
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: s2, title_t: "on its own" } ]
+      show: "responseHeader.status"
+  - http:
+      path: "/lesson-lab/admin/segments"
+      params: { wt: json }
+      show: "segments"
+      fields: [size, delCount, source]
+  - ask: "b1 lives in that first three-document segment. What happens when you update it?"
+    options:
+      - "the segment is rewritten with the new version"
+      - "the old copy is marked deleted where it is, and the new version goes into a new segment"
+      - "the new version waits in memory until the next merge"
+    answer: 1
+    why: >
+      Immutable segments can't take an edit, so an update is a delete plus an
+      add. The old copy stays on disk, flagged in a small deletes file (the
+      "live docs"), until a merge finally drops it.
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: b1, title_t: "first batch, edited" } ]
+      show: "responseHeader.status"
+  - http:
+      path: "/lesson-lab/admin/segments"
+      params: { wt: json }
+      show: "segments"
+      fields: [size, delCount, source]
+  - say: |
+      The first segment still says size=3, with delCount=1: it holds three
+      documents, and one of them no longer counts. That's the gap between
+      maxDoc (everything on disk) and numDocs (what search can see), and it's
+      why an index that only ever gets updates still grows.
+  - ask: "s1 is alone in its segment. Update it, and what happens to that segment?"
+    options:
+      - "same as before: size=1, delCount=1"
+      - "it disappears"
+    answer: 1
+    why: >
+      A segment whose every document is deleted is dropped at the next
+      commit. There's nothing left in it worth merging.
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: s1, title_t: "on its own, edited" } ]
+      show: "responseHeader.status"
+  - http:
+      path: "/lesson-lab/admin/segments"
+      params: { wt: json }
+      show: "segments"
+      fields: [size, delCount, source]
+  - say: |
+      Left alone, commits would pile up segments forever, and every search
+      has to visit every segment. The MERGE POLICY stops that by combining
+      segments in the background. With Solr's default (TieredMergePolicy,
+      segmentsPerTier=10) it waits until there are about ten segments of a
+      similar size.
+  - wait: |
+      Your turn: make it merge. Commit single documents until a segment shows
+      up with source=merge. In another terminal:
+
+        for i in $(seq 1 12); do
+          curl -s -X POST 'http://localhost:8983/solr/lesson-lab/update?commit=true' \
+            -H 'content-type: application/json' -d "[{\"id\":\"loop$i\"}]" > /dev/null
+        done
+
+      (Or open the control panel, pick lesson-lab, and use the segment view's
+      Snapshot and "what changed?" between writes to watch it happen.)
+    url: "/lesson-lab/admin/segments"
+    params: { wt: json }
+    until: { path: "segments.*.source", op: has_value, value: merge }
+  - http:
+      path: "/lesson-lab/admin/segments"
+      params: { wt: json }
+      show: "segments"
+      fields: [size, delCount, source]
+  - say: |
+      There it is: about ten small segments folded into one, labelled
+      "merge". If the first segment (the one with delCount=1) went into it,
+      the merged segment still says delCount=0: a merge copies only live
+      documents. Apart from a segment that's entirely deleted, merging is the
+      only way a deleted document ever leaves the disk.
+  - ask: "forceMerge (optimize) to one segment would tidy this up. Why is it discouraged on an index that keeps changing?"
+    options:
+      - "it rewrites the whole index, and on a big index it can leave a segment too large for normal merging"
+      - "it permanently loses the deleted documents"
+      - "Solr refuses it while there are open searchers"
+    answer: 0
+    why: >
+      Losing deleted documents is the point of a merge, not a risk. The cost
+      is rewriting everything, and on an index bigger than maxMergedSegmentMB
+      (5 GB by default) the one segment it leaves is too large for normal
+      merges: the policy only rewrites it again once its deleted share passes
+      deletesPctAllowed. On a read-only index built once, it can be worth it.
+cleanup:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - say: "(removed the lesson-lab collection.)"

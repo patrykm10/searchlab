@@ -6,7 +6,8 @@ from __future__ import annotations
 import pytest
 
 from searchlab.explain import explain_report, format_explain, format_timing
-from searchlab.learn import builtin_lessons, check_condition, dig, load_lesson, run_lesson
+from searchlab.learn import (builtin_lessons, check_condition, dig, load_lesson, render,
+                             run_lesson)
 
 # -------------------------------------------------------------- conditions ---
 
@@ -115,6 +116,124 @@ def test_builtin_lessons_are_valid():
     waits = [s for s in le["steps"] if "wait" in s]
     assert len(waits) == 2
     assert waits[0]["until"] == {"path": "cluster.live_nodes", "op": "len_eq", "value": 1}
+
+
+def test_dig_wildcard_fans_out():
+    # the analysis API's shape: stage class -> list of tokens
+    body = {"index": {"org.a.StandardTokenizer": [{"text": "The"}, {"text": "Runs"}],
+                      "org.a.PorterStemFilter": [{"text": "run"}]},
+            "segs": {"_0": {"source": "flush"}, "_1": {"source": "merge"}}}
+    assert dig(body, "index.*.*.text") == {"org.a.StandardTokenizer": ["The", "Runs"],
+                                          "org.a.PorterStemFilter": ["run"]}
+    assert dig(body, "segs.*.source") == {"_0": "flush", "_1": "merge"}
+    assert dig(body, "segs.*") == body["segs"]
+    assert dig({"x": 1}, "x.*") is None
+
+
+def test_has_value_checks_values_not_keys():
+    body = {"segments": {"_0": {"source": "flush"}, "_1": {"source": "merge"}}}
+    cond = {"path": "segments.*.source", "op": "has_value", "value": "merge"}
+    assert check_condition(body, cond)
+    assert not check_condition({"segments": {"_0": {"source": "flush"}}}, cond)
+    assert not check_condition({}, cond)
+    # contains on the same object checks keys, which is why has_value exists
+    assert not check_condition(body, {**cond, "op": "contains"})
+
+
+def test_render_is_readable():
+    # token stages: short class names, aligned, bracketed tokens
+    out = render({"org.apache.lucene.analysis.standard.StandardTokenizer": ["The", "Runs"],
+                  "org.apache.lucene.analysis.en.PorterStemFilter": ["run"]})
+    assert out.splitlines() == ["StandardTokenizer  [The] [Runs]",
+                                "PorterStemFilter   [run]"]
+    assert render([]) == "(none)" and render({}) == "(none)"
+    # a table of objects, narrowed to the columns asked for
+    segs = {"_0": {"size": 3, "delCount": 1, "source": "flush", "sizeInBytes": 9}}
+    assert render(segs, ["size", "delCount", "source"]) == "_0  size=3  delCount=1  source=flush"
+    assert render([{"id": "a", "rating": 5}]) == "id=a  rating=5"
+    assert render("msg") == '"msg"' and render(0) == "0"
+
+
+def test_render_falls_back_to_json_rather_than_hiding_nested_data():
+    # a whole response has nested objects; a one-line row would silently drop them
+    body = {"responseHeader": {"status": 0, "params": {"q": "x"}}}
+    assert '"params"' in render(body)
+    assert '"b"' in render([{"a": {"b": 1}}])
+
+
+def test_engine_mismatch_refuses_to_start():
+    lesson = load_lesson({"title": "t", "engine": "solr", "steps": [{"say": "x"}]})
+    with pytest.raises(SystemExit, match="solr"):
+        run_lesson(lesson, "http://b", io=ScriptedIO([]), engine="opensearch")
+    run_lesson(lesson, "http://b", io=ScriptedIO([]), engine="solr")
+    with pytest.raises(SystemExit):
+        load_lesson({"title": "t", "engine": "mongo", "steps": [{"say": "x"}]})
+
+
+def test_cleanup_runs_even_when_interrupted():
+    calls = []
+
+    def http(method, path, **kw):
+        calls.append(path)
+        return {"ok": 1}
+
+    class Interrupting(ScriptedIO):
+        def pause(self, prompt=""):
+            raise KeyboardInterrupt
+
+    lesson = load_lesson({"title": "t", "steps": [{"pause": ""}, {"http": {"path": "/never"}}],
+                          "cleanup": [{"http": {"path": "/drop"}}, {"say": "cleaned"}]})
+    io = Interrupting([])
+    run_lesson(lesson, "http://b", io=io, http=http)
+    assert calls == ["/drop"]
+    assert ("say", "\ncleaned") in io.log
+    with pytest.raises(SystemExit):
+        load_lesson({"title": "t", "steps": [{"say": "x"}], "cleanup": [{"ask": "q?"}]})
+
+
+def test_http_step_shows_request_and_survives_unreachable_cluster():
+    import httpx
+    io = ScriptedIO([])
+    lesson = load_lesson({"title": "t", "steps": [
+        {"http": {"path": "/admin/collections",
+                  "params": {"action": "LIST", "wt": "json"}, "show": "x"}}]})
+    run_lesson(lesson, "http://127.0.0.1:9", io=io)   # nothing listens on port 9
+    texts = [t for _, t in io.log]
+    assert "\n-> GET /admin/collections?action=LIST" in texts   # wt=json is noise, left out
+    assert any(t.startswith("!! ConnectError") for t in texts)
+    assert httpx  # the real client was used, not a stub
+
+
+def test_scratch_collection_lessons_are_self_contained():
+    # A lesson that CREATEs a collection must remove it however it ends, and
+    # must not name a configset: the Schema API edits the configset, so a
+    # lesson on configName=_default rewrote _default for the whole cluster
+    # (it happened while writing schema-changes). With none named, Solr makes
+    # a private <name>.AUTOCREATED copy and deletes it with the collection.
+    for name, lesson in builtin_lessons().items():
+        creates = [s["http"]["params"]["name"] for s in lesson["steps"]
+                   if "http" in s and (s["http"].get("params") or {}).get("action") == "CREATE"]
+        for coll in creates:
+            create = next(s["http"]["params"] for s in lesson["steps"]
+                          if "http" in s and (s["http"].get("params") or {}).get("name") == coll
+                          and s["http"]["params"].get("action") == "CREATE")
+            assert "collection.configName" not in create, name
+            drops = [s for s in lesson.get("cleanup") or []
+                     if "http" in s and s["http"]["params"] == {
+                         "action": "DELETE", "name": coll, "wt": "json"}]
+            assert drops, f"{name} creates {coll} but never removes it"
+
+
+def test_new_lessons_ship_and_name_their_engine():
+    lessons = builtin_lessons()
+    assert {"analysis-chain", "segments-and-merges", "schema-changes"} <= set(lessons)
+    for name, lesson in lessons.items():
+        assert lesson.get("engine") == "solr", name   # all of them call Solr's API
+    orders = sorted(lesson["order"] for lesson in lessons.values())
+    assert orders == list(range(1, len(lessons) + 1))   # a course: no gaps, no ties
+    merge_wait = next(s for s in lessons["segments-and-merges"]["steps"] if "wait" in s)
+    assert merge_wait["until"] == {"path": "segments.*.source", "op": "has_value",
+                                   "value": "merge"}
 
 
 # ----------------------------------------------------------------- explain ---

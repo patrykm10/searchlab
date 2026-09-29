@@ -15,6 +15,16 @@
   set-user-property and reset to file, limited to the 29 properties Solr 9.6
   accepts
 - Landing page leads with learning and experimenting rather than load testing
+- `learn`: three new lessons, each checked against Solr 9.6 —
+  **analysis-chain**, **segments-and-merges** (with a merge the learner
+  triggers and the lesson waits for) and **schema-changes** (an accepted
+  schema change that breaks the next write, and why deleting everything
+  doesn't fix it). `searchlab learn` lists all six as a course
+- Lesson engine: `*` wildcards in paths, a `has_value` condition, readable
+  rendering of token chains and segment tables (`fields` picks columns),
+  each request shown with its parameters, `engine:` checked against the
+  running cluster, `cleanup:` steps that run however a lesson ends, and an
+  unreachable cluster reported instead of a traceback
 
 ## 0.14.0 — interactive learning
 - `learn`: an interactive lesson engine that teaches against the LIVE

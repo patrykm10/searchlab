@@ -666,9 +666,12 @@ def learn_cmd(lesson):
     docs, answer questions; the lesson watches real state change."""
     lessons = ln.builtin_lessons()
     if not lesson:
-        click.echo("available lessons:\n")
-        for name, les in sorted(lessons.items()):
-            click.echo(f"  {name:<26} {les['title']}")
+        click.echo("available lessons, in a suggested order:\n")
+        # `order` makes the list a course: each lesson leans on the ones above
+        for name, les in sorted(lessons.items(),
+                                key=lambda kv: (kv[1].get("order", 99), kv[0])):
+            click.echo(f"  {name:<26} {les['title']}"
+                       + (f"  [{les['engine']}]" if les.get("engine") else ""))
             if les.get("requires"):
                 click.echo(f"  {'':<26} requires: {les['requires']}")
         click.echo("\nrun one: searchlab learn <name>")
@@ -676,7 +679,7 @@ def learn_cmd(lesson):
     if lesson not in lessons:
         raise SystemExit(f"searchlab: no lesson '{lesson}' — run `searchlab learn` to list")
     spec = cl.load_spec()
-    ln.run_lesson(ln.load_lesson(lessons[lesson]), spec.base_url())
+    ln.run_lesson(ln.load_lesson(lessons[lesson]), spec.base_url(), engine=spec.engine)
 
 
 @main.command("explain")

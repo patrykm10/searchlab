@@ -1,4 +1,6 @@
 title: "Commits: why your document isn't searchable yet"
+engine: solr
+order: 3
 requires: "a cluster with a collection named 'products' (quickstart makes one)"
 intro: |
   The most common Solr surprise: you indexed a document, queried, and it
