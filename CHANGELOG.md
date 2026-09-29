@@ -33,6 +33,9 @@
   burst rather than an effect. Cache hit ratios and GC per phase, read
   against latency. The knob goes back exactly as found (override or file),
   even on Ctrl-C, and collections sharing the configset are named
+- Control panel: **Try a value as an experiment** under the tuning knobs
+  runs the same A/B/A from the page; a load test, a second experiment and
+  knob turns are refused while one runs, since they'd be measured with it
 - Landing page: the command list covers all 28 commands
 - Control panel: **Lessons** section — the same lessons, a step at a time
   in the browser, with click-to-answer questions, wait steps that poll the

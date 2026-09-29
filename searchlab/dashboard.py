@@ -391,6 +391,14 @@ def make_handler(spec: ClusterSpec, demo: bool,
                 # ES/OS: a whole-index copy into more shards, not Solr's
                 # per-shard split
                 return runner.split_index(coll, body.get("shards"))
+            if path == "/api/experiment/start":
+                try:
+                    return runner.start_experiment(
+                        coll, str(body.get("knob", "")), float(body.get("to")),
+                        float(body.get("rps", 50)), float(body.get("duration", 30)),
+                        float(body.get("warmup", 10)))
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "The value to try must be a number."}
             if path.startswith("/api/lesson/"):
                 return self._lesson_post(path, body)
             if path == "/api/replica/remove":

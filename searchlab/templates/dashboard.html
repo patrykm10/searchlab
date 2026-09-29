@@ -585,6 +585,19 @@ textarea:focus { border-color: var(--cobalt); }
   .wp-arrow { display: none; }
   .wp-stage { grid-template-columns: 1fr; }
 }
+/* ---------- experiment (A/B/A on one knob) ---------- */
+#exp-box { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
+#exp-box h3 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 4px; }
+.exp-form { display: flex; gap: 14px 22px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.exp-form > div { display: flex; flex-direction: column; gap: 4px; }
+#exp-to { width: 110px; }
+#exp-status { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+#exp-status.on { color: var(--cobalt); }
+#exp-status.err { color: var(--crit); }
+#exp-status:empty { display: none; }
+#exp-report { font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre;
+  overflow-x: auto; background: var(--card); border: 1.5px solid var(--line); padding: 10px 14px; }
+#exp-report:empty { display: none; }
 /* ---------- lessons ---------- */
 .ls-row { display: grid; grid-template-columns: 26px 1fr auto; gap: 2px 14px;
   padding: 10px 0; border-top: 1px solid var(--line); align-items: baseline; }
@@ -1035,6 +1048,25 @@ section.collapsed h2 { margin-bottom: 0; }
   <div class="desc">Adjust how the engine behaves. Changes go live within seconds — no restart.</div>
   <div id="tuning-note" class="desc" style="display:none"></div>
   <div id="knobs"><span class="desc">Loading current settings…</span></div>
+  <div id="exp-box" style="display:none">
+    <h3>Try a value as an experiment</h3>
+    <div class="desc">Before keeping a change, measure it. A (the knob as it is), B (the
+      value below), then A again, all replaying the same queries, each from a fresh reload
+      with a warm-up thrown away. How far the two A runs differ is the noise; B only counts
+      when it moves more than that. The knob is put back afterwards either way.</div>
+    <div class="exp-form">
+      <div><label for="exp-knob">Knob</label><select id="exp-knob"></select></div>
+      <div><label for="exp-to">Try</label><input id="exp-to" type="number"></div>
+      <div><label for="exp-len">Each phase</label><select id="exp-len">
+        <option value="10,20">10 s warm-up + 20 s</option>
+        <option value="15,30" selected>15 s warm-up + 30 s</option>
+        <option value="20,60">20 s warm-up + 60 s</option></select></div>
+      <div><label for="exp-rps">Rate</label><input id="exp-rps" type="number" value="50" min="1"></div>
+      <button class="btn primary" id="btn-exp-run">Run A / B / A&prime;</button>
+    </div>
+    <div id="exp-status"></div>
+    <div id="exp-report"></div>
+  </div>
 </section>
 <section id="lessons-section">
   <h2>Lessons</h2>
@@ -1865,6 +1897,7 @@ function renderControls(a) {
     return;
   }
   const load = a.load || {}, idx = a.index || {};
+  renderExperiment(a.experiment);
   const lbtn = $("btn-load");
   lbtn.dataset.running = load.running ? "1" : "0";
   lbtn.textContent = load.running ? "Stop load test" : "Start load test";
@@ -1915,6 +1948,7 @@ async function loadTuning(collection) {
       return;
     }
     knobsFor = collection;
+    fillExperimentKnobs(out.registry, out.values);
     const note = $("tuning-note");
     note.style.display = out.note ? "block" : "none";
     note.textContent = out.note || "";
@@ -5882,6 +5916,73 @@ async function pollLogs() {
     logCursor = out.latest ?? logCursor;
     if (logAnchor == null) renderLog();   // paged-back view stays frozen
   } catch (e) { /* retry next tick */ }
+}
+
+/* ---------- experiment: A/B/A on one knob ----------
+   The server runs it (experiment.py); the page starts it and reads progress
+   and the report back from the action state it already polls. */
+let expRegistry = {}, expValues = {};
+
+function fillExperimentKnobs(registry, values) {
+  expRegistry = registry; expValues = values;
+  const sel = $("exp-knob"), keep = sel.value;
+  sel.innerHTML = Object.entries(registry).map(([name, k]) =>
+    `<option value="${sxe(name)}">${esc(k.label)}</option>`).join("");
+  if (keep && registry[keep]) sel.value = keep;
+  expKnobChanged();
+}
+
+function expKnobChanged() {
+  const k = expRegistry[$("exp-knob").value];
+  if (!k) return;
+  const cur = expValues[$("exp-knob").value];
+  const inp = $("exp-to");
+  inp.min = k.min; inp.max = k.max;
+  inp.placeholder = `${k.min}–${k.max} ${k.unit}`;
+  $("exp-to").title = `Now: ${cur ?? "the solrconfig default"} ${k.unit}`;
+}
+$("exp-knob").addEventListener("change", expKnobChanged);
+
+$("btn-exp-run").addEventListener("click", async () => {
+  const to = $("exp-to").value;
+  if (to === "") { $("exp-status").className = "err";
+    $("exp-status").textContent = "Enter the value to try (B)."; return; }
+  const [warmup, duration] = $("exp-len").value.split(",").map(Number);
+  $("exp-report").textContent = "";
+  const out = await post("/api/experiment/start", { collection: knobsFor || coll(),
+    knob: $("exp-knob").value, to: Number(to), rps: Number($("exp-rps").value),
+    duration, warmup });
+  if (!out.ok) { $("exp-status").className = "err"; $("exp-status").textContent = out.error; return; }
+  $("exp-status").className = "on";
+  $("exp-status").textContent = "Starting…";
+  poll();
+});
+
+let expWasRunning = false;
+function renderExperiment(e) {
+  if (!e) return;
+  $("exp-box").style.display = e.available ? "" : "none";
+  if (!e.available) return;
+  $("btn-exp-run").disabled = !!e.running;
+  // a knob turned mid-experiment would be measured as part of it
+  for (const input of $("knobs").querySelectorAll("input[type=range]")) input.disabled = !!e.running;
+  const st = $("exp-status");
+  if (e.running) {
+    const last = (e.lines || []).slice(-1)[0] || "starting…";
+    const m = Math.floor((e.elapsed_s || 0) / 60), sec = (e.elapsed_s || 0) % 60;
+    st.className = "on";
+    st.textContent = `${last}  (${m} min ${sec} s of about ${Math.round((e.est_s || 0) / 60)} min)`;
+    $("exp-report").textContent = "";
+  } else if (e.error) {
+    st.className = "err";
+    st.textContent = e.error;
+  } else if (e.report) {
+    st.className = "";
+    st.textContent = `${e.knob} on ${e.collection}: finished, and the knob is back as it was.`;
+    if (expWasRunning || !$("exp-report").textContent) $("exp-report").textContent = e.report;
+  }
+  if (expWasRunning && !e.running && knobsFor) loadTuning(knobsFor);   // show restored values
+  expWasRunning = !!e.running;
 }
 
 /* ---------- lessons ----------

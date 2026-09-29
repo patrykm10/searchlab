@@ -380,3 +380,78 @@ def test_lesson_api_refuses_what_the_lesson_file_does_not_say(lesson_server):
                         {"name": "analysis-chain", "index": 0})
     assert status == 409 and "opensearch" in out["error"]
     assert sent == []
+
+
+# -------------------------------------------------------------- experiment ---
+
+def _wait_until(pred, timeout=5.0):
+    import time as _t
+    end = _t.time() + timeout
+    while _t.time() < end:
+        if pred():
+            return True
+        _t.sleep(0.02)
+    return False
+
+
+def test_experiment_runs_in_the_background_and_reports_back(monkeypatch):
+    import searchlab.experiment as xp
+    from searchlab.actions import ActionRunner
+
+    gate = threading.Event()
+
+    def fake_run(spec, coll, knob, to, *, say, **kw):
+        say("phase A (result_cache = 512 entries): …")
+        gate.wait(5)
+        return {"collection": coll, "knob": knob, "phases": []}
+
+    monkeypatch.setattr(xp, "run_experiment", fake_run)
+    monkeypatch.setattr(xp, "format_report", lambda res: "the report")
+    r = ActionRunner(ClusterSpec())
+    assert r.start_experiment("c", "result_cache", 64, 50, 20, 10) == {"ok": True}
+    assert _wait_until(lambda: r.state()["experiment"]["lines"])
+    st = r.state()["experiment"]
+    assert st["running"] and st["knob"] == "result_cache" and st["est_s"] == 114
+    # while it runs: no second experiment, no load test, no knob turns
+    assert "already running" in r.start_experiment("c", "result_cache", 64, 50, 20, 10)["error"]
+    assert "experiment" in r.start_load("c", 10)["error"]
+    assert "experiment" in r.tune("c", "result_cache", 100)["error"]
+    gate.set()
+    assert _wait_until(lambda: not r.state()["experiment"]["running"])
+    st = r.state()["experiment"]
+    assert st["report"] == "the report" and st["error"] is None
+    assert r.state()["last_action"]["ok"] is True
+
+
+def test_experiment_refusals(monkeypatch):
+    import searchlab.experiment as xp
+    from searchlab.actions import ActionRunner
+
+    assert "Solr-only" in ActionRunner(ClusterSpec(engine="opensearch")).start_experiment(
+        "c", "k", 1, 50, 20, 10)["error"]
+    assert ActionRunner(ClusterSpec(engine="opensearch")).state()["experiment"]["available"] is False
+    r = ActionRunner(ClusterSpec())
+    assert "collection" in r.start_experiment("", "k", 1, 50, 20, 10)["error"]
+    assert "out of range" in r.start_experiment("c", "k", 1, 50, 2, 10)["error"]
+    # a failure inside the run is reported, with the CLI's prefix dropped
+    monkeypatch.setattr(xp, "run_experiment", lambda *a, **k: (_ for _ in ()).throw(
+        SystemExit("searchlab: no knob 'k' on c — available: filter_cache")))
+    assert r.start_experiment("c", "k", 1, 50, 20, 10)["ok"]
+    assert _wait_until(lambda: r.state()["experiment"]["error"])
+    assert r.state()["experiment"]["error"].startswith("no knob 'k'")
+
+
+def test_experiment_route_rejects_a_non_number():
+    class Runner:
+        def start_experiment(self, *a):
+            raise AssertionError("must not be called with a bad value")
+
+    handler = make_handler(ClusterSpec(), demo=False, runner=Runner(), logs=None)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        status, out = _post(f"http://127.0.0.1:{server.server_address[1]}/api/experiment/start",
+                            {"collection": "c", "knob": "result_cache", "to": "lots"})
+        assert status == 409 and "number" in out["error"]
+    finally:
+        server.shutdown()

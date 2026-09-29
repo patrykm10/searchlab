@@ -110,7 +110,7 @@ A single self-contained page (no CDN, no build step) that both *shows* the clust
 
 **Drive it:** ramp RPS live with a slider while a load test runs, index N documents of chosen complexity, force a commit or a merge, expunge deletes, reload, purge, create and delete collections, add and remove replicas by type, split a shard.
 
-**Tune it while it runs:** knobs for soft/hard commit interval, filter and result cache size, RAM buffer, merge policy (segments per tier, max merged segment, deletes allowed), and merge scheduler threads. Turning one writes through the Config API on Solr, or index settings on ES/OS — no restart, no editing `solrconfig.xml`, and each knob links to the endpoint that proves its live value.
+**Tune it while it runs:** knobs for soft/hard commit interval, filter and result cache size, RAM buffer, merge policy (segments per tier, max merged segment, deletes allowed), and merge scheduler threads. Turning one writes through the Config API on Solr, or index settings on ES/OS — no restart, no editing `solrconfig.xml`, and each knob links to the endpoint that proves its live value. Under the knobs, **Try a value as an experiment** runs the same A/B/A as `searchlab experiment` (below) from the page, with progress by phase, the knobs locked while it runs, and the report when it's done.
 
 **Read it in plain language:** an insights panel that says *why* something is wrong rather than only that it is — "heap above 80% on solr2, which is why p99 is climbing" — with the alert history foldable so it stops disappearing before you finish reading.
 
