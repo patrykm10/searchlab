@@ -34,6 +34,24 @@ def test_datagen_deterministic_with_seed():
     assert a == b
 
 
+def test_datagen_dates_do_not_follow_the_clock(monkeypatch):
+    # Dates were now() minus a seeded offset, so two seeded runs a second
+    # apart differed (this test's neighbour failed intermittently). Within a
+    # day the clock no longer matters; an explicit anchor pins it for good.
+    import searchlab.datagen as dg
+    from datetime import datetime, timezone
+    profile = {"fields": {"ts_dt": {"type": "date", "days_back": 30}}}
+    clock = iter([datetime(2026, 9, 30, 8, 0, 0, tzinfo=timezone.utc),
+                  datetime(2026, 9, 30, 21, 59, 59, tzinfo=timezone.utc)])
+    monkeypatch.setattr(dg, "_now", lambda: next(clock))
+    a = list(generate(profile, 50, seed=3))
+    b = list(generate(profile, 50, seed=3))
+    assert a == b
+    assert all(d["ts_dt"] < "2026-09-30T00:00:00Z" for d in a)    # counted back from midnight
+    pinned = {"fields": {"ts_dt": {"type": "date", "days_back": 1, "anchor": "2026-01-02"}}}
+    assert all(d["ts_dt"].startswith("2026-01-01") for d in generate(pinned, 20, seed=1))
+
+
 def test_datagen_uuid_ids_deterministic_with_seed():
     profile = load_profile(ROOT / "profiles" / "high-cardinality.yaml")
     a = list(generate(profile, 100, seed=1))

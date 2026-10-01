@@ -15,6 +15,47 @@
   set-user-property and reset to file, limited to the 29 properties Solr 9.6
   accepts
 - Landing page leads with learning and experimenting rather than load testing
+- `learn`: three new lessons, each checked against Solr 9.6 —
+  **analysis-chain**, **segments-and-merges** (with a merge the learner
+  triggers and the lesson waits for) and **schema-changes** (an accepted
+  schema change that breaks the next write, and why deleting everything
+  doesn't fix it), and **scoring** (BM25's three levers on five documents,
+  ending with the learner re-ranking one), and **caching** (which cache
+  answers which request, read from Solr's own counters). `searchlab learn`
+  lists all eight as a course
+- `explain` no longer names the `debug` component "your optimization
+  target": it only runs because the report asked for it. It's set aside
+  when judging the query, and called out when it is most of the time
+- `experiment`: change one tuning knob on the live cluster, A/B/A. Each
+  phase starts from a reload with a discarded warm-up (a knob change empties
+  the caches, so a naive before/after measures the flush) and replays the
+  same seeded queries. The A/A′ gap is the noise floor; p99 is also judged
+  without each phase's worst second, so a one-off stall is reported as a
+  burst rather than an effect. Cache hit ratios and GC per phase, read
+  against latency. The knob goes back exactly as found (override or file),
+  even on Ctrl-C, and collections sharing the configset are named
+- Control panel: **Try a value as an experiment** under the tuning knobs
+  runs the same A/B/A from the page; a load test, a second experiment and
+  knob turns are refused while one runs, since they'd be measured with it
+- Landing page: the command list covers all 28 commands
+- `experiment --rounds N` (and a Rounds choice in the panel): A B A B … A,
+  where a change counts only if every B run is on the same side of every A
+  run and further from them than the A runs spread
+- Fixed: seeded data generation wasn't reproducible for profiles with a
+  `date` field. Dates were `now()` minus a seeded offset, so two runs a
+  second apart differed (a determinism test failed intermittently). They
+  now count back from the start of the current UTC day, and a field can
+  pin `anchor:` to reproduce across days
+- Control panel: **Lessons** section — the same lessons, a step at a time
+  in the browser, with click-to-answer questions, wait steps that poll the
+  cluster, and cleanup on stop or tab close. The server runs steps by lesson
+  name and number, never a request the page supplies
+- Lesson engine: dot paths reach keys that contain dots (Solr's metric
+  names), `fields` narrows a flat object too, `*` wildcards in paths, a `has_value` condition, readable
+  rendering of token chains and segment tables (`fields` picks columns),
+  each request shown with its parameters, `engine:` checked against the
+  running cluster, `cleanup:` steps that run however a lesson ends, and an
+  unreachable cluster reported instead of a traceback
 
 ## 0.14.0 — interactive learning
 - `learn`: an interactive lesson engine that teaches against the LIVE

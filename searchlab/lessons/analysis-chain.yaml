@@ -1,0 +1,120 @@
+title: "Analysis: what the index actually stores"
+engine: solr
+order: 2
+requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
+intro: |
+  You search for words, but the index doesn't hold words. It holds TERMS:
+  whatever is left after the text has been through an analysis chain (a
+  tokenizer, then a series of filters). Most "why didn't this match?" puzzles
+  come down to two chains producing different terms. Let's watch one run.
+steps:
+  - say: "First, a scratch collection. With no configset named, Solr gives it a private copy of _default:"
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - http:
+      path: "/admin/collections"
+      params: { action: CREATE, name: lesson-lab, numShards: 1, replicationFactor: 1, wt: json }
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
+  - say: |
+      (A 400 from the DELETE just means there was no leftover lesson-lab to remove.)
+
+      The field analysis API runs a value through a field type's chain and
+      reports the tokens after every stage. Here is text_en, which the
+      _default schema uses for any field ending in _txt_en:
+  - http:
+      path: "/lesson-lab/analysis/field"
+      params: { analysis.fieldtype: text_en, analysis.fieldvalue: "The Runners were running",
+                wt: json, json.nl: map }
+      show: "analysis.field_types.text_en.index.*.*.text"
+  - say: |
+      Read it top to bottom. The tokenizer splits on word boundaries. The
+      StopFilter drops "The", but keeps "were": a stop list is just a file of
+      words (lang/stopwords_en.txt), not a grammar, and "were" isn't in it.
+      Then lowercasing, then the Porter stemmer, which cuts suffixes by rule:
+      "running" becomes "run", and "runners" becomes "runner".
+  - ask: "A user searches this field for: ran. Does the document match?"
+    options:
+      - "yes: it's the same verb as running"
+      - "no: the stemmer never produces the term ran's analysis would need"
+    answer: 1
+    why: >
+      Porter works on spelling, not meaning. "ran" stays "ran", and the
+      document holds "run" and "runner". Irregular forms need a dictionary
+      stemmer or synonyms.
+  - say: "Now the same text through text_general, the type behind *_t fields:"
+  - http:
+      path: "/lesson-lab/analysis/field"
+      params: { analysis.fieldtype: text_general, analysis.fieldvalue: "The Runners were running",
+                wt: json, json.nl: map }
+      show: "analysis.field_types.text_general.index.*.*.text"
+  - say: |
+      Three stages instead of six, and no stemming: "running" stays "running".
+      Its StopFilter ran and removed nothing, because _default's stopwords.txt
+      is empty. Let's index one document with the text in both fields:
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: "a1", title_txt_en: "The Runners were running",
+                title_t: "The Runners were running" } ]
+      show: "responseHeader.status"
+  - ask: "Which search finds it: title_t:run, or title_txt_en:runs?"
+    options:
+      - "title_t:run"
+      - "title_txt_en:runs"
+      - "both"
+    answer: 1
+    why: >
+      title_t stored "running", and "run" is a different term. title_txt_en
+      stored "run", and the query "runs" is stemmed to "run" too. A query is
+      analyzed as well, by the field's query-time chain.
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "title_t:run", wt: json }
+      show: "response.numFound"
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "title_txt_en:runs", wt: json }
+      show: "response.numFound"
+      expect: { path: "response.numFound", op: eq, value: 1 }
+  - say: |
+      The query side has its own chain, and it isn't always the same as the
+      index side. Here's text_en analyzing the query "runs":
+  - http:
+      path: "/lesson-lab/analysis/field"
+      params: { analysis.fieldtype: text_en, analysis.fieldvalue: "x", analysis.query: "runs",
+                wt: json, json.nl: map }
+      show: "analysis.field_types.text_en.query.*.*.text"
+  - say: |
+      There's a SynonymGraphFilter here that the index chain doesn't have.
+      Putting synonyms at query time means changing them never needs a
+      reindex. A match happens when the two chains land on the same term,
+      and nowhere else.
+  - wait: |
+      Your turn. Index a document into lesson-lab that the search
+      title_txt_en:swim will find, without using the word "swim" itself.
+      Something like:
+
+        curl -X POST 'http://localhost:8983/solr/lesson-lab/update?commit=true' \
+          -H 'content-type: application/json' \
+          -d '[{"id":"yours","title_txt_en":"..."}]'
+
+      (Keep commit=true: without a commit the document isn't searchable yet.
+      The commits-and-visibility lesson is about exactly that.)
+    url: "/lesson-lab/select"
+    params: { q: "title_txt_en:swim", wt: json }
+    until: { path: "response.numFound", op: gte, value: 1 }
+  - say: |
+      Found it. Whatever you wrote ("swimming", "swims"…) was analyzed down to
+      the same term the query was. When a search misses, run both sides
+      through the analysis API (or the control panel's write-path explorer)
+      and compare the terms. It's almost always there.
+cleanup:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - say: "(removed the lesson-lab collection.)"

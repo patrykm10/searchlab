@@ -33,6 +33,23 @@ _WORDS = (
 ).split()
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _date_anchor(cfg: dict[str, Any]) -> datetime:
+    """The moment `days_back` counts back from. It used to be now() at each
+    value, so a seeded run gave different dates once the clock ticked over a
+    second, and "same seed, same dataset" failed for any profile with a date.
+    Now it's the start of the current UTC day, fixed for the whole run: the
+    same seed on the same day gives the same documents, and dates stay
+    recent. A profile that must match across days sets `anchor: 2026-01-01`."""
+    if cfg.get("anchor"):
+        a = datetime.fromisoformat(str(cfg["anchor"]))
+        return a if a.tzinfo else a.replace(tzinfo=timezone.utc)
+    return _now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 class FieldGen:
     """One field generator, built from its profile definition."""
 
@@ -41,6 +58,8 @@ class FieldGen:
         self.cfg = cfg
         self.rng = rng
         self.type = cfg.get("type", "text")
+        if self.type == "date":
+            self.anchor = _date_anchor(cfg)
         # Vectors: pre-build cluster centroids. Uniform random vectors are
         # pathological for ANN benchmarking (everything is equidistant), so we
         # generate around centroids — the shape real embeddings actually have.
@@ -96,7 +115,7 @@ class FieldGen:
             return round(self.rng.uniform(float(self.cfg.get("min", 0)), float(self.cfg.get("max", 1000))), 4)
         if t == "date":
             days = int(self.cfg.get("days_back", 365))
-            dt = datetime.now(timezone.utc) - timedelta(
+            dt = self.anchor - timedelta(
                 seconds=self.rng.randint(0, days * 86400)
             )
             return dt.strftime("%Y-%m-%dT%H:%M:%SZ")

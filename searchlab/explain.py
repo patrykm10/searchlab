@@ -56,12 +56,22 @@ def format_timing(debug: dict) -> str:
         parts.sort(key=lambda x: -x[1])
         shown = ", ".join(f"{n} {t}ms" for n, t in parts if t > 0) or "all ~0ms"
         lines.append(f"  {phase:<8} {ph.get('time', 0):>5} ms   ({shown})")
+    # The debug component runs only because this report asked for it, and on
+    # a small index it is most of the time, so it was being named "your
+    # optimization target". Judge the query by the rest.
+    debug_ms = sum(c.get("time", 0) for ph in ("prepare", "process")
+                   for n, c in timing.get(ph, {}).items()
+                   if n == "debug" and isinstance(c, dict))
+    query_ms = total - debug_ms
     biggest = max(
         ((n, c.get("time", 0)) for n, c in timing.get("process", {}).items()
-         if isinstance(c, dict)),
+         if isinstance(c, dict) and n != "debug"),
         key=lambda x: x[1], default=(None, 0))
-    if biggest[0] and total and biggest[1] > total * 0.5:
+    if biggest[0] and query_ms > 0 and biggest[1] > query_ms * 0.5:
         lines.append(f"  >> '{biggest[0]}' dominates — that's your optimization target")
+    if total and debug_ms > total * 0.5:
+        lines.append(f"  (most of it is 'debug', the cost of producing this report; "
+                     f"the query itself took about {query_ms:g} ms)")
     return "\n".join(lines)
 
 

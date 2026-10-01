@@ -585,6 +585,55 @@ textarea:focus { border-color: var(--cobalt); }
   .wp-arrow { display: none; }
   .wp-stage { grid-template-columns: 1fr; }
 }
+/* ---------- experiment (A/B/A on one knob) ---------- */
+#exp-box { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
+#exp-box h3 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 4px; }
+.exp-form { display: flex; gap: 14px 22px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.exp-form > div { display: flex; flex-direction: column; gap: 4px; }
+#exp-to { width: 110px; }
+#exp-status { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+#exp-status.on { color: var(--cobalt); }
+#exp-status.err { color: var(--crit); }
+#exp-status:empty { display: none; }
+#exp-report { font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre;
+  overflow-x: auto; background: var(--card); border: 1.5px solid var(--line); padding: 10px 14px; }
+#exp-report:empty { display: none; }
+/* ---------- lessons ---------- */
+.ls-row { display: grid; grid-template-columns: 26px 1fr auto; gap: 2px 14px;
+  padding: 10px 0; border-top: 1px solid var(--line); align-items: baseline; }
+.ls-row:first-child { border-top: none; }
+.ls-n { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+.ls-t { font-weight: 600; }
+.ls-name { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: 8px; }
+.ls-req { grid-column: 2 / 4; font-size: 12px; color: var(--faint); }
+.ls-bar { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; margin-bottom: 10px; }
+#ls-progress { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+#btn-ls-stop { margin-left: auto; }
+#ls-log { border: 1.5px solid var(--line); background: var(--card); padding: 4px 16px 12px;
+  max-height: 70vh; overflow: auto; }
+.ls-item { padding: 10px 0; border-top: 1px solid var(--line); }
+.ls-item:first-child { border-top: none; }
+.ls-item p { max-width: 78ch; margin-bottom: 8px; font-size: 14px; }
+.ls-item p:last-child { margin-bottom: 0; }
+.ls-code, .ls-out { font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre;
+  overflow-x: auto; background: var(--paper); border: 1px solid var(--line);
+  padding: 8px 10px; margin: 6px 0 8px; }
+.ls-reqline { font-family: var(--mono); font-size: 12px; color: var(--cobalt); overflow-wrap: anywhere; }
+.ls-err { color: var(--crit); font-family: var(--mono); font-size: 12px; margin-top: 4px; }
+.ls-warn { color: var(--warn); font-size: 12.5px; }
+.ls-q { font-weight: 600; margin-bottom: 8px; max-width: 78ch; }
+.ls-opts { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
+.ls-opts .btn { font-weight: 500; text-align: left; }
+.ls-opts .btn.right, .ls-opts .btn.right:disabled { color: var(--cobalt); border-bottom-color: var(--cobalt); }
+.ls-opts .btn.wrong, .ls-opts .btn.wrong:disabled { color: var(--crit); text-decoration: line-through; }
+.ls-verdict { margin-top: 8px; font-size: 13.5px; max-width: 78ch; }
+.ls-verdict:empty { display: none; }
+.ls-wait { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex;
+  gap: 14px; align-items: baseline; margin-top: 6px; }
+.ls-wait.met { color: var(--cobalt); }
+.ls-done { font-weight: 700; }
+@media (max-width: 640px) { .ls-row { grid-template-columns: 22px 1fr; }
+  .ls-row .btn { grid-column: 2; justify-self: start; } .ls-req { grid-column: 2; } }
 /* ---------- schema explorer ---------- */
 .sx-head { font-family: var(--mono); font-size: 12px; color: var(--muted);
   margin: 4px 0 12px; line-height: 1.7; }
@@ -999,6 +1048,43 @@ section.collapsed h2 { margin-bottom: 0; }
   <div class="desc">Adjust how the engine behaves. Changes go live within seconds — no restart.</div>
   <div id="tuning-note" class="desc" style="display:none"></div>
   <div id="knobs"><span class="desc">Loading current settings…</span></div>
+  <div id="exp-box" style="display:none">
+    <h3>Try a value as an experiment</h3>
+    <div class="desc">Before keeping a change, measure it. A (the knob as it is), B (the
+      value below), then A again, all replaying the same queries, each from a fresh reload
+      with a warm-up thrown away. How far the two A runs differ is the noise; B only counts
+      when it moves more than that. The knob is put back afterwards either way.</div>
+    <div class="exp-form">
+      <div><label for="exp-knob">Knob</label><select id="exp-knob"></select></div>
+      <div><label for="exp-to">Try</label><input id="exp-to" type="number"></div>
+      <div><label for="exp-len">Each phase</label><select id="exp-len">
+        <option value="10,20">10 s warm-up + 20 s</option>
+        <option value="15,30" selected>15 s warm-up + 30 s</option>
+        <option value="20,60">20 s warm-up + 60 s</option></select></div>
+      <div><label for="exp-rps">Rate</label><input id="exp-rps" type="number" value="50" min="1"></div>
+      <div><label for="exp-rounds">Rounds</label><select id="exp-rounds"
+          title="More rounds alternate A and B again (A B A B … A): slower, and much harder to fool">
+        <option value="1" selected>1: A B A′</option>
+        <option value="2">2: A B A B A</option>
+        <option value="3">3: A B A B A B A</option></select></div>
+      <button class="btn primary" id="btn-exp-run">Run the experiment</button>
+    </div>
+    <div id="exp-status"></div>
+    <div id="exp-report"></div>
+  </div>
+</section>
+<section id="lessons-section">
+  <h2>Lessons</h2>
+  <div class="desc">Short lessons that run against this cluster, the same ones as
+    <code>searchlab learn</code>, in a suggested order. Nothing is simulated: every
+    request goes to the cluster and you see what came back, and when a lesson asks
+    you to do something, it waits until the cluster shows that you did.</div>
+  <div id="ls-list"><span class="desc">Loading lessons…</span></div>
+  <div id="ls-run" style="display:none">
+    <div class="ls-bar"><b id="ls-title"></b><span id="ls-progress"></span>
+      <button class="btn" id="btn-ls-stop">Stop and clean up</button></div>
+    <div id="ls-log"></div>
+  </div>
 </section>
 <section id="writepath-section">
   <h2>Write path</h2>
@@ -1816,6 +1902,7 @@ function renderControls(a) {
     return;
   }
   const load = a.load || {}, idx = a.index || {};
+  renderExperiment(a.experiment);
   const lbtn = $("btn-load");
   lbtn.dataset.running = load.running ? "1" : "0";
   lbtn.textContent = load.running ? "Stop load test" : "Start load test";
@@ -1866,6 +1953,7 @@ async function loadTuning(collection) {
       return;
     }
     knobsFor = collection;
+    fillExperimentKnobs(out.registry, out.values);
     const note = $("tuning-note");
     note.style.display = out.note ? "block" : "none";
     note.textContent = out.note || "";
@@ -5835,12 +5923,274 @@ async function pollLogs() {
   } catch (e) { /* retry next tick */ }
 }
 
+/* ---------- experiment: A/B/A on one knob ----------
+   The server runs it (experiment.py); the page starts it and reads progress
+   and the report back from the action state it already polls. */
+let expRegistry = {}, expValues = {};
+
+function fillExperimentKnobs(registry, values) {
+  expRegistry = registry; expValues = values;
+  const sel = $("exp-knob"), keep = sel.value;
+  sel.innerHTML = Object.entries(registry).map(([name, k]) =>
+    `<option value="${sxe(name)}">${esc(k.label)}</option>`).join("");
+  if (keep && registry[keep]) sel.value = keep;
+  expKnobChanged();
+}
+
+function expKnobChanged() {
+  const k = expRegistry[$("exp-knob").value];
+  if (!k) return;
+  const cur = expValues[$("exp-knob").value];
+  const inp = $("exp-to");
+  inp.min = k.min; inp.max = k.max;
+  inp.placeholder = `${k.min}–${k.max} ${k.unit}`;
+  $("exp-to").title = `Now: ${cur ?? "the solrconfig default"} ${k.unit}`;
+}
+$("exp-knob").addEventListener("change", expKnobChanged);
+
+$("btn-exp-run").addEventListener("click", async () => {
+  const to = $("exp-to").value;
+  if (to === "") { $("exp-status").className = "err";
+    $("exp-status").textContent = "Enter the value to try (B)."; return; }
+  const [warmup, duration] = $("exp-len").value.split(",").map(Number);
+  $("exp-report").textContent = "";
+  const out = await post("/api/experiment/start", { collection: knobsFor || coll(),
+    knob: $("exp-knob").value, to: Number(to), rps: Number($("exp-rps").value),
+    duration, warmup, rounds: Number($("exp-rounds").value) });
+  if (!out.ok) { $("exp-status").className = "err"; $("exp-status").textContent = out.error; return; }
+  $("exp-status").className = "on";
+  $("exp-status").textContent = "Starting…";
+  poll();
+});
+
+let expWasRunning = false;
+function renderExperiment(e) {
+  if (!e) return;
+  $("exp-box").style.display = e.available ? "" : "none";
+  if (!e.available) return;
+  $("btn-exp-run").disabled = !!e.running;
+  // a knob turned mid-experiment would be measured as part of it
+  for (const input of $("knobs").querySelectorAll("input[type=range]")) input.disabled = !!e.running;
+  const st = $("exp-status");
+  if (e.running) {
+    const last = (e.lines || []).slice(-1)[0] || "starting…";
+    const m = Math.floor((e.elapsed_s || 0) / 60), sec = (e.elapsed_s || 0) % 60;
+    st.className = "on";
+    st.textContent = `${last}  (${m} min ${sec} s of about ${Math.round((e.est_s || 0) / 60)} min)`;
+    $("exp-report").textContent = "";
+  } else if (e.error) {
+    st.className = "err";
+    st.textContent = e.error;
+  } else if (e.report) {
+    st.className = "";
+    st.textContent = `${e.knob} on ${e.collection}: finished, and the knob is back as it was.`;
+    if (expWasRunning || !$("exp-report").textContent) $("exp-report").textContent = e.report;
+  }
+  if (expWasRunning && !e.running && knobsFor) loadTuning(knobsFor);   // show restored values
+  expWasRunning = !!e.running;
+}
+
+/* ---------- lessons ----------
+   The same lessons as `searchlab learn`, one step at a time. The page names a
+   lesson and a step number; the server looks the step up and runs it, so the
+   only requests that ever run are the ones the lesson file contains. */
+let lsState = null;   // { name, index, total, asked, correct, token, cleaned, finished }
+
+function lsDedent(lines) {
+  const ind = Math.min(...lines.filter(l => l.trim()).map(l => l.match(/^ */)[0].length));
+  return lines.map(l => l.slice(ind)).join("\n");
+}
+
+// Lesson text is YAML block text: blank lines split paragraphs, and a
+// paragraph indented throughout is a command to copy, so it stays verbatim.
+function lsText(t) {
+  return String(t || "").trim().split(/\n\s*\n/).map(par => {
+    const lines = par.split("\n");
+    if (lines.every(l => !l.trim() || /^\s{2,}/.test(l)))
+      return `<pre class="ls-code">${esc(lsDedent(lines))}</pre>`;
+    return `<p>${esc(lines.map(l => l.trim()).join(" "))}</p>`;
+  }).join("");
+}
+
+function lsAppend(html) {
+  const log = $("ls-log");
+  const el = document.createElement("div");
+  el.className = "ls-item";
+  el.innerHTML = html;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+function lsHttp(out) {
+  let h = `<div class="ls-reqline">&rarr; ${esc(out.request)}</div>`;
+  if (out.error) return h + `<div class="ls-err">${esc(out.error)}</div>`;
+  h += `<pre class="ls-out">${esc(out.output)}</pre>`;
+  if (out.unexpected) h += `<div class="ls-warn">Not what the lesson expected at this
+    point, so what follows may not match what you see.</div>`;
+  return h;
+}
+
+async function lsLoad() {
+  let out;
+  try { out = await (await fetch("/api/lessons")).json(); }
+  catch (e) { $("ls-list").innerHTML = `<span class="desc">Could not load the lessons.</span>`; return; }
+  $("ls-list").innerHTML = out.lessons.map((l, i) => {
+    const note = out.demo ? "Lessons need a running cluster, and demo mode has none."
+      : l.runnable ? "Needs " + l.requires + "." : l.why_not;
+    return `<div class="ls-row">
+      <span class="ls-n">${i + 1}</span>
+      <span><span class="ls-t">${esc(l.title)}</span><span class="ls-name">${esc(l.name)}</span></span>
+      <button class="btn" data-lesson="${sxe(l.name)}"${out.demo || !l.runnable ? " disabled" : ""}>Start</button>
+      <span class="ls-req">${esc(note)}</span></div>`;
+  }).join("");
+  $("ls-list").querySelectorAll("button[data-lesson]").forEach(b =>
+    b.addEventListener("click", () => lsStart(out.lessons.find(l => l.name === b.dataset.lesson))));
+}
+
+function lsStart(lesson) {
+  lsState = { name: lesson.name, index: 0, total: lesson.steps, asked: 0, correct: 0,
+              token: {}, cleaned: false, finished: false };
+  $("ls-list").style.display = "none";
+  $("ls-run").style.display = "";
+  $("ls-title").textContent = lesson.title;
+  $("btn-ls-stop").textContent = "Stop and clean up";
+  $("ls-log").innerHTML = "";
+  if (lesson.intro) lsAppend(lsText(lesson.intro));
+  lsNext(lsState.token);
+}
+
+async function lsNext(token) {
+  while (lsState && lsState.token === token) {
+    const st = lsState;
+    $("ls-progress").textContent = `step ${Math.min(st.index + 1, st.total)} of ${st.total}`;
+    const out = await post("/api/lesson/step", { name: st.name, index: st.index });
+    if (lsState !== st || st.token !== token) return;          // stopped meanwhile
+    if (!out.ok) {
+      lsAppend(`<div class="ls-err">${esc(out.error || "The step failed.")}</div>`);
+      return lsFinish(false);
+    }
+    const index = st.index++;
+    if (out.kind === "end") return lsFinish(true);
+    if (out.kind === "say") lsAppend(lsText(out.text));
+    else if (out.kind === "http") lsAppend(lsHttp(out));
+    else if (out.kind === "run") lsAppend(`<div class="ls-reqline">$ ${esc(out.command)}</div>
+      <pre class="ls-out">${esc(out.output || "(no output)")}</pre>`);
+    else if (out.kind === "pause") await lsContinue();
+    else if (out.kind === "ask") await lsAsk(out, index, token);
+    else if (out.kind === "wait") await lsWait(out, index, token);
+  }
+}
+
+function lsContinue() {
+  return new Promise(resolve => {
+    const el = lsAppend(`<button class="btn primary">Continue</button>`);
+    el.querySelector("button").addEventListener("click", () => { el.remove(); resolve(); });
+  });
+}
+
+function lsAsk(out, index, token) {
+  return new Promise(resolve => {
+    const el = lsAppend(`<div class="ls-q">${esc(out.question)}</div>
+      <div class="ls-opts">${out.options.map((o, i) =>
+        `<button class="btn" data-i="${i}">${String.fromCharCode(97 + i)}) ${esc(o)}</button>`).join("")}</div>
+      <div class="ls-verdict"></div>`);
+    const buttons = [...el.querySelectorAll("button[data-i]")];
+    buttons.forEach(b => b.addEventListener("click", async () => {
+      buttons.forEach(x => { x.disabled = true; });
+      const res = await post("/api/lesson/answer",
+        { name: lsState.name, index, choice: Number(b.dataset.i) });
+      if (!lsState || lsState.token !== token) return;
+      if (!res.ok) { buttons.forEach(x => { x.disabled = false; }); return; }
+      lsState.asked += 1;
+      if (res.correct) lsState.correct += 1;
+      b.classList.add(res.correct ? "right" : "wrong");
+      const right = buttons[out.options.indexOf(res.right)];
+      if (right) right.classList.add("right");
+      el.querySelector(".ls-verdict").innerHTML =
+        `<b>${res.correct ? "Correct." : "Not quite."}</b> ${esc(res.why)}`;
+      resolve();
+    }));
+  });
+}
+
+function lsWait(out, index, token) {
+  return new Promise(resolve => {
+    const el = lsAppend(`${lsText(out.text)}<div class="ls-wait">
+      <span class="ls-wstat">Waiting for the cluster&hellip;</span>
+      <button class="btn">Skip</button></div>`);
+    const box = el.querySelector(".ls-wait"), stat = el.querySelector(".ls-wstat");
+    let done = false, checks = 0;
+    const finish = (msg, met) => {
+      if (done) return;
+      done = true;
+      stat.textContent = msg;
+      box.classList.toggle("met", met);
+      box.querySelector("button").remove();
+      resolve();
+    };
+    box.querySelector("button").addEventListener("click", () => finish("Skipped.", false));
+    (async () => {
+      while (!done && lsState && lsState.token === token) {
+        const res = await post("/api/lesson/poll", { name: lsState.name, index });
+        if (done || !lsState || lsState.token !== token) return;
+        checks += 1;
+        if (res.ok && res.met) return finish("Condition met: the cluster did its thing.", true);
+        stat.textContent = res.error
+          ? `Can't reach the cluster (${res.error}); still trying…`
+          : `Waiting for the cluster… checked ${checks} time${checks === 1 ? "" : "s"}`;
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    })();
+  });
+}
+
+// Cleanup runs however a lesson ends, as it does in the terminal, so a scratch
+// collection never outlives the lesson that made it.
+async function lsFinish(completed) {
+  const st = lsState;
+  if (!st || st.finished) return;
+  st.finished = true;
+  st.token = {};                                              // stops any loop
+  if (!st.cleaned) {
+    st.cleaned = true;
+    const out = await post("/api/lesson/cleanup", { name: st.name, index: 0 });
+    for (const s of (out.ok ? out.steps : []))
+      lsAppend(s.kind === "http" ? lsHttp(s) : lsText(s.text || ""));
+  }
+  if (completed) lsAppend(`<div class="ls-done">Done${st.asked
+    ? `: ${st.correct} of ${st.asked} question${st.asked === 1 ? "" : "s"} right` : ""}.</div>`);
+  $("ls-progress").textContent = completed ? "finished" : "stopped";
+  $("btn-ls-stop").textContent = "Back to the lessons";
+}
+
+$("btn-ls-stop").addEventListener("click", () => {
+  if (lsState && !lsState.finished) {
+    lsAppend(`<div class="ls-warn">Stopped.</div>`);
+    return lsFinish(false);
+  }
+  lsState = null;
+  $("ls-run").style.display = "none";
+  $("ls-list").style.display = "";
+});
+
+// closing the tab mid-lesson: a beacon still gets the cleanup to the server
+// (text/plain, because a beacon can't send application/json; the server reads
+// the body as JSON either way)
+addEventListener("pagehide", () => {
+  if (lsState && !lsState.cleaned && navigator.sendBeacon)
+    navigator.sendBeacon("/api/lesson/cleanup", new Blob(
+      [JSON.stringify({ name: lsState.name, index: 0 })], { type: "text/plain" }));
+});
+
+lsLoad();
+
 /* ---------- collapsible sections ---------- */
 
 (function initCollapsers() {
   const ids = ["controls", "lastaction", "health-section", "causal-section", "signals",
                "topo-section", "activity", "traffic-section", "tuningblock",
-               "vector-section", "query-section"];
+               "lessons-section", "vector-section", "query-section"];
   let saved;
   try { saved = new Set(JSON.parse(localStorage.getItem("searchlab.collapsed") || "[]")); }
   catch (e) { saved = new Set(); }

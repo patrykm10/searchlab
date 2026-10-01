@@ -69,6 +69,7 @@ searchlab is **open-loop**: requests fire on a fixed wall-clock schedule derived
 | `chaos run scenario.yaml` | Timed fault steps only (see `examples/chaos-node-loss.yaml`) |
 | `drill drill.yaml` | Full orchestrated drill: load + chaos + metrics, one annotated report |
 | `scenario list/show/run` | Named reproductions — a data shape, a query mix, faults, and what to watch |
+| `experiment` | Change one tuning knob on the live cluster, A/B/A: noise measured, bursts told apart from shifts, knob put back |
 | `sweep sweep.yaml` | One workload x a config matrix, fresh cluster per cell, comparison table |
 | `dashboard` | The control panel: drive the cluster, tune it live, build queries, read the incident timeline (`--demo` to preview) |
 | `schema` | Explicit schema fields derived from a data profile (`--dry-run` to inspect) |
@@ -109,7 +110,7 @@ A single self-contained page (no CDN, no build step) that both *shows* the clust
 
 **Drive it:** ramp RPS live with a slider while a load test runs, index N documents of chosen complexity, force a commit or a merge, expunge deletes, reload, purge, create and delete collections, add and remove replicas by type, split a shard.
 
-**Tune it while it runs:** knobs for soft/hard commit interval, filter and result cache size, RAM buffer, merge policy (segments per tier, max merged segment, deletes allowed), and merge scheduler threads. Turning one writes through the Config API on Solr, or index settings on ES/OS — no restart, no editing `solrconfig.xml`, and each knob links to the endpoint that proves its live value.
+**Tune it while it runs:** knobs for soft/hard commit interval, filter and result cache size, RAM buffer, merge policy (segments per tier, max merged segment, deletes allowed), and merge scheduler threads. Turning one writes through the Config API on Solr, or index settings on ES/OS — no restart, no editing `solrconfig.xml`, and each knob links to the endpoint that proves its live value. Under the knobs, **Try a value as an experiment** runs the same A/B/A as `searchlab experiment` (below) from the page, one to three rounds, with progress by phase, the knobs locked while it runs, and the report when it's done.
 
 **Read it in plain language:** an insights panel that says *why* something is wrong rather than only that it is — "heap above 80% on solr2, which is why p99 is climbing" — with the alert history foldable so it stops disappearing before you finish reading.
 
@@ -134,6 +135,8 @@ Three panels that treat the cluster as something to learn from rather than somet
 **Config.** The effective solrconfig, with each value marked by where it comes from: `solrconfig.xml`, the configset overlay (`configoverlay.json`, where `set-property` writes), or a lab `${searchlab.*}` user property. Edit commit timing, caches and the lab's merge/buffer settings through `set-property` / `set-user-property`, then **reset to file**. The editable list is the 29 properties Solr 9.6 actually accepted when each was set to its current value — `indexConfig.*`, `directoryFactory.*` and the update log were refused. The lab configset reaches its merge and buffer settings through `${searchlab.*}` user properties instead; everything else is shown but not editable.
 
 Hover explanations on all three follow the header's help toggle.
+
+**Lessons** sit next to them: the same lessons as `searchlab learn` (below), run a step at a time in the page. Requests and responses show as they happen, questions are answered with a click, a lesson that asks you to do something waits until the cluster shows you did, and its scratch collection is removed however it ends, including when you close the tab. The page only ever names a lesson and a step number; the server looks the step up in the lesson file, so it can't be used to send arbitrary requests.
 
 ## Query builder
 
@@ -234,9 +237,10 @@ Real Solr performance problems come from data *shape*, not doc count. Profiles a
 - `categorical` — `cardinality` + optional `zipf` skew (facet/filter behavior)
 - `keyword` — random strings (`length`), effectively unique at scale
 - `multivalued` — wraps any inner type, `min_values` / `max_values`
-- `int`, `float`, `date`, `bool`, `id`
+- `date` — `days_back` (spread over the days before the start of today, UTC); `anchor: 2026-01-01` counts back from a fixed day instead
+- `int`, `float`, `bool`, `id`
 
-`profiles/default.yaml` is an e-commerce-ish baseline. `profiles/high-cardinality.yaml` is a repro profile for high-cardinality faceting pain. Use `--seed` for reproducible datasets.
+`profiles/default.yaml` is an e-commerce-ish baseline. `profiles/high-cardinality.yaml` is a repro profile for high-cardinality faceting pain. Use `--seed` for reproducible datasets: the same seed gives the same documents (on the same day, for profiles with dates, unless they set an `anchor`).
 
 ## Query templates
 
@@ -261,7 +265,22 @@ searchlab learn                     # list lessons
 searchlab learn leader-election     # run one
 ```
 
-Lessons run against your **live cluster**, not a slideshow. The engine's signature move is the `wait` step: the lesson tells you to go do something real — `searchlab chaos kill solr2` in another terminal — then polls actual cluster state until ZooKeeper notices, and continues the story from what just happened. Multiple-choice questions (scored, with explanations either way) check the mental model along the way. Built-ins: **cluster-anatomy** (nodes/shards/replicas against your real topology), **leader-election** (you cause one), and **commits-and-visibility** (reproduces the classic "I indexed it, where is it?" surprise, then resolves it). Lessons are plain YAML — writing your own for a team onboarding is a text file away.
+Lessons run against your **live cluster**, not a slideshow. The engine's signature move is the `wait` step: the lesson tells you to go do something real — `searchlab chaos kill solr2` in another terminal — then polls actual cluster state until ZooKeeper notices, and continues the story from what just happened. Multiple-choice questions (scored, with explanations either way) check the mental model along the way. `searchlab learn` lists the built-ins in a suggested order, each leaning on the ones before it. The control panel's **Lessons** section runs the same ones in the browser:
+
+| Lesson | What you find out by doing it |
+|---|---|
+| **cluster-anatomy** | nodes, shards, replicas and ZooKeeper, against your real topology |
+| **analysis-chain** | what the index actually stores: every stage of `text_en` and `text_general`, token by token, and why `runs` finds "running" but `ran` doesn't. Ends with you indexing a document the lesson's query has to find |
+| **scoring** | BM25 on five tiny documents: term frequency saturating (eight mentions score 10% above two), length normalization, and a document that never says "solr" outranking one that says it eight times, because the other term is rarer. Ends with you editing a document until it outranks another |
+| **commits-and-visibility** | the classic "I indexed it, where is it?" surprise, reproduced then resolved — and real-time get finding the document search can't see yet |
+| **caching** | what `fq` really buys: an identical repeat never reaches the filterCache (the queryResultCache answers it whole), the same filter under a different query does, a filter written into `q` never does, and a commit empties it all — leaving a hit ratio of 1.0 from zero lookups |
+| **segments-and-merges** | an update is a delete plus an add: `delCount` appearing, a fully deleted segment vanishing, and a merge you trigger yourself (the lesson waits until one shows up) |
+| **schema-changes** | the Schema API accepts `docValues=true` on a populated field, then the next ordinary write fails; deleting every document doesn't fix it, a reload does. Also why editing a shared configset changes every collection on it |
+| **leader-election** | you kill a node; the lesson notices |
+
+Every answer in these lessons was checked against Solr 9.6 rather than written from memory. Every lesson from analysis-chain to schema-changes makes a scratch `lesson-lab` collection with a private copy of `_default` and remove it however the lesson ends, Ctrl-C included, so they're safe on any cluster.
+
+Lessons are plain YAML — writing your own for a team onboarding is a text file away. An `http` step's `show` takes a dot path where `*` fans out over a list or an object (`analysis.field_types.text_en.index.*.*.text` is every stage's tokens), `fields` narrows a table to the columns worth reading, `engine:` stops a Solr lesson from running against OpenSearch, and `cleanup:` steps always run.
 
 ```
 searchlab explain --collection products "q=title_t:Merging&fq=category_s:x"
@@ -370,6 +389,33 @@ searchlab schema --collection events --profile profiles/high-cardinality.yaml
 ```
 
 Text maps to `text_general`; string/numeric/date fields get `docValues: true` by default. Override per field with a `solr:` block in the profile — e.g. `solr: { docValues: false }` on a facet field reproduces fieldCache heap pressure on demand.
+
+## Experiments: change one thing, honestly
+
+```
+searchlab experiment --collection products --knob result_cache --to 64
+```
+
+The quick question, "what does this knob do?", answered on the cluster you already have. Three phases replay the same seeded queries at the same rate: **A** with the knob as it is, **B** with `--to`, then **A′**, back as it was. Two things make it a fair comparison, and both are easy to get wrong by hand:
+
+- **Every phase starts from a reload, with a warm-up thrown away.** Turning a knob reloads the core, and a reload empties its caches. Measure "before" on warm caches and "after" on cold ones and you've measured a cache flush.
+- **A and A′ have the same setting, so the gap between them is the noise.** B only counts as a change when it moves more than twice that. p99 is also recomputed without each phase's worst second: a single stall (GC, a merge, another collection reloading) can make p99 jump 30x in one phase, and the report calls that a burst, not an effect. This check exists because it happened while building it.
+
+```
+                                  A          B         A′   B vs A      noise (A′ vs A)
+  latency p50 (ms)              6.6        6.8        6.4     +3.7%       4.3%   within noise
+  latency p99 (ms)              9.0        9.5        9.8     +1.1%       8.1%   within noise
+    without worst second        9.0        9.3        9.2     +2.4%       2.8%   within noise
+  queryResultCache hits        0.66       0.54       0.66
+
+  p50: B moved +3.7%: no measurable change.
+  queryResultCache hit ratio fell from 0.66 to 0.54, and latency didn't notice: on this
+  index and workload, a miss costs about what a hit does.
+```
+
+One A/A′ pair is a rough measure of noise, and the report says so. `--rounds N` alternates them (A B A B … A), and then a change only counts when every B run lands on the same side of every A run *and* the medians are further apart than the A runs are from each other. Both halves matter: in a two-round run, both B runs sat just above all three A runs, but the A runs spread 12% and the "effect" was 9%. That gets reported as too close to call.
+
+Cache hit ratios and GC per phase sit next to the latency, and when a cache clearly moved the report says whether latency moved with it. The knob always goes back as it was found, on Ctrl-C too: as an override if it was one, or to `solrconfig.xml` if it wasn't, and collections sharing the configset are named up front, since they change with it. Knob names are the control panel's (an unknown one lists what the collection has). Solr only for now. For changes a live cluster can't take (heap, GC flags, versions), use a sweep:
 
 ## Config sweeps
 

@@ -293,3 +293,165 @@ def test_post_unknown_path_and_bad_body(demo_server):
     except urllib.error.HTTPError as e:
         status = e.code
     assert status == 400
+
+
+# ------------------------------------------------------------ lessons API ---
+
+@pytest.fixture
+def lesson_server(monkeypatch):
+    """A live-mode handler (a stand-in runner, so controls are enabled) whose
+    lesson requests go to a recorder instead of a cluster."""
+    import searchlab.learn as ln
+    sent = []
+
+    def fake_http(base_url, method, path, params=None, json=None):
+        sent.append((method, path, (params or {}).get("action")))
+        if path.endswith("/admin/segments"):
+            return {"segments": {"_0": {"size": 3, "delCount": 0, "source": "merge"}}}
+        return {"responseHeader": {"status": 0}}
+
+    monkeypatch.setattr(ln, "http_request", fake_http)
+
+    def start(engine="solr"):
+        handler = make_handler(ClusterSpec(engine=engine), demo=False, runner=object(), logs=None)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    servers = []
+    yield start, sent
+    for s in servers:
+        s.shutdown()
+
+
+def test_lessons_listed_in_course_order(demo_server):
+    status, out = _get(demo_server + "/api/lessons")
+    assert status == 200 and out["demo"] is True and out["engine"] == "solr"
+    names = [x["name"] for x in out["lessons"]]
+    assert names[:3] == ["cluster-anatomy", "analysis-chain", "scoring"] and len(names) == 8
+    # demo mode lists them, but running one is a control like any other
+    status, out = _post(demo_server + "/api/lesson/step", {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "demo" in out["error"]
+
+
+def test_lesson_steps_run_server_side_and_questions_keep_their_answer(lesson_server):
+    start, sent = lesson_server
+    url = start()
+    status, out = _post(url + "/api/lesson/step", {"name": "segments-and-merges", "index": 0})
+    assert status == 200 and out["kind"] == "http"
+    assert out["request"] == "GET /admin/collections?action=DELETE&name=lesson-lab"
+    assert sent == [("GET", "/admin/collections", "DELETE")]
+    # the page gets the question and options, never the answer
+    lesson = __import__("searchlab.learn", fromlist=["x"]).builtin_lessons()["segments-and-merges"]
+    ask = next(i for i, s in enumerate(lesson["steps"]) if "ask" in s)
+    status, out = _post(url + "/api/lesson/step", {"name": "segments-and-merges", "index": ask})
+    assert out["kind"] == "ask" and "answer" not in out and "why" not in out
+    status, out = _post(url + "/api/lesson/answer",
+                        {"name": "segments-and-merges", "index": ask, "choice": 2})
+    assert out["correct"] is True and out["why"]
+    # a wait step is polled; the fake segments report a merge, so it's met
+    wait = next(i for i, s in enumerate(lesson["steps"]) if "wait" in s)
+    status, out = _post(url + "/api/lesson/poll", {"name": "segments-and-merges", "index": wait})
+    assert out == {"ok": True, "met": True}
+    status, out = _post(url + "/api/lesson/step",
+                        {"name": "segments-and-merges", "index": len(lesson["steps"])})
+    assert out["kind"] == "end"
+
+
+def test_lesson_cleanup_runs_every_cleanup_step_in_one_call(lesson_server):
+    start, sent = lesson_server
+    status, out = _post(start() + "/api/lesson/cleanup", {"name": "schema-changes", "index": 0})
+    assert status == 200 and [s["kind"] for s in out["steps"]] == ["http", "say"]
+    assert sent == [("GET", "/admin/collections", "DELETE")]
+
+
+def test_lesson_api_refuses_what_the_lesson_file_does_not_say(lesson_server):
+    start, sent = lesson_server
+    url = start()
+    status, out = _post(url + "/api/lesson/step", {"name": "../../etc", "index": 0})
+    assert status == 409 and "no lesson" in out["error"]
+    status, out = _post(url + "/api/lesson/poll", {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "not a wait step" in out["error"]
+    status, out = _post(url + "/api/lesson/answer", {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "not a question" in out["error"]
+    # a Solr lesson on an OpenSearch cluster is refused before anything is sent
+    status, out = _post(start("opensearch") + "/api/lesson/step",
+                        {"name": "analysis-chain", "index": 0})
+    assert status == 409 and "opensearch" in out["error"]
+    assert sent == []
+
+
+# -------------------------------------------------------------- experiment ---
+
+def _wait_until(pred, timeout=5.0):
+    import time as _t
+    end = _t.time() + timeout
+    while _t.time() < end:
+        if pred():
+            return True
+        _t.sleep(0.02)
+    return False
+
+
+def test_experiment_runs_in_the_background_and_reports_back(monkeypatch):
+    import searchlab.experiment as xp
+    from searchlab.actions import ActionRunner
+
+    gate = threading.Event()
+
+    def fake_run(spec, coll, knob, to, *, say, **kw):
+        say("phase A (result_cache = 512 entries): …")
+        gate.wait(5)
+        return {"collection": coll, "knob": knob, "phases": []}
+
+    monkeypatch.setattr(xp, "run_experiment", fake_run)
+    monkeypatch.setattr(xp, "format_report", lambda res: "the report")
+    r = ActionRunner(ClusterSpec())
+    assert r.start_experiment("c", "result_cache", 64, 50, 20, 10) == {"ok": True}
+    assert _wait_until(lambda: r.state()["experiment"]["lines"])
+    st = r.state()["experiment"]
+    assert st["running"] and st["knob"] == "result_cache" and st["est_s"] == 114
+    # while it runs: no second experiment, no load test, no knob turns
+    assert "already running" in r.start_experiment("c", "result_cache", 64, 50, 20, 10)["error"]
+    assert "experiment" in r.start_load("c", 10)["error"]
+    assert "experiment" in r.tune("c", "result_cache", 100)["error"]
+    gate.set()
+    assert _wait_until(lambda: not r.state()["experiment"]["running"])
+    st = r.state()["experiment"]
+    assert st["report"] == "the report" and st["error"] is None
+    assert r.state()["last_action"]["ok"] is True
+
+
+def test_experiment_refusals(monkeypatch):
+    import searchlab.experiment as xp
+    from searchlab.actions import ActionRunner
+
+    assert "Solr-only" in ActionRunner(ClusterSpec(engine="opensearch")).start_experiment(
+        "c", "k", 1, 50, 20, 10)["error"]
+    assert ActionRunner(ClusterSpec(engine="opensearch")).state()["experiment"]["available"] is False
+    r = ActionRunner(ClusterSpec())
+    assert "collection" in r.start_experiment("", "k", 1, 50, 20, 10)["error"]
+    assert "out of range" in r.start_experiment("c", "k", 1, 50, 2, 10)["error"]
+    # a failure inside the run is reported, with the CLI's prefix dropped
+    monkeypatch.setattr(xp, "run_experiment", lambda *a, **k: (_ for _ in ()).throw(
+        SystemExit("searchlab: no knob 'k' on c — available: filter_cache")))
+    assert r.start_experiment("c", "k", 1, 50, 20, 10)["ok"]
+    assert _wait_until(lambda: r.state()["experiment"]["error"])
+    assert r.state()["experiment"]["error"].startswith("no knob 'k'")
+
+
+def test_experiment_route_rejects_a_non_number():
+    class Runner:
+        def start_experiment(self, *a):
+            raise AssertionError("must not be called with a bad value")
+
+    handler = make_handler(ClusterSpec(), demo=False, runner=Runner(), logs=None)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        status, out = _post(f"http://127.0.0.1:{server.server_address[1]}/api/experiment/start",
+                            {"collection": "c", "knob": "result_cache", "to": "lots"})
+        assert status == 409 and "number" in out["error"]
+    finally:
+        server.shutdown()

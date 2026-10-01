@@ -1,4 +1,6 @@
 title: "SolrCloud anatomy: nodes, shards, replicas, ZooKeeper"
+engine: solr
+order: 1
 requires: "a running cluster (searchlab up) with at least one collection"
 intro: |
   Ten minutes on what the pieces actually are — against your real cluster,

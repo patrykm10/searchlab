@@ -93,6 +93,9 @@ class ActionRunner:
         # write-path walkthrough: last segment snapshot per collection:core,
         # so a diff means something without the caller tracking state itself
         self._wp_baseline: dict[str, list[dict]] = {}
+        # one A/B/A experiment at a time; its progress lines and report are
+        # read back through state() by the page's poll
+        self._exp: dict = {}
 
     # ------------------------------------------------------------- helpers --
 
@@ -150,6 +153,9 @@ class ActionRunner:
         with self._lock:
             if self._running(self._load_future):
                 return {"ok": False, "error": "A load test is already running."}
+            if self._exp.get("running"):
+                return {"ok": False, "error": "An experiment is running its own load; "
+                        "a second load would be measured with it."}
             self._control = LoadControl(rps=rps)
             self._load_meta = {"collection": collection, "started": time.time(),
                                "custom": bool(query)}
@@ -825,6 +831,9 @@ class ActionRunner:
     def tune(self, collection: str, name: str, value: float) -> dict:
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
+        if self._exp.get("running"):
+            return {"ok": False, "error": "An experiment is changing the knobs; wait for it "
+                    "to finish (it puts everything back)."}
         mod = self._tuning_module()
         try:
             mod.apply_tuning(self.spec, collection, name, value)
@@ -834,6 +843,65 @@ class ActionRunner:
         return self._done(
             "tune", True,
             f"{knob['label']} set to {value:g} {knob['unit']} — live within a few seconds.")
+
+    # ------------------------------------------------------------ experiment --
+
+    def start_experiment(self, collection: str, knob: str, to: float, rps: float,
+                         duration: float, warmup: float, rounds: int = 1) -> dict:
+        """A/B/A on one knob (see experiment.py), in a thread of its own: it
+        drives its own event loop for the load, which can't nest in ours."""
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "Experiments are Solr-only for now."}
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        if (not 0 < rps <= MAX_RPS or not 5 <= duration <= 600 or not 0 <= warmup <= 300
+                or not 1 <= rounds <= 5):
+            return {"ok": False, "error": "Rate, duration or warm-up is out of range."}
+        with self._lock:
+            if self._exp.get("running"):
+                return {"ok": False, "error": "An experiment is already running."}
+            if self._running(self._load_future):
+                return {"ok": False, "error": "Stop the load test first: an experiment runs "
+                        "its own load, and yours would be measured with it."}
+            lines: list[str] = []
+            self._exp = {"running": True, "collection": collection, "knob": knob, "to": to,
+                         "lines": lines, "report": None, "error": None, "started": time.time(),
+                         # 2 x rounds + 1 phases of warm-up + measurement, plus
+                         # reloads and settling
+                         "est_s": round((2 * rounds + 1) * (warmup + duration + 8))}
+
+        def job():
+            from . import experiment as xp
+
+            queries = Path("queries/default.yaml")
+            try:
+                res = xp.run_experiment(self.spec, collection, knob, to, rps=rps,
+                                        duration=duration, warmup=warmup,
+                                        queries_path=queries if queries.exists() else None,
+                                        rounds=rounds, say=lines.append)
+            except (SystemExit, Exception) as e:  # noqa: BLE001 — report, don't die
+                msg = str(e) or type(e).__name__
+                self._exp["error"] = msg.removeprefix("searchlab: ")
+                self._done("experiment", False, self._exp["error"])
+            else:
+                self._exp["report"] = xp.format_report(res)
+                self._done("experiment", True, f"Experiment on {knob} finished; the knob is "
+                           "back as it was.")
+            finally:
+                self._exp["running"] = False
+
+        threading.Thread(target=job, daemon=True).start()
+        return {"ok": True}
+
+    def _experiment_state(self) -> dict:
+        e = self._exp
+        out = {"available": self.spec.engine == "solr",
+               **{k: e.get(k) for k in ("running", "collection", "knob", "to", "report",
+                                        "error", "est_s")},
+               "lines": list(e.get("lines") or [])}
+        if e.get("started"):
+            out["elapsed_s"] = round(time.time() - e["started"])
+        return out
 
     # ----------------------------------------------------------------- state --
 
@@ -854,6 +922,7 @@ class ActionRunner:
             },
             "maintenance": self._maint_busy,
             "collection_busy": self._coll_busy,
+            "experiment": self._experiment_state(),
             "last_action": self.last_action,
             "action_log": list(self.action_log)[:40],
         }

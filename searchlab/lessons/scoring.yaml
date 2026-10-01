@@ -1,0 +1,115 @@
+title: "Scoring: why this document beat that one"
+engine: solr
+order: 3
+requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
+intro: |
+  Relevance ranking in Solr is BM25, and BM25 is three ideas multiplied
+  together: how often the term appears in the document, how long the
+  document is, and how rare the term is across the index. Five tiny
+  documents are enough to see each of them, and to see them surprise you.
+steps:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - http:
+      path: "/admin/collections"
+      params: { action: CREATE, name: lesson-lab, numShards: 1, replicationFactor: 1, wt: json }
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
+  - say: |
+      (A 400 from the DELETE just means there was no leftover lesson-lab to remove.)
+
+      Five documents, all in body_t (text_general, so no stemming):
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json:
+        - { id: short,   body_t: "solr tuning" }
+        - { id: long,    body_t: "a long guide that mentions solr once among many other words about clusters and shards and replicas and more" }
+        - { id: repeat2, body_t: "solr solr" }
+        - { id: repeat8, body_t: "solr solr solr solr solr solr solr solr" }
+        - { id: none,    body_t: "elasticsearch tuning" }
+      show: "responseHeader.status"
+  - ask: "Search body_t:solr. repeat8 says solr eight times, repeat2 twice, and neither says anything else. How much higher does repeat8 score?"
+    options:
+      - "about four times higher"
+      - "about 10% higher"
+      - "the same"
+    answer: 1
+    why: >
+      Term frequency SATURATES. BM25's tf part is freq / (freq + k1 * ...),
+      which climbs quickly and then flattens (k1 = 1.2 by default). The
+      first few mentions count; the eighth barely does. That's deliberate:
+      repeating a word shouldn't let a document shout its way to the top.
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "body_t:solr", fl: "id,score", wt: json }
+      show: "response.docs"
+      fields: [id, score]
+  - ask: "short and long both mention solr exactly once. Why does short score about 2.5 times higher?"
+    options:
+      - "one mention in 2 words is stronger evidence than one mention in 20 (length normalization)"
+      - "solr comes earlier in short"
+      - "each document has its own idf"
+    answer: 0
+    why: >
+      BM25 compares each document's length with the average (the b
+      parameter, 0.75 by default). A match in a short field is worth more.
+      Word position plays no part in the score, and idf is a property of the
+      term across the whole index, the same for every document.
+  - ask: "Now search body_t:solr body_t:tuning. The document none doesn't contain solr at all. Where does it rank against repeat8?"
+    options:
+      - "below it: repeat8 matches solr eight times"
+      - "above it"
+    answer: 1
+    why: >
+      "tuning" is in 2 of the 5 documents, "solr" in 4. The rarer term
+      carries a much bigger idf, so a single "tuning" outweighs any number
+      of "solr"s. A term that's everywhere tells you almost nothing about
+      which document is the right one.
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "body_t:solr body_t:tuning", fl: "id,score", wt: json }
+      show: "response.docs"
+      fields: [id, score]
+  - say: |
+      Here's Solr's own account of the top document, via searchlab explain
+      (it runs the query with debug=true and keeps the readable part of the
+      score tree). Compare the two idf lines:
+  - run: "searchlab explain --collection lesson-lab 'q=body_t:solr body_t:tuning&fl=id'"
+  - say: |
+      Each matching term adds a weight of idf times tf, and the document's
+      score is their sum. "tuning" has roughly three times the idf of
+      "solr", which is the whole story of this ranking.
+  - wait: |
+      Your turn. Search body_t:solr, looking at just short and long. Change
+      the document long (send it again with the same id, which replaces it)
+      until it ranks above short. You can't touch short. For example:
+
+        curl -X POST 'http://localhost:8983/solr/lesson-lab/update?commit=true' \
+          -H 'content-type: application/json' \
+          -d '[{"id":"long","body_t":"..."}]'
+
+      Think about the two ideas from the first half: how often, and how long.
+    url: "/lesson-lab/select"
+    params: { q: "body_t:solr", fq: "id:(long OR short)", fl: "id,score", wt: json }
+    until: { path: "response.docs.0.id", op: eq, value: long }
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "body_t:solr", fq: "id:(long OR short)", fl: "id,score", wt: json }
+      show: "response.docs"
+      fields: [id, score]
+  - say: |
+      Done. Whatever you changed, it moved one of the two levers: more
+      mentions (with diminishing returns) or a shorter field. When a
+      ranking puzzles you, run the query with debug=true (or searchlab
+      explain, or the control panel's explain checkbox) and read which of
+      the three is doing the work.
+cleanup:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - say: "(removed the lesson-lab collection.)"

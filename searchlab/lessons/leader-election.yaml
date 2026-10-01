@@ -1,4 +1,6 @@
 title: "Leader election: kill a node and watch"
+engine: solr
+order: 8
 requires: "a cluster with >= 2 nodes and a collection with replicas on both"
 intro: |
   Every shard has exactly one leader replica: writes go through it, and it
