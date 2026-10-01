@@ -1062,7 +1062,12 @@ section.collapsed h2 { margin-bottom: 0; }
         <option value="15,30" selected>15 s warm-up + 30 s</option>
         <option value="20,60">20 s warm-up + 60 s</option></select></div>
       <div><label for="exp-rps">Rate</label><input id="exp-rps" type="number" value="50" min="1"></div>
-      <button class="btn primary" id="btn-exp-run">Run A / B / A&prime;</button>
+      <div><label for="exp-rounds">Rounds</label><select id="exp-rounds"
+          title="More rounds alternate A and B again (A B A B … A): slower, and much harder to fool">
+        <option value="1" selected>1: A B A′</option>
+        <option value="2">2: A B A B A</option>
+        <option value="3">3: A B A B A B A</option></select></div>
+      <button class="btn primary" id="btn-exp-run">Run the experiment</button>
     </div>
     <div id="exp-status"></div>
     <div id="exp-report"></div>
@@ -5951,7 +5956,7 @@ $("btn-exp-run").addEventListener("click", async () => {
   $("exp-report").textContent = "";
   const out = await post("/api/experiment/start", { collection: knobsFor || coll(),
     knob: $("exp-knob").value, to: Number(to), rps: Number($("exp-rps").value),
-    duration, warmup });
+    duration, warmup, rounds: Number($("exp-rounds").value) });
   if (!out.ok) { $("exp-status").className = "err"; $("exp-status").textContent = out.error; return; }
   $("exp-status").className = "on";
   $("exp-status").textContent = "Starting…";

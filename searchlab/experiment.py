@@ -21,6 +21,7 @@ Solr's. On ES/OS the command says so rather than measuring something else.
 from __future__ import annotations
 
 import asyncio
+import statistics
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -169,7 +170,7 @@ def measure(spec: ClusterSpec, collection: str, rps: float, warmup: float, durat
 def run_experiment(spec: ClusterSpec, collection: str, knob: str, to: float, *,
                    rps: float = 50.0, duration: float = 30.0, warmup: float = 10.0,
                    seed: int = 7, queries_path: str | Path | None = None, settle: float = 3.0,
-                   say: Callable[[str], None] = print) -> dict:
+                   rounds: int = 1, say: Callable[[str], None] = print) -> dict:
     if spec.engine != "solr":
         raise SystemExit("searchlab: experiment is Solr-only for now (it reloads cores and "
                          f"reads Solr's cache and GC counters); the cluster is {spec.engine}")
@@ -184,6 +185,8 @@ def run_experiment(spec: ClusterSpec, collection: str, knob: str, to: float, *,
                          f"{info['max']} {info['unit']}")
     if to == original:
         raise SystemExit(f"searchlab: {knob} is already {to:g}; pick a different value")
+    if not 1 <= rounds <= 5:
+        raise SystemExit("searchlab: rounds must be between 1 and 5")
 
     def label(v):
         return f"{v:g} {info['unit']}" if v is not None else "solrconfig default"
@@ -206,17 +209,22 @@ def run_experiment(spec: ClusterSpec, collection: str, knob: str, to: float, *,
         phases.append({"name": name, "value": value,
                        **measure(spec, collection, rps, warmup, duration, seed, queries_path)})
 
+    # one round is A B A'; more alternate A B A B … A, so every B sits
+    # between two A runs and slow drift can't pass for an effect
+    names = (["A", "B", "A'"] if rounds == 1 else
+             [n for i in range(1, rounds + 1) for n in (f"A{i}", f"B{i}")] + [f"A{rounds + 1}"])
     try:
         _reload(spec, collection)
-        phase("A", original)
-        _set(spec, collection, knob, to)
-        changed = True
-        _wait_for(spec, collection, knob, to)
-        phase("B", to)
-        _set(spec, collection, knob, restore)
-        changed = False
-        _wait_for(spec, collection, knob, original)
-        phase("A'", original)
+        phase(names[0], original)
+        for b_name, a_name in zip(names[1::2], names[2::2]):
+            _set(spec, collection, knob, to)
+            changed = True
+            _wait_for(spec, collection, knob, to)
+            phase(b_name, to)
+            _set(spec, collection, knob, restore)
+            changed = False
+            _wait_for(spec, collection, knob, original)
+            phase(a_name, original)
     finally:
         # however the run ends, the cluster goes back to how it was found
         if changed:
@@ -224,7 +232,8 @@ def run_experiment(spec: ClusterSpec, collection: str, knob: str, to: float, *,
             _set(spec, collection, knob, restore)
     return {"collection": collection, "knob": knob, "label": info["label"],
             "unit": info["unit"], "from": original, "to": to, "rps": rps,
-            "duration": duration, "warmup": warmup, "seed": seed, "phases": phases}
+            "duration": duration, "warmup": warmup, "seed": seed, "rounds": rounds,
+            "phases": phases}
 
 
 # --------------------------------------------------------------- the report ---
@@ -247,7 +256,90 @@ def _pct(v: float) -> str:
     return f"{v:+.1f}%" if abs(v) < 10 else f"{v:+.0f}%"
 
 
+def verdict_rounds(a_vals: list, b_vals: list, *, floor_pct: float = 5.0) -> dict:
+    """Over several rounds: a change counts only if every B run lands on the
+    same side of every A run, AND the medians are further apart than the A
+    runs are from each other. Being on one side alone isn't enough: in a live
+    run, two B runs sat just above three A runs that spread 12%, and the
+    "effect" was 9%."""
+    if not a_vals or not b_vals or None in a_vals or None in b_vals:
+        return {"kind": "unknown"}
+    base = statistics.median(a_vals)
+    if base == 0:
+        return {"kind": "unknown"}
+    effect = (statistics.median(b_vals) - base) / base * 100
+    noise = (max(a_vals) - min(a_vals)) / base * 100
+    apart = min(b_vals) > max(a_vals) or max(b_vals) < min(a_vals)
+    return {"kind": "real" if apart and abs(effect) >= max(floor_pct, noise) else "noise",
+            "effect_pct": effect, "noise_pct": noise, "apart": apart}
+
+
+def _format_rounds(res: dict) -> str:
+    a_ph = [p for p in res["phases"] if p["name"].startswith("A")]
+    b_ph = [p for p in res["phases"] if p["name"].startswith("B")]
+    fmt_v = (lambda v: f"{v:g}" if v is not None else "default")
+    lines = [
+        f"experiment: {res['label']} ({res['knob']}) {fmt_v(res['from'])} -> "
+        f"{fmt_v(res['to'])} {res['unit']}, {res['rounds']} rounds",
+        f"  {res['collection']}, {res['rps']:g} rps, {res['warmup']:g}s warm-up + "
+        f"{res['duration']:g}s measured per phase, seed {res['seed']}, each phase from a reload",
+        f"  order: {' '.join(p['name'] for p in res['phases'])}",
+        "",
+        f"  {'':<22}{'A runs':>20}  {'B runs':>20}   B vs A   A spread",
+    ]
+
+    def row(name, key, fmt, judged=False):
+        av = [p.get(key) for p in a_ph]
+        bv = [p.get(key) for p in b_ph]
+        cell = lambda vs: " ".join(fmt(v) if v is not None else "—" for v in vs)  # noqa: E731
+        tail = ""
+        if judged:
+            v = verdict_rounds(av, bv)
+            if v["kind"] != "unknown":
+                tail = (f"  {v['effect_pct']:+6.1f}%  {v['noise_pct']:6.1f}%   "
+                        + ("real" if v["kind"] == "real" else
+                           "overlaps A" if not v["apart"] else "too close"))
+        lines.append(f"  {name:<22}{cell(av):>20}  {cell(bv):>20} {tail}")
+
+    ms = lambda v: f"{v:.1f}"  # noqa: E731
+    row("latency p50 (ms)", "p50_ms", ms, judged=True)
+    row("latency p99 (ms)", "p99_ms", ms, judged=True)
+    row("  without worst second", "p99_without_worst_s", ms, judged=True)
+    row("errors", "errors", lambda v: f"{v:d}")
+    row("dropped", "dropped", lambda v: f"{v:d}")
+    for cache in CACHES:
+        av = [(p.get("hitratio") or {}).get(cache) for p in a_ph]
+        bv = [(p.get("hitratio") or {}).get(cache) for p in b_ph]
+        if any(v is not None for v in av + bv):
+            c = lambda vs: " ".join(f"{v:.2f}" if v is not None else "—" for v in vs)  # noqa: E731
+            lines.append(f"  {cache + ' hits':<22}{c(av):>20}  {c(bv):>20}")
+    lines.append("")
+    n = len(b_ph)
+    for name, key in (("p50", "p50_ms"), ("p99", "p99_ms")):
+        v = verdict_rounds([p.get(key) for p in a_ph], [p.get(key) for p in b_ph])
+        if v["kind"] == "unknown":
+            lines.append(f"  {name}: no verdict (a phase returned no successful requests)")
+        elif v["kind"] == "real":
+            side = "slower" if v["effect_pct"] > 0 else "faster"
+            lines.append(f"  {name}: all {n} B runs were {side} than every A run "
+                         f"(median {_pct(v['effect_pct'])}): a real effect.")
+        elif not v["apart"]:
+            lines.append(f"  {name}: B runs and A runs overlap (median {_pct(v['effect_pct'])}): "
+                         "no effect you can rely on.")
+        elif abs(v["effect_pct"]) < 5:
+            lines.append(f"  {name}: B is consistently on one side, but only by "
+                         f"{_pct(v['effect_pct'])}: too small to matter.")
+        else:
+            lines.append(f"  {name}: B is consistently on one side ({_pct(v['effect_pct'])}), "
+                         f"but by less than the A runs spread among themselves "
+                         f"({v['noise_pct']:.0f}%): too close to call. More rounds or "
+                         "longer phases would settle it.")
+    return "\n".join(lines)
+
+
 def format_report(res: dict) -> str:
+    if res.get("rounds", 1) > 1:
+        return _format_rounds(res)
     ph = {p["name"]: p for p in res["phases"]}
     a, b, a2 = ph.get("A"), ph.get("B"), ph.get("A'")
     fmt_v = (lambda v: f"{v:g}" if v is not None else "default")

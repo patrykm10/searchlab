@@ -396,7 +396,7 @@ def make_handler(spec: ClusterSpec, demo: bool,
                     return runner.start_experiment(
                         coll, str(body.get("knob", "")), float(body.get("to")),
                         float(body.get("rps", 50)), float(body.get("duration", 30)),
-                        float(body.get("warmup", 10)))
+                        float(body.get("warmup", 10)), int(body.get("rounds", 1)))
                 except (TypeError, ValueError):
                     return {"ok": False, "error": "The value to try must be a number."}
             if path.startswith("/api/lesson/"):

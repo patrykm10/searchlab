@@ -847,14 +847,15 @@ class ActionRunner:
     # ------------------------------------------------------------ experiment --
 
     def start_experiment(self, collection: str, knob: str, to: float, rps: float,
-                         duration: float, warmup: float) -> dict:
+                         duration: float, warmup: float, rounds: int = 1) -> dict:
         """A/B/A on one knob (see experiment.py), in a thread of its own: it
         drives its own event loop for the load, which can't nest in ours."""
         if self.spec.engine != "solr":
             return {"ok": False, "error": "Experiments are Solr-only for now."}
         if not collection:
             return {"ok": False, "error": "Pick a collection first."}
-        if not 0 < rps <= MAX_RPS or not 5 <= duration <= 600 or not 0 <= warmup <= 300:
+        if (not 0 < rps <= MAX_RPS or not 5 <= duration <= 600 or not 0 <= warmup <= 300
+                or not 1 <= rounds <= 5):
             return {"ok": False, "error": "Rate, duration or warm-up is out of range."}
         with self._lock:
             if self._exp.get("running"):
@@ -865,8 +866,9 @@ class ActionRunner:
             lines: list[str] = []
             self._exp = {"running": True, "collection": collection, "knob": knob, "to": to,
                          "lines": lines, "report": None, "error": None, "started": time.time(),
-                         # three phases of warm-up + measurement, plus reloads and settling
-                         "est_s": round(3 * (warmup + duration + 8))}
+                         # 2 x rounds + 1 phases of warm-up + measurement, plus
+                         # reloads and settling
+                         "est_s": round((2 * rounds + 1) * (warmup + duration + 8))}
 
         def job():
             from . import experiment as xp
@@ -876,7 +878,7 @@ class ActionRunner:
                 res = xp.run_experiment(self.spec, collection, knob, to, rps=rps,
                                         duration=duration, warmup=warmup,
                                         queries_path=queries if queries.exists() else None,
-                                        say=lines.append)
+                                        rounds=rounds, say=lines.append)
             except (SystemExit, Exception) as e:  # noqa: BLE001 — report, don't die
                 msg = str(e) or type(e).__name__
                 self._exp["error"] = msg.removeprefix("searchlab: ")

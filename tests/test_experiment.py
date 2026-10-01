@@ -152,3 +152,53 @@ def test_refusals_before_anything_changes(fake_cluster):
     with pytest.raises(SystemExit, match="between"):
         xp.run_experiment(ClusterSpec(), "c", "filter_cache", 10**9)
     assert calls == []
+
+
+# ----------------------------------------------------------------- rounds ---
+
+
+def test_rounds_alternate_and_restore_between_every_b(fake_cluster, monkeypatch):
+    calls, state = fake_cluster
+    monkeypatch.setattr(xp, "_overridden", lambda spec, coll, knob: False)
+    res = xp.run_experiment(ClusterSpec(), "c", "filter_cache", 64, rounds=2, say=lambda s: None)
+    assert [p["name"] for p in res["phases"]] == ["A1", "B1", "A2", "B2", "A3"]
+    measured = [c[1] for c in calls if c[0] == "measure"]
+    assert measured == [512.0, 64, 512.0, 64, 512.0]
+    assert state["filter_cache"] == 512.0 and res["rounds"] == 2
+    with pytest.raises(SystemExit, match="rounds"):
+        xp.run_experiment(ClusterSpec(), "c", "filter_cache", 64, rounds=9)
+
+
+def test_round_verdict_needs_every_b_on_one_side():
+    v = xp.verdict_rounds([10.0, 10.4, 10.2], [13.0, 13.5])
+    assert v["kind"] == "real" and v["apart"] and v["effect_pct"] > 25
+    # one B inside the A range: overlap, whatever the medians say
+    v = xp.verdict_rounds([10.0, 14.0, 10.2], [13.0, 15.0])
+    assert v["kind"] == "noise" and not v["apart"]
+    # cleanly apart but tiny
+    v = xp.verdict_rounds([10.0, 10.0, 10.0], [10.2, 10.3])
+    assert v["kind"] == "noise" and v["apart"]
+    # the live case: B just above every A, but A itself spreads 12% and the
+    # effect is 9% — on one side, not a result
+    v = xp.verdict_rounds([6.1, 6.9, 6.5], [6.92, 7.2])
+    assert v["apart"] and v["noise_pct"] > abs(v["effect_pct"]) and v["kind"] == "noise"
+    assert xp.verdict_rounds([None, 1.0], [1.0])["kind"] == "unknown"
+
+
+def test_round_report_reads_as_rounds():
+    def ph(name, p50, p99):
+        return {"name": name, "p50_ms": p50, "p99_ms": p99, "p99_without_worst_s": p99,
+                "errors": 0, "dropped": 0, "hitratio": {"queryResultCache": 0.6}}
+    res = {"collection": "c", "knob": "filter_cache", "label": "Filter cache size",
+           "unit": "entries", "from": 512, "to": 64, "rps": 50, "duration": 30,
+           "warmup": 15, "seed": 7, "rounds": 2,
+           "phases": [ph("A1", 6.0, 9.0), ph("B1", 9.0, 9.2), ph("A2", 6.1, 12.0),
+                      ph("B2", 9.3, 9.1), ph("A3", 6.0, 8.8)]}
+    out = xp.format_report(res)
+    assert "order: A1 B1 A2 B2 A3" in out
+    assert "p50: all 2 B runs were slower than every A run" in out
+    assert "p99: B runs and A runs overlap" in out
+    # one side but within A's spread
+    res["phases"] = [ph("A1", 6.1, 9), ph("B1", 6.92, 9), ph("A2", 6.9, 9),
+                     ph("B2", 7.2, 9), ph("A3", 6.5, 9)]
+    assert "too close to call" in xp.format_report(res)

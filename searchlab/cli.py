@@ -696,8 +696,12 @@ def learn_cmd(lesson):
               help="YAML query templates (default: queries/default.yaml if present).")
 @click.option("--seed", default=7, show_default=True, type=int,
               help="Same seed in every phase, so every phase sends the same queries.")
+@click.option("--rounds", default=1, show_default=True, type=click.IntRange(1, 5),
+              help="Alternate A and B this many times (A B A B … A). A change only "
+                   "counts when every B run lands on the same side of every A run.")
 @click.option("--report", default=None, help="Also write the results as JSON.")
-def experiment_cmd(collection, knob, to_value, rps, duration, warmup, queries_path, seed, report):
+def experiment_cmd(collection, knob, to_value, rps, duration, warmup, queries_path, seed,
+                   rounds, report):
     """Change one knob and measure it honestly: A (current value), B (--to),
     then A again. Every phase starts from a core reload with a discarded
     warm-up, and replays the same seeded queries; how far the two A runs
@@ -711,7 +715,7 @@ def experiment_cmd(collection, knob, to_value, rps, duration, warmup, queries_pa
     res = xp.run_experiment(spec, collection, knob, to_value, rps=rps,
                             duration=gates.parse_duration(duration),
                             warmup=gates.parse_duration(warmup), seed=seed,
-                            queries_path=queries_path, say=click.echo)
+                            queries_path=queries_path, rounds=rounds, say=click.echo)
     click.echo("")
     click.echo(xp.format_report(res))
     if report:

@@ -38,6 +38,14 @@
   runs the same A/B/A from the page; a load test, a second experiment and
   knob turns are refused while one runs, since they'd be measured with it
 - Landing page: the command list covers all 28 commands
+- `experiment --rounds N` (and a Rounds choice in the panel): A B A B … A,
+  where a change counts only if every B run is on the same side of every A
+  run and further from them than the A runs spread
+- Fixed: seeded data generation wasn't reproducible for profiles with a
+  `date` field. Dates were `now()` minus a seeded offset, so two runs a
+  second apart differed (a determinism test failed intermittently). They
+  now count back from the start of the current UTC day, and a field can
+  pin `anchor:` to reproduce across days
 - Control panel: **Lessons** section — the same lessons, a step at a time
   in the browser, with click-to-answer questions, wait steps that poll the
   cluster, and cleanup on stop or tab close. The server runs steps by lesson

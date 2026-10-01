@@ -110,7 +110,7 @@ A single self-contained page (no CDN, no build step) that both *shows* the clust
 
 **Drive it:** ramp RPS live with a slider while a load test runs, index N documents of chosen complexity, force a commit or a merge, expunge deletes, reload, purge, create and delete collections, add and remove replicas by type, split a shard.
 
-**Tune it while it runs:** knobs for soft/hard commit interval, filter and result cache size, RAM buffer, merge policy (segments per tier, max merged segment, deletes allowed), and merge scheduler threads. Turning one writes through the Config API on Solr, or index settings on ES/OS — no restart, no editing `solrconfig.xml`, and each knob links to the endpoint that proves its live value. Under the knobs, **Try a value as an experiment** runs the same A/B/A as `searchlab experiment` (below) from the page, with progress by phase, the knobs locked while it runs, and the report when it's done.
+**Tune it while it runs:** knobs for soft/hard commit interval, filter and result cache size, RAM buffer, merge policy (segments per tier, max merged segment, deletes allowed), and merge scheduler threads. Turning one writes through the Config API on Solr, or index settings on ES/OS — no restart, no editing `solrconfig.xml`, and each knob links to the endpoint that proves its live value. Under the knobs, **Try a value as an experiment** runs the same A/B/A as `searchlab experiment` (below) from the page, one to three rounds, with progress by phase, the knobs locked while it runs, and the report when it's done.
 
 **Read it in plain language:** an insights panel that says *why* something is wrong rather than only that it is — "heap above 80% on solr2, which is why p99 is climbing" — with the alert history foldable so it stops disappearing before you finish reading.
 
@@ -237,9 +237,10 @@ Real Solr performance problems come from data *shape*, not doc count. Profiles a
 - `categorical` — `cardinality` + optional `zipf` skew (facet/filter behavior)
 - `keyword` — random strings (`length`), effectively unique at scale
 - `multivalued` — wraps any inner type, `min_values` / `max_values`
-- `int`, `float`, `date`, `bool`, `id`
+- `date` — `days_back` (spread over the days before the start of today, UTC); `anchor: 2026-01-01` counts back from a fixed day instead
+- `int`, `float`, `bool`, `id`
 
-`profiles/default.yaml` is an e-commerce-ish baseline. `profiles/high-cardinality.yaml` is a repro profile for high-cardinality faceting pain. Use `--seed` for reproducible datasets.
+`profiles/default.yaml` is an e-commerce-ish baseline. `profiles/high-cardinality.yaml` is a repro profile for high-cardinality faceting pain. Use `--seed` for reproducible datasets: the same seed gives the same documents (on the same day, for profiles with dates, unless they set an `anchor`).
 
 ## Query templates
 
@@ -411,6 +412,8 @@ The quick question, "what does this knob do?", answered on the cluster you alrea
   queryResultCache hit ratio fell from 0.66 to 0.54, and latency didn't notice: on this
   index and workload, a miss costs about what a hit does.
 ```
+
+One A/A′ pair is a rough measure of noise, and the report says so. `--rounds N` alternates them (A B A B … A), and then a change only counts when every B run lands on the same side of every A run *and* the medians are further apart than the A runs are from each other. Both halves matter: in a two-round run, both B runs sat just above all three A runs, but the A runs spread 12% and the "effect" was 9%. That gets reported as too close to call.
 
 Cache hit ratios and GC per phase sit next to the latency, and when a cache clearly moved the report says whether latency moved with it. The knob always goes back as it was found, on Ctrl-C too: as an override if it was one, or to `solrconfig.xml` if it wasn't, and collections sharing the configset are named up front, since they change with it. Knob names are the control panel's (an unknown one lists what the collection has). Solr only for now. For changes a live cluster can't take (heap, GC flags, versions), use a sweep:
 
