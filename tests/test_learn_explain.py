@@ -130,6 +130,21 @@ def test_dig_wildcard_fans_out():
     assert dig({"x": 1}, "x.*") is None
 
 
+def test_dig_reaches_keys_that_contain_dots():
+    stats = {"solr-mbeans": {"CACHE": {"filterCache": {"stats": {
+        "CACHE.searcher.filterCache.hits": 3, "CACHE.searcher.filterCache.lookups": 4}}}}}
+    assert dig(stats, "solr-mbeans.CACHE.filterCache.stats.CACHE.searcher.filterCache.hits") == 3
+    assert dig({"a.b": {"c": 1}}, "a.b.c") == 1
+    assert dig({"a": {"b": 2}, "a.b": 9}, "a.b") == 2      # a plain path still wins
+    assert dig(stats, "solr-mbeans.CACHE.nope.hits") is None
+
+
+def test_render_narrows_a_flat_object_by_short_name():
+    st = {"CACHE.searcher.filterCache.lookups": 4, "CACHE.searcher.filterCache.hits": 3,
+          "CACHE.searcher.filterCache.ramBytesUsed": 999}
+    assert render(st, ["hits", "lookups"]).splitlines() == ["hits     3", "lookups  4"]
+
+
 def test_has_value_checks_values_not_keys():
     body = {"segments": {"_0": {"source": "flush"}, "_1": {"source": "merge"}}}
     cond = {"path": "segments.*.source", "op": "has_value", "value": "merge"}

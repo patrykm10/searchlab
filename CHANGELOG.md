@@ -20,8 +20,9 @@
   triggers and the lesson waits for) and **schema-changes** (an accepted
   schema change that breaks the next write, and why deleting everything
   doesn't fix it), and **scoring** (BM25's three levers on five documents,
-  ending with the learner re-ranking one). `searchlab learn` lists all
-  seven as a course
+  ending with the learner re-ranking one), and **caching** (which cache
+  answers which request, read from Solr's own counters). `searchlab learn`
+  lists all eight as a course
 - `explain` no longer names the `debug` component "your optimization
   target": it only runs because the report asked for it. It's set aside
   when judging the query, and called out when it is most of the time
@@ -41,7 +42,8 @@
   in the browser, with click-to-answer questions, wait steps that poll the
   cluster, and cleanup on stop or tab close. The server runs steps by lesson
   name and number, never a request the page supplies
-- Lesson engine: `*` wildcards in paths, a `has_value` condition, readable
+- Lesson engine: dot paths reach keys that contain dots (Solr's metric
+  names), `fields` narrows a flat object too, `*` wildcards in paths, a `has_value` condition, readable
   rendering of token chains and segment tables (`fields` picks columns),
   each request shown with its parameters, `engine:` checked against the
   running cluster, `cleanup:` steps that run however a lesson ends, and an

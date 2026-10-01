@@ -63,16 +63,27 @@ _OPS = {
 
 
 def dig(data: Any, path: str) -> Any:
-    parts = path.split(".")
+    return _dig(data, path.split("."))
+
+
+def _dig(data: Any, parts: list[str]) -> Any:
     for i, part in enumerate(parts):
         if part == "*":
-            rest = ".".join(parts[i + 1:])
+            rest = parts[i + 1:]
             if isinstance(data, dict):
-                return {k: dig(v, rest) if rest else v for k, v in data.items()}
+                return {k: _dig(v, rest) if rest else v for k, v in data.items()}
             if isinstance(data, list):
-                return [dig(v, rest) if rest else v for v in data]
+                return [_dig(v, rest) if rest else v for v in data]
             return None
         if isinstance(data, dict):
+            if part not in data:
+                # Solr's metrics name keys with dots of their own
+                # ("CACHE.searcher.filterCache.hits"): try the longest run
+                # of remaining parts that is a key, then carry on below it
+                for j in range(len(parts), i + 1, -1):
+                    key = ".".join(parts[i:j])
+                    if key in data:
+                        return _dig(data[key], parts[j:])
             data = data.get(part)
         elif isinstance(data, list) and part.isdigit():
             data = data[int(part)] if int(part) < len(data) else None
@@ -112,6 +123,11 @@ def render(value: Any, fields: list[str] | None = None) -> str:
             isinstance(v, dict) and (fields or all(_scalar(x) for x in v.values()))
             for v in value):
         return "\n".join(_row(v, fields) for v in value) if value else "(none)"
+    if isinstance(value, dict) and fields and all(_scalar(v) for v in value.values()):
+        # a flat object narrowed to the keys worth reading (matched on the
+        # short name, so "hits" picks CACHE.searcher.filterCache.hits)
+        value = {k: v for k, v in value.items() if _label(k) in fields}
+        value = dict(sorted(value.items(), key=lambda kv: fields.index(_label(kv[0]))))
     if isinstance(value, dict) and value and all(
             _scalar(v) or isinstance(v, (list, dict)) for v in value.values()):
         width = max(len(_label(k)) for k in value)

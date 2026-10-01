@@ -329,7 +329,7 @@ def test_lessons_listed_in_course_order(demo_server):
     status, out = _get(demo_server + "/api/lessons")
     assert status == 200 and out["demo"] is True and out["engine"] == "solr"
     names = [x["name"] for x in out["lessons"]]
-    assert names[:3] == ["cluster-anatomy", "analysis-chain", "scoring"] and len(names) == 7
+    assert names[:3] == ["cluster-anatomy", "analysis-chain", "scoring"] and len(names) == 8
     # demo mode lists them, but running one is a control like any other
     status, out = _post(demo_server + "/api/lesson/step", {"name": "analysis-chain", "index": 0})
     assert status == 409 and "demo" in out["error"]

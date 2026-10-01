@@ -1,0 +1,170 @@
+title: "Caching: what fq really buys you"
+engine: solr
+order: 5
+requires: "a running Solr cluster (searchlab up); the lesson makes and removes its own collection"
+intro: |
+  "Put filters in fq, they get cached" is advice everyone gives and few
+  people have watched happen. Solr has two query-side caches in play here:
+  the filterCache holds the set of documents matching each fq, and the
+  queryResultCache holds whole ordered result lists. Which one answers a
+  request isn't always the one you'd guess. Let's read their counters.
+steps:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - http:
+      path: "/admin/collections"
+      params: { action: CREATE, name: lesson-lab, numShards: 1, replicationFactor: 1, wt: json }
+      show: "responseHeader.status"
+      expect: { path: "responseHeader.status", op: eq, value: 0 }
+  - say: |
+      (A 400 from the DELETE just means there was no leftover lesson-lab to remove.)
+
+      Six documents across three categories, then a look at the filterCache:
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json:
+        - { id: d1, category_s: shoes,  title_t: "trail runner" }
+        - { id: d2, category_s: shoes,  title_t: "road runner" }
+        - { id: d3, category_s: tents,  title_t: "two person tent" }
+        - { id: d4, category_s: tents,  title_t: "four season tent" }
+        - { id: d5, category_s: stoves, title_t: "canister stove" }
+        - { id: d6, category_s: stoves, title_t: "wood stove" }
+      show: "responseHeader.status"
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.filterCache.stats"
+      fields: [lookups, hits, inserts, size]
+  - say: "Empty. A query with a filter:"
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "*:*", fq: "category_s:shoes", wt: json }
+      show: "response.numFound"
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.filterCache.stats"
+      fields: [lookups, hits, inserts, size]
+  - say: |
+      One lookup, a miss, so Solr worked out which documents are shoes and
+      inserted that set. The next request with this fq should find it.
+  - ask: "Send exactly the same request again (q=*:*, fq=category_s:shoes). What happens to the filterCache's hits?"
+    options:
+      - "it goes to 1: the filter set is reused"
+      - "it stays 0"
+    answer: 1
+    why: >
+      The identical request is answered whole from the queryResultCache,
+      keyed on the query, the filters and the sort together. Solr never
+      gets as far as asking the filterCache.
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "*:*", fq: "category_s:shoes", wt: json }
+      show: "response.numFound"
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.filterCache.stats"
+      fields: [lookups, hits, inserts, size]
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: queryResultCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.queryResultCache.stats"
+      fields: [lookups, hits, inserts, size]
+  - say: |
+      filterCache untouched; queryResultCache has its first hit. The
+      filterCache earns its keep when the filter repeats under DIFFERENT
+      queries, which is how real traffic looks: many searches, a few
+      filters (a category, "in stock", a date range).
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "title_t:runner", fq: "category_s:shoes", wt: json }
+      show: "response.numFound"
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.filterCache.stats"
+      fields: [lookups, hits, inserts, size]
+  - ask: "Now the same restriction written into the query itself: q=title_t:tent AND category_s:tents. What does the filterCache do?"
+    options:
+      - "a lookup, and a new entry for category_s:tents"
+      - "nothing"
+    answer: 1
+    why: >
+      Only fq clauses go through the filterCache. Written into q, the
+      restriction is part of the scored query: it's evaluated each time
+      and affects the score, and only the whole result list can be cached.
+  - http:
+      path: "/lesson-lab/select"
+      params: { q: "title_t:tent AND category_s:tents", wt: json }
+      show: "response.numFound"
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.filterCache.stats"
+      fields: [lookups, hits, inserts, size]
+  - say: |
+      Unchanged. So: restrictions that repeat go in fq. A filter that never
+      repeats (a timestamp to the millisecond, a user id) only fills the
+      cache with entries nobody reuses. Mark those with {!cache=false}
+      (fq={!cache=false}user_s:12345) and Solr skips the cache entirely.
+  - ask: "One more document arrives, with a commit. What happens to the filterCache?"
+    options:
+      - "nothing: the cached sets are still correct for the old documents"
+      - "it's emptied"
+    answer: 1
+    why: >
+      A commit opens a new searcher, and caches belong to a searcher, so
+      the new one starts empty. Solr can pre-fill it from the old one
+      (autowarmCount); the _default configset doesn't.
+  - http:
+      method: POST
+      path: "/lesson-lab/update"
+      params: { commit: "true", wt: json }
+      json: [ { id: d7, category_s: shoes, title_t: "approach shoe" } ]
+      show: "responseHeader.status"
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.filterCache.stats"
+      fields: [lookups, hits, inserts, size, hitratio]
+  - say: |
+      Empty again, and look at hitratio: 1.0, a perfect score from zero
+      lookups. A dashboard showing a cache's hit ratio right after a commit
+      is showing you nothing. Read lookups next to it. And with soft commits
+      every second, caches barely live long enough to help, which is one
+      reason a shorter "search visibility delay" costs query performance.
+  - wait: |
+      Your turn: get the filterCache to 3 hits. Any queries you like, as
+      long as they're answered with filters that are already cached, and
+      not straight from the queryResultCache. For example:
+
+        curl 'http://localhost:8983/solr/lesson-lab/select?q=*:*&fq=category_s:stoves'
+        curl 'http://localhost:8983/solr/lesson-lab/select?q=title_t:stove&fq=category_s:stoves'
+
+      Watch the counters as you go, with the mbeans request from earlier:
+
+        curl 'http://localhost:8983/solr/lesson-lab/admin/mbeans?cat=CACHE&key=filterCache&stats=true'
+    url: "/lesson-lab/admin/mbeans"
+    params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+    until: { path: "solr-mbeans.CACHE.filterCache.stats.CACHE.searcher.filterCache.hits", op: gte, value: 3 }
+  - http:
+      path: "/lesson-lab/admin/mbeans"
+      params: { cat: CACHE, key: filterCache, stats: "true", wt: json, json.nl: map }
+      show: "solr-mbeans.CACHE.filterCache.stats"
+      fields: [lookups, hits, inserts, size, hitratio]
+  - say: |
+      That's the pattern a filterCache is for: few distinct filters, many
+      different queries using them. To see what caching does to latency on
+      a real workload, try searchlab experiment with the filter_cache or
+      result_cache knob: it reads these same counters for each phase.
+cleanup:
+  - http:
+      path: "/admin/collections"
+      params: { action: DELETE, name: lesson-lab, wt: json }
+      show: "responseHeader.status"
+  - say: "(removed the lesson-lab collection.)"
