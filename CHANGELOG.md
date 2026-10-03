@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — look inside
+- Control panel: **write path** explorer — one document from analyzer to
+  buffer to segment to merge, each stage confirmed against the live cluster
+  (real-time get vs search; segment diffs labelled flush or merge). The
+  segment panel gains snapshot and "what changed?" for any write
+- Control panel: **schema** explorer — the managed schema with every
+  property labelled by its source layer (field, type, default), what each
+  segment physically holds, and edits previewed as the exact Schema API
+  call, with a warning when a change will make the next write fail
+  (behaviour verified on Solr 9.6)
+- Control panel: **config** explorer — the effective solrconfig with overlay
+  and lab user properties marked; edits via set-property /
+  set-user-property and reset to file, limited to the 29 properties Solr 9.6
+  accepts
+- Landing page leads with learning and experimenting rather than load testing
+
 ## 0.14.0 — interactive learning
 - `learn`: an interactive lesson engine that teaches against the LIVE
   cluster — its `wait` step tells you to go do something real (kill a node

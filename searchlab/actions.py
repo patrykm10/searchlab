@@ -90,6 +90,9 @@ class ActionRunner:
         # a rolling history, so a burst of actions doesn't erase the one you
         # were actually reading — newest first
         self.action_log: deque[dict] = deque(maxlen=100)
+        # write-path walkthrough: last segment snapshot per collection:core,
+        # so a diff means something without the caller tracking state itself
+        self._wp_baseline: dict[str, list[dict]] = {}
 
     # ------------------------------------------------------------- helpers --
 
@@ -581,6 +584,165 @@ class ActionRunner:
                     node_index = max(0, int(digits) - 1) if digits else 0
         try:
             return {"ok": True, **replica_segments(self.spec, core, node_index)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ------------------------------------------------ write-path walkthrough --
+
+    def _wp_segments(self, collection: str, core: str) -> dict:
+        if self.spec.engine != "solr":
+            # ES/OS segments carry no flush/merge provenance, which is the
+            # whole point of the diff
+            return {"ok": False, "error": "The write-path walkthrough is Solr-only for now."}
+        return self.segments(collection, core)
+
+    @staticmethod
+    def _baseline_key(owner: str, collection: str, core: str) -> str:
+        # One baseline per caller: the segment panel and the walkthrough (and
+        # a second tab) each roll their own forward. Shared, whichever diffed
+        # first used up the other's change.
+        return f"{owner}|{collection}:{core}"
+
+    def writepath_snapshot(self, collection: str, core: str, owner: str = "") -> dict:
+        """Remember this replica's segments as the caller's baseline."""
+        out = self._wp_segments(collection, core)
+        if out.get("ok"):
+            if len(self._wp_baseline) > 500:       # abandoned tabs: forget the oldest
+                self._wp_baseline.pop(next(iter(self._wp_baseline)))
+            self._wp_baseline[self._baseline_key(owner, collection, core)] = out["segments"]
+        return out
+
+    def writepath_diff(self, collection: str, core: str, owner: str = "") -> dict:
+        """Segments that appeared or vanished since this caller's last
+        snapshot or diff.
+
+        The baseline rolls forward on every diff, so after a forced merge a
+        second diff shows the flush segments going and the merge one arriving.
+        """
+        from .segments import diff_segments
+
+        key = self._baseline_key(owner, collection, core)
+        if key not in self._wp_baseline:
+            return {"ok": False, "error": "Take a snapshot first."}
+        out = self._wp_segments(collection, core)
+        if not out.get("ok"):
+            return out
+        diff = diff_segments(self._wp_baseline[key], out["segments"])
+        self._wp_baseline[key] = out["segments"]
+        return {**out, "diff": diff}
+
+    def _wp_guard(self, collection: str, **required: str) -> dict | None:
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "The write-path walkthrough is Solr-only for now."}
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        for name, value in required.items():
+            if not value:
+                return {"ok": False, "error": f"Missing {name}."}
+        return None
+
+    def writepath_analyze(self, collection: str, field: str, value: str) -> dict:
+        if err := self._wp_guard(collection, field=field, value=value):
+            return err
+        from .writepath import fetch_analysis
+
+        try:
+            return {"ok": True, "stages": fetch_analysis(self.spec, collection, field, value)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def writepath_submit(self, collection: str, field: str, value: str,
+                         cores: list[str] | None = None) -> dict:
+        if err := self._wp_guard(collection, field=field, value=value):
+            return err
+        if field == "id" or field.startswith("_"):
+            # the walkthrough sets the id itself; a value here would replace
+            # it (possibly overwriting a real document) while the page waited
+            # for an id that was never indexed
+            return {"ok": False, "error": f"'{field}' can't be the walkthrough's field: "
+                    "pick a text field."}
+        from .writepath import commit_settings, index_single_doc, locate_doc
+
+        try:
+            out = index_single_doc(self.spec, collection, field, value)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        try:
+            out["core"] = locate_doc(self.spec, collection, out["id"], cores or [])
+            out["commits"] = commit_settings(self.spec, collection)
+        except Exception:
+            # the document is in; without these the page watches every
+            # leader and names no trigger, which is less, not wrong
+            out.setdefault("core", None)
+            out["commits"] = None
+        return {"ok": True, **out}
+
+    # --------------------------------------------------------------- schema --
+
+    def schema(self, collection: str) -> dict:
+        if err := self._schema_guard(collection):
+            return err
+        from .schema_view import read_schema
+
+        try:
+            return {"ok": True, **read_schema(self.spec, collection)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def schema_set(self, collection: str, kind: str, name: str, prop: str,
+                   value: bool, dry_run: bool) -> dict:
+        if err := self._schema_guard(collection):
+            return err
+        from .schema_view import set_field_property
+
+        try:
+            out = set_field_property(self.spec, collection, kind, name, prop,
+                                     value, dry_run=dry_run)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        if not dry_run:
+            self._done("schema", True, f"Schema: {name} {prop}={str(value).lower()}")
+        return {"ok": True, **out}
+
+    def config(self, collection: str) -> dict:
+        if err := self._schema_guard(collection):
+            return err
+        from .config_view import read_config
+
+        try:
+            return {"ok": True, **read_config(self.spec, collection)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def config_set(self, collection: str, path: str, value, reset: bool,
+                   dry_run: bool) -> dict:
+        if err := self._schema_guard(collection):
+            return err
+        from .config_view import set_config
+
+        try:
+            out = set_config(self.spec, collection, path, value, reset=reset, dry_run=dry_run)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        if not dry_run:
+            self._done("config", True, f"Config: {path} "
+                       + ("reset to solrconfig.xml" if reset else f"= {value}"))
+        return {"ok": True, **out}
+
+    def _schema_guard(self, collection: str) -> dict | None:
+        if self.spec.engine != "solr":
+            return {"ok": False, "error": "The schema and config explorers are Solr-only for now."}
+        if not collection:
+            return {"ok": False, "error": "Pick a collection first."}
+        return None
+
+    def writepath_visibility(self, collection: str, doc_id: str) -> dict:
+        if err := self._wp_guard(collection, id=doc_id):
+            return err
+        from .writepath import doc_visibility
+
+        try:
+            return {"ok": True, **doc_visibility(self.spec, collection, doc_id)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

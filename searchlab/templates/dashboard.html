@@ -295,6 +295,16 @@ canvas { width: 100%; height: 150px; display: block;
 .lustat span { display: block; color: var(--faint); font-size: 9.5px;
   text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
 .lustat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.segdiff { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.segdiff-bar { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.segdiff-out { margin-top: 10px; font-size: 12.5px; line-height: 1.5; }
+.segdiff-out p { margin: 0 0 8px; }
+.sdhead { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.sdgone td { color: var(--faint); text-decoration: line-through; }
+.sdsrc { font-family: var(--mono); padding: 0 5px; border: 1px solid var(--line); }
+.sd-flush { color: var(--cobalt); border-color: var(--cobalt); }
+.sd-merge { color: var(--warn); border-color: var(--warn); }
 .segfold > summary { cursor: pointer; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
   list-style: none; padding: 2px 0; }
@@ -541,6 +551,91 @@ textarea:focus { border-color: var(--cobalt); }
 .tfail { color: var(--crit); font-weight: 700; }
 
 /* ---------- incident timeline ---------- */
+/* ---------- write path walkthrough ---------- */
+.wp-diagram { display: flex; align-items: stretch; gap: 6px; margin: 4px 0 18px;
+  flex-wrap: wrap; }
+.wp-box { flex: 1 1 150px; border: 1.5px solid var(--line); background: var(--card);
+  padding: 10px 12px; font-size: 11.5px; color: var(--faint);
+  transition: border-color .4s, color .4s, background .4s; }
+.wp-box b { display: block; font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+.wp-box span { line-height: 1.4; }
+.wp-box.done { color: var(--muted); border-color: var(--muted); }
+.wp-box.active { color: var(--ink); border-color: var(--cobalt);
+  box-shadow: inset 0 -3px 0 var(--cobalt); }
+.wp-box.active b { color: var(--cobalt); }
+.wp-box.waiting b::after { content: " \2026"; animation: wpblink 1s steps(2) infinite; }
+@keyframes wpblink { 50% { opacity: 0; } }
+.wp-arrow { align-self: center; color: var(--faint); font-family: var(--mono); }
+.wp-actions { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0 14px; }
+#wp-stages:empty, #wp-log:empty { display: none; }
+#wp-stages { border: 1.5px solid var(--line); background: var(--card);
+  padding: 10px 14px; margin-bottom: 12px; }
+.wp-stage { display: grid; grid-template-columns: 200px 1fr; gap: 10px;
+  padding: 5px 0; border-top: 1px solid var(--line); align-items: baseline; }
+.wp-stage:first-child { border-top: none; }
+.wp-stage > span { font-family: var(--mono); font-size: 11px; color: var(--muted);
+  overflow-wrap: anywhere; }
+.wp-tok { display: inline-block; font-family: var(--mono); font-size: 11px;
+  border: 1px solid var(--line); padding: 0 5px; margin: 2px 4px 2px 0; color: var(--ink); }
+.wp-tok.changed { border-color: var(--cobalt); color: var(--cobalt); }
+.wp-tok.removed { color: var(--faint); text-decoration: line-through; border-style: dashed; }
+#wp-log { background: var(--card); border: 1.5px solid var(--line); }
+@media (max-width: 640px) {
+  .wp-arrow { display: none; }
+  .wp-stage { grid-template-columns: 1fr; }
+}
+/* ---------- schema explorer ---------- */
+.sx-head { font-family: var(--mono); font-size: 12px; color: var(--muted);
+  margin: 4px 0 12px; line-height: 1.7; }
+.sx-tabs { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.sx-tabs .btn.on { color: var(--cobalt); border-bottom-color: var(--cobalt); }
+.sx-opts { display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline;
+  font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.sx-legend { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono);
+  font-size: 10.5px; margin-bottom: 10px; }
+.sx-sw { color: var(--ink); }
+.sx-body { background: var(--card); border: 1.5px solid var(--line); padding: 12px 14px;
+  font-family: var(--mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.sx-el { display: flex; flex-wrap: wrap; gap: 0 10px; padding: 4px 0;
+  border-top: 1px solid var(--line); }
+.sx-el:first-child { border-top: none; }
+.sx-kids { padding-left: 22px; width: 100%; }
+.sx-kids .sx-el { border-top: none; padding: 1px 0; }
+.sx-tag { color: var(--muted); }
+.sx-a { color: var(--ink); }
+.sx-a .sx-v { color: var(--cobalt); }
+.from-type, .from-type .sx-v { color: var(--muted); }
+.from-default, .from-default .sx-v { color: var(--faint); font-style: italic; }
+.help-on [data-sh] { cursor: help; }
+.help-on [data-sh]:hover { background: var(--cobalt-soft); }
+.sx-edit .sx-v, .sx-editable { text-decoration: underline dotted; text-underline-offset: 3px; }
+.sx-edit .sx-v { cursor: pointer; }
+.sx-com { color: var(--faint); width: 100%; }
+.sx-com b { color: var(--muted); font-weight: 500; }
+.sx-bad { color: var(--warn); }
+.sx-confirm { width: 100%; margin: 8px 0 6px; padding: 10px 12px; border: 1.5px solid var(--cobalt);
+  font-family: var(--sans); font-size: 12.5px; line-height: 1.5; }
+.sx-confirm pre { font-family: var(--mono); font-size: 11.5px; background: var(--bg, transparent);
+  border: 1px solid var(--line); padding: 8px; margin: 8px 0; white-space: pre-wrap; }
+.sx-confirm p { margin: 0 0 6px; }
+.sx-confirm .sx-warn { color: var(--warn); }
+.sx-confirm .btns { display: flex; gap: 16px; margin-top: 8px; }
+.from-overlay, .from-overlay .sx-v { color: var(--cobalt); font-weight: 600; }
+.from-labprop, .from-labprop .sx-v { color: var(--warn); }
+.from-absent, .from-absent .sx-v { color: var(--faint); font-style: italic; }
+.cf-sec > summary { cursor: pointer; list-style: none; padding: 3px 0; }
+.cf-sec > summary::-webkit-details-marker { display: none; }
+.cf-sec > summary::before { content: "\25B6\00a0"; font-size: 8px; color: var(--faint); }
+.cf-sec[open] > summary::before { content: "\25BC\00a0"; }
+.cf-sec { border-top: 1px solid var(--line); padding: 3px 0; }
+.cf-sec:first-child { border-top: none; }
+.cf-editor { display: inline-flex; gap: 8px; align-items: baseline; }
+.cf-editor input { font-family: var(--mono); font-size: 12px; width: 110px; }
+#phelp .sx-card-val { margin-top: 8px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--muted); }
+#phelp .sx-card-flip { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line);
+  font-size: 12px; line-height: 1.45; color: var(--ink); }
 #causal { background: var(--card); border: 1.5px solid var(--line); }
 #causal:empty { display: none; }
 #causal-count { float: right; font-family: var(--mono); font-size: 10px;
@@ -904,6 +999,95 @@ section.collapsed h2 { margin-bottom: 0; }
   <div class="desc">Adjust how the engine behaves. Changes go live within seconds — no restart.</div>
   <div id="tuning-note" class="desc" style="display:none"></div>
   <div id="knobs"><span class="desc">Loading current settings…</span></div>
+</section>
+<section id="writepath-section">
+  <h2>Write path</h2>
+  <div class="desc">Follow one document from the text you type to a segment
+    on disk. Nothing here is simulated: each step is confirmed by asking the
+    cluster, and the diagram only moves when it answers.</div>
+
+  <div class="wp-diagram" id="wp-diagram">
+    <div class="wp-box" data-stage="analyze"><b>1 &middot; Analyze</b>
+      <span>The field's analyzer turns text into the terms that get indexed.</span></div>
+    <div class="wp-arrow">&rarr;</div>
+    <div class="wp-box" data-stage="buffer"><b>2 &middot; Buffer</b>
+      <span>Held in memory and the transaction log. Real-time get sees it; search does not.</span></div>
+    <div class="wp-arrow">&rarr;</div>
+    <div class="wp-box" data-stage="segment"><b>3 &middot; Segment</b>
+      <span>A commit flushes the buffer into a new immutable segment and opens a searcher.</span></div>
+    <div class="wp-arrow">&rarr;</div>
+    <div class="wp-box" data-stage="merge"><b>4 &middot; Merge</b>
+      <span>Small segments are rewritten into bigger ones; deleted docs are dropped.</span></div>
+  </div>
+
+  <div class="qrow qsplit" style="align-items:end">
+    <div>
+      <label for="wp-field">Text field</label>
+      <select id="wp-field"><option value="">choose a field…</option></select>
+    </div>
+    <div>
+      <label for="wp-value">Value</label>
+      <input id="wp-value" type="text" value="The Quick Brown Foxes were Running">
+    </div>
+  </div>
+  <div class="wp-actions">
+    <button class="btn primary" id="btn-wp-analyze">Analyze</button>
+    <button class="btn" id="btn-wp-submit" disabled>Index this one document</button>
+    <button class="btn" id="btn-wp-commit" disabled>Commit now</button>
+    <button class="btn" id="btn-wp-merge" disabled>Force a merge</button>
+    <button class="btn" id="btn-wp-reset">Start over</button>
+  </div>
+  <div id="wp-stages"></div>
+  <div id="wp-log"></div>
+</section>
+<section id="schema-section">
+  <h2>Schema</h2>
+  <div class="desc">The collection's live managed schema, laid out the way
+    managed-schema.xml reads. With hover help on (the ? in the header), hover any
+    attribute, value, field type, tokenizer,
+    filter or parameter to see what it does, which layer its value comes from,
+    and what changing it on a populated index really does — each of those
+    behaviours was checked against this Solr version, not recalled. Values on
+    declared fields and dynamic rules can be changed by clicking them.</div>
+  <div id="sx-head" class="sx-head"></div>
+  <div class="sx-tabs" id="sx-tabs">
+    <button class="btn" data-view="data">In your data</button>
+    <button class="btn" data-view="fields">Declared fields</button>
+    <button class="btn" data-view="dynamic">Dynamic rules</button>
+    <button class="btn" data-view="types">Field types</button>
+    <button class="btn" data-view="copy">Copy fields</button>
+  </div>
+  <div class="sx-opts">
+    <label><input type="checkbox" id="sx-inherited" checked> show inherited values</label>
+    <label id="sx-all-wrap"><input type="checkbox" id="sx-all"> show all, not only what your data uses</label>
+    <button class="btn" id="btn-sx-reload">Reload</button>
+  </div>
+  <div class="sx-legend"><span class="sx-sw">declared here</span>
+    <span class="sx-sw from-type">inherited from the field type</span>
+    <span class="sx-sw from-default">Solr's built-in default</span>
+    <span class="sx-sw sx-editable">click to change</span></div>
+  <div id="sx-body" class="sx-body"><span class="desc">Pick a collection to read its schema.</span></div>
+</section>
+<section id="config-section">
+  <h2>Config</h2>
+  <div class="desc">The collection's live solrconfig, as the Config API reports it —
+    solrconfig.xml with the overlay applied. With hover help on (the ? in the
+    header), hover any element or value to see what it does and where its value
+    comes from. Values the Config API can change are underlined: click one to see
+    the exact command before anything is sent, and reset any change back to
+    solrconfig.xml.</div>
+  <div id="cf-head" class="sx-head"></div>
+  <div class="sx-opts">
+    <label><input type="checkbox" id="cf-settable"> only what can be changed</label>
+    <button class="btn" id="btn-cf-expand">Expand all</button>
+    <button class="btn" id="btn-cf-reload">Reload</button>
+  </div>
+  <div class="sx-legend"><span class="sx-sw">solrconfig.xml</span>
+    <span class="sx-sw from-overlay">set through the Config API</span>
+    <span class="sx-sw from-labprop">lab user property</span>
+    <span class="sx-sw from-absent">not in the file: Solr's default</span>
+    <span class="sx-sw sx-editable">click to change</span></div>
+  <div id="cf-body" class="sx-body"><span class="desc">Pick a collection to read its config.</span></div>
 </section>
 <section id="vector-section">
   <h2>Vector Search</h2>
@@ -3499,6 +3683,15 @@ async function showSegments(core) {
       ${stats.length ? `<div class="lustats">${stats.map(([k, v, tip]) =>
         `<div class="lustat" title="${esc(tip)}"><span>${esc(k)}</span>
           <b>${esc(v)}</b></div>`).join("")}</div>` : ""}
+      ${isES() ? "" : `<div class="segdiff">
+        <div class="segdiff-bar">
+          <button class="btn" data-wp="snapshot" data-core="${esc(core)}">Snapshot</button>
+          <button class="btn" data-wp="diff" data-core="${esc(core)}"
+            ${segDiff.core === core && segDiff.hasBaseline ? "" : "disabled"}>What changed?</button>
+          <span class="desc">Snapshot, then index or commit, then ask what changed on disk.</span>
+        </div>
+        ${segDiff.core === core ? segDiff.html : ""}
+      </div>`}
       <details class="segfold"${segOpen ? " open" : ""}>
         <summary>${s.count} segments in detail</summary>
         <table class="segtable">
@@ -3525,6 +3718,1742 @@ async function showSegments(core) {
   const fold = $("segcell").querySelector(".segfold");
   if (fold) fold.addEventListener("toggle", () => { segOpen = fold.open; });
 }
+
+/* ---------- segment diff: what a write actually did on disk ---------- */
+
+// kept outside the DOM because the topology poll rebuilds the panel
+let segDiff = { core: null, hasBaseline: false, html: "" };
+
+function segDiffRow(g, gone) {
+  return `<tr class="${gone ? "sdgone" : ""}">
+    <td>${gone ? "&minus;" : "+"}</td>
+    <td>${esc(g.name)}</td>
+    <td class="num">${Number(g.docs).toLocaleString()}</td>
+    <td class="num">${esc(g.size)}</td>
+    <td><span class="sdsrc sd-${esc(g.source)}">${esc(g.source)}</span></td></tr>`;
+}
+
+function segDiffStory(d) {
+  const flushed = d.new.filter(g => g.source === "flush");
+  const merged = d.new.filter(g => g.source === "merge");
+  const docs = gs => gs.reduce((n, g) => n + (g.docs || 0), 0).toLocaleString();
+  const lines = [];
+  if (!d.new.length && !d.gone.length)
+    lines.push(`Nothing changed on disk. Anything indexed since the snapshot is still
+      in the in-memory indexing buffer — not in any segment, not searchable (except by
+      real-time get). A commit, or the buffer filling up, writes it out as a new segment.`);
+  if (flushed.length)
+    lines.push(`<b>Flush:</b> ${flushed.length} new segment${flushed.length > 1 ? "s" : ""}
+      holding ${docs(flushed)} docs, written straight from the indexing buffer. Segments are
+      immutable — every flush adds a new one rather than growing an old one.`);
+  if (merged.length)
+    lines.push(`<b>Merge:</b> ${d.gone.length} segment${d.gone.length === 1 ? "" : "s"} rewritten
+      into ${merged.length}, ${docs(merged)} live docs. Deleted documents in the inputs are
+      dropped here — this is the only moment they stop costing disk.`);
+  else if (d.gone.length)
+    lines.push(`${d.gone.length} segment${d.gone.length > 1 ? "s" : ""} vanished with no merge
+      result on this replica — usually every document in it was deleted.`);
+  return lines.map(l => `<p>${l}</p>`).join("");
+}
+
+async function segDiffAction(kind, core) {
+  const out = await post("/api/writepath/" + kind, { collection: coll(), core, owner: "panel:" + TAB });
+  const at = new Date().toLocaleTimeString();
+  if (!out.ok) {
+    segDiff = { core, hasBaseline: segDiff.core === core && segDiff.hasBaseline,
+      html: `<div class="segdiff-out"><p>${esc(out.error || "unavailable")}</p></div>` };
+  } else if (kind === "snapshot") {
+    segDiff = { core, hasBaseline: true, html: `<div class="segdiff-out"><p>Baseline taken at
+      ${at}: ${out.summary.count} segments, ${Number(out.summary.docs).toLocaleString()} live docs.
+      Now change something — index documents, commit, or force a merge.</p></div>` };
+  } else {
+    const d = out.diff;
+    segDiff = { core, hasBaseline: true, html: `<div class="segdiff-out">
+      <div class="sdhead">Since the last snapshot (checked ${at})</div>
+      ${segDiffStory(d)}
+      ${d.new.length || d.gone.length ? `<table class="segtable">
+        <tr><th></th><th>Segment</th><th class="num">Live docs</th><th class="num">Size</th><th>Source</th></tr>
+        ${d.new.map(g => segDiffRow(g, false)).join("")}
+        ${d.gone.map(g => segDiffRow(g, true)).join("")}
+      </table>` : ""}
+      <p class="desc">The baseline moves forward with each check, so the next one shows only what happens after this.</p>
+    </div>` };
+  }
+  openCore = null;          // re-open to refresh the segment table under the diff
+  showSegments(core);
+}
+
+// delegated: the panel's buttons are rebuilt by every topology poll
+$("topo").addEventListener("click", e => {
+  const b = e.target.closest("[data-wp]");
+  if (b && !b.disabled) segDiffAction(b.dataset.wp, b.dataset.core);
+});
+
+/* ---------- write path walkthrough ---------- */
+
+const WP_WATCH_S = 120, WP_MERGE_WATCH_S = 300;
+let wp = null;   // {collection, field, docId, cores, docCore, commits, t0, timer, committed}
+// Names this tab's diff baselines on the server, so the segment panel, the
+// walkthrough and a second tab each roll their own forward instead of using
+// up one another's changes.
+const TAB = Math.random().toString(36).slice(2, 10);
+
+function wpStage(name, state) {
+  // every box before `name` is done, `name` is current, the rest are ahead
+  let passed = true;
+  for (const box of $("wp-diagram").querySelectorAll(".wp-box")) {
+    box.classList.remove("done", "active", "waiting");
+    if (!name) continue;
+    if (box.dataset.stage === name) {
+      passed = false;
+      box.classList.add(state === "done" ? "done" : "active");
+      if (state === "waiting") box.classList.add("waiting");
+    } else if (passed) box.classList.add("done");
+  }
+}
+
+function wpLog(title, detail, severity = "info") {
+  const el = $("wp-log");
+  if (!el.firstElementChild) el.innerHTML = `<div class="chain">
+    <div class="chain-head">this document, step by step</div></div>`;
+  const since = wp && wp.t0 ? "+" + ((performance.now() - wp.t0) / 1000).toFixed(1) + "s"
+                            : new Date().toLocaleTimeString();
+  el.firstElementChild.insertAdjacentHTML("beforeend",
+    `<div class="step ${esc(severity)}"><div class="t">${esc(since)}</div>
+      <div class="spine"></div><div><div class="what">${esc(title)}</div>
+      <div class="why">${detail}</div></div></div>`);
+}
+
+function wpButtons(stage) {
+  $("btn-wp-submit").disabled = stage !== "analyzed";
+  $("btn-wp-commit").disabled = !["submitted"].includes(stage);
+  $("btn-wp-merge").disabled = !["flushed", "merged"].includes(stage);
+  $("btn-wp-analyze").disabled = !["idle", "analyzed"].includes(stage);
+}
+
+function wpStopTimer(run = wp) {
+  if (run && run.timer) { clearInterval(run.timer); run.timer = null; }
+}
+
+function wpReset() {
+  wpStopTimer();
+  wp = null;
+  $("wp-stages").innerHTML = "";
+  $("wp-log").innerHTML = "";
+  wpStage(null);
+  wpButtons("idle");
+}
+
+async function wpLoadFields() {
+  const sel = $("wp-field");
+  let fields = allFields;
+  if (!fields.length && coll()) {
+    const out = await post("/api/fields", { collection: coll() });
+    fields = (out.ok && out.fields) || [];
+  }
+  const texts = fields.filter(f => f.text).map(f => f.name);
+  const current = sel.value;
+  if (!texts.length || sel.dataset.for === texts.join(",")) return;
+  sel.dataset.for = texts.join(",");
+  sel.innerHTML = `<option value="">choose a field…</option>` +
+    texts.map(n => `<option${n === current ? " selected" : ""}>${esc(n)}</option>`).join("");
+  if (!sel.value) sel.value = texts.find(n => /title/.test(n)) || texts[0];
+}
+
+function renderAnalyzerStages(stages) {
+  let prev = null;
+  $("wp-stages").innerHTML = stages.map(s => {
+    // a token is marked when this stage changed it, so each filter's job shows
+    const before = new Map((prev || []).map(t => [t.position, t.text]));
+    const toks = s.tokens.map(t => {
+      const changed = prev && before.get(t.position) !== t.text;
+      return `<span class="wp-tok${changed ? " changed" : ""}"
+        title="${esc(t.type || "")}${t.position != null ? " · position " + t.position : ""}">${esc(t.text)}</span>`;
+    }).join("") + (prev || [])
+      // dropped by this stage (a stopword filter, say): shown struck through
+      .filter(t => t.position != null && !s.tokens.some(u => u.position === t.position))
+      .map(t => `<span class="wp-tok removed" title="removed by this stage">${esc(t.text)}</span>`)
+      .join("");
+    prev = s.tokens;
+    return `<div class="wp-stage"><span title="${esc(s.class)}">${esc(s.stage)}</span>
+      <div>${toks || '<span class="desc">no tokens — this stage removed everything</span>'}</div></div>`;
+  }).join("");
+}
+
+async function wpAnalyze() {
+  const field = $("wp-field").value, value = $("wp-value").value;
+  if (!coll()) return showStrip("Pick a collection first.", true);
+  if (!field || !value) return showStrip("Choose a text field and type a value.", true);
+  wpReset();
+  const run = wp = { collection: coll(), field, value, t0: null, timer: null, committed: false };
+  const out = await post("/api/writepath/analyze", { collection: run.collection, field, value });
+  // every await below can come back after Start over (or a new run): a reply
+  // for an old run must not touch the page
+  if (!out.ok || wp !== run) return;
+  renderAnalyzerStages(out.stages);
+  const terms = out.stages.length ? out.stages[out.stages.length - 1].tokens.map(t => t.text) : [];
+  wpStage("analyze", "done");
+  wpLog("Analyzed", `${out.stages.length} stages turned your text into
+    ${terms.length} term${terms.length === 1 ? "" : "s"}: <b>${terms.map(esc).join(" ")}</b>.
+    These — not what you typed — are what the index stores and what a query has to match.
+    Marked tokens are the ones that stage changed.`);
+  wpButtons("analyzed");
+}
+
+async function wpLeaderCores() {
+  const r = await fetch("/api/topology?collection=" + encodeURIComponent(wp.collection));
+  const out = await r.json();
+  if (!out.ok) return [];
+  const cores = [];
+  for (const shard of Object.values(out.shards || {})) {
+    if (shard.state && shard.state !== "active") continue;
+    for (const rep of Object.values(shard.replicas || {}))
+      if (rep.leader && rep.core) cores.push(rep.core);
+  }
+  return cores;
+}
+
+async function wpDiffAll(run, cores = run.cores) {
+  const all = { new: [], gone: [], count: 0 };
+  for (const core of cores) {
+    const out = await post("/api/writepath/diff",
+      { collection: run.collection, core, owner: "wp:" + TAB });
+    if (!out.ok) continue;
+    all.new.push(...out.diff.new.map(g => ({ ...g, core })));
+    all.gone.push(...out.diff.gone.map(g => ({ ...g, core })));
+    all.count += out.summary.count;
+  }
+  return all;
+}
+
+async function wpSubmit() {
+  const run = wp;
+  run.cores = await wpLeaderCores();
+  if (wp !== run) return;
+  if (!run.cores.length) return showStrip("Could not find the collection's shard leaders.", true);
+  for (const core of run.cores)
+    await post("/api/writepath/snapshot", { collection: run.collection, core, owner: "wp:" + TAB });
+  if (wp !== run) return;
+  const out = await post("/api/writepath/submit",
+    { collection: run.collection, field: run.field, value: run.value, cores: run.cores });
+  if (!out.ok || wp !== run) return;
+  run.docId = out.id;
+  run.docCore = out.core;          // the leader holding it; the one shard worth watching
+  run.commits = out.commits;       // the automatic commits that could flush or show it
+  run.t0 = performance.now();
+  wpLog("Indexed, not committed", `Solr acknowledged <b>${esc(out.id)}</b> in ${out.took_ms} ms${
+    out.core ? ` on <b>${esc(out.core)}</b>, the leader of its shard` : ""}.
+    It is now in the indexing buffer (RAM) and the transaction log — nothing on disk has changed
+    in any segment yet.`);
+  wpStage("buffer", "waiting");
+  wpButtons("submitted");
+  wpWatchFlush();
+}
+
+// What made the document flush or appear, as far as the page can know: your
+// Commit, else the collection's own automatic commits. A segment without
+// visibility is a hard commit that opens no searcher, not the soft one.
+function wpTrigger(run, searchable) {
+  if (run.committed) return "your commit";
+  const c = run.commits;
+  if (!c) return "a commit nobody pressed here";
+  const sec = ms => `${(ms / 1000).toLocaleString()} s`;
+  if (searchable) {
+    if (c.soft_ms > 0) return `the automatic soft commit (autoSoftCommit every ${sec(c.soft_ms)},
+      "Search visibility delay" in Tuning) — nobody pressed Commit`;
+    if (c.hard_ms > 0 && c.hard_opens_searcher) return `the automatic hard commit (autoCommit
+      every ${sec(c.hard_ms)}, which opens a searcher) — nobody pressed Commit`;
+    return "a commit from elsewhere: another client, or a commitWithin on another request";
+  }
+  if (c.hard_ms > 0 && !c.hard_opens_searcher) return `the automatic hard commit (autoCommit
+    every ${sec(c.hard_ms)}, openSearcher=false)`;
+  return "a flush nobody asked for here: the indexing buffer filled, or another client committed";
+}
+
+function wpSegText(seg) {
+  const others = (seg.docs || 0) - 1;
+  return `New segment <b>${esc(seg.name)}</b> on ${esc(seg.core)}:
+    ${Number(seg.docs).toLocaleString()} doc${seg.docs === 1 ? "" : "s"}, ${esc(seg.size)},
+    source <b>${esc(seg.source)}</b>${others > 0 ? ` — your document and ${others.toLocaleString()}
+    more written to this shard since you submitted it` : ""}`;
+}
+
+function wpWatchFlush() {
+  const run = wp;
+  let seenRtg = false, busy = false;
+  const started = performance.now();
+  wpStopTimer(run);
+  run.timer = setInterval(async () => {
+    if (busy || wp !== run) return;
+    busy = true;
+    try {
+      const vis = await post("/api/writepath/visibility", { collection: run.collection, id: run.docId });
+      if (wp !== run) return;
+      const searchable = !!(vis.ok && vis.searchable);
+      if (vis.ok && vis.rtg && !searchable && !seenRtg) {
+        seenRtg = true;
+        wpLog("Visible to real-time get, invisible to search", `<code>/get?id=</code> finds it,
+          because real-time get reads the transaction log. <code>/select?q=id:…</code> finds
+          nothing, because search only reads segments opened by the current searcher —
+          and no commit has opened a new one.`);
+      }
+      // only the document's own shard: a new segment on another one is
+      // somebody else's write, not this document flushing
+      const d = await wpDiffAll(run, run.docCore ? [run.docCore] : run.cores);
+      if (wp !== run) return;
+      const seg = d.new.find(g => g.source === "flush") || d.new[0];
+      if (seg && !run.flushed) run.flushed = seg;
+      if (run.flushed && !searchable && !run.flushLogged) {
+        run.flushLogged = true;
+        wpLog("On disk, still not searchable", `${wpSegText(run.flushed)}. It came from
+          ${wpTrigger(run, false)}: the document is now durable in a segment, but no new
+          searcher opened over it, so search still can't see it.`);
+        wpStage("segment", "waiting");
+      }
+      if (searchable) {
+        wpStopTimer(run);
+        if (run.flushed && !run.flushLogged)
+          wpLog("Flushed into a new segment", `${wpSegText(run.flushed)}. Triggered by
+            ${wpTrigger(run, true)}. A new searcher opened over it, so search sees the document.`);
+        else if (run.flushed)
+          wpLog("Searchable", `A new searcher opened, from ${wpTrigger(run, true)}, so search
+            sees the document now.`);
+        else
+          wpLog("Searchable", `Triggered by ${wpTrigger(run, true)}. Search finds the document,
+            but no new segment showed up on its shard between checks — another write may have
+            flushed it in the meantime.`);
+        wpStage("segment", "done");
+        wpButtons("flushed");
+      } else if ((performance.now() - started) / 1000 > WP_WATCH_S) {
+        wpStopTimer(run);
+        wpLog(run.flushed ? "Durable, still not searchable" : "Still only in the buffer",
+          run.flushed
+            ? `After ${WP_WATCH_S}s no commit that opens a searcher has run. Press <b>Commit now</b>.`
+            : `After ${WP_WATCH_S}s nothing has flushed it. This collection probably has no
+               automatic soft commit — press <b>Commit now</b>.`, "warn");
+      }
+    } finally { busy = false; }
+  }, POLL_MS);
+}
+
+async function wpCommit() {
+  const run = wp;
+  run.committed = true;
+  wpLog("Commit requested", `A hard commit: flush the buffer to a segment, fsync it, and open a
+    new searcher.`);
+  await post("/api/commit", { collection: run.collection });
+  if (wp === run && !run.timer) wpWatchFlush();
+}
+
+async function wpForceMerge() {
+  const run = wp;
+  const d = await wpDiffAll(run);    // also moves every shard's baseline to right now
+  if (wp !== run) return;
+  if (d.count <= run.cores.length) {
+    wpLog("Nothing to merge", `Each shard already holds a single segment, so a forced merge
+      would have nothing to combine. Index this document a few more times (Start over keeps the
+      field and value) and try again.`, "warn");
+    return;
+  }
+  wpLog("Forced merge requested", `Rewriting ${d.count} segments down to one per shard — the
+    expensive operation the merge policy normally does a little at a time in the background.`);
+  wpStage("merge", "waiting");
+  $("btn-wp-merge").disabled = true;
+  const ok = (await post("/api/optimize", { collection: run.collection })).ok;
+  if (wp !== run) return;
+  if (!ok) return wpButtons("flushed");
+  const started = performance.now();
+  let busy = false;
+  wpStopTimer(run);
+  run.timer = setInterval(async () => {
+    if (busy || wp !== run) return;
+    busy = true;
+    try {
+      const m = await wpDiffAll(run);
+      if (wp !== run) return;
+      const merged = m.new.filter(g => g.source === "merge");
+      if (merged.length) {
+        wpStopTimer(run);
+        const docs = merged.reduce((n, g) => n + (g.docs || 0), 0);
+        wpLog("Merged", `${m.gone.length} segment${m.gone.length === 1 ? "" : "s"} (including
+          the one your document was flushed into) rewritten into ${merged.length}:
+          ${merged.map(g => `<b>${esc(g.name)}</b> (${esc(g.size)})`).join(", ")},
+          ${docs.toLocaleString()} live docs, source <b>merge</b>. Your document was copied, not
+          moved — segments are never edited in place.`);
+        wpStage("merge", "done");
+        wpButtons("merged");
+      } else if ((performance.now() - started) / 1000 > WP_MERGE_WATCH_S) {
+        wpStopTimer(run);
+        wpLog("No merge seen", `Nothing merged within ${WP_MERGE_WATCH_S / 60} minutes.`, "warn");
+        wpButtons("flushed");
+      }
+    } finally { busy = false; }
+  }, POLL_MS);
+}
+
+$("wp-field").addEventListener("focus", wpLoadFields);
+$("btn-wp-analyze").addEventListener("click", wpAnalyze);
+$("btn-wp-submit").addEventListener("click", wpSubmit);
+$("btn-wp-commit").addEventListener("click", wpCommit);
+$("btn-wp-merge").addEventListener("click", wpForceMerge);
+$("btn-wp-reset").addEventListener("click", wpReset);
+
+/* ---------- schema explorer ---------- */
+// schema values land in attributes, and the page's esc() leaves quotes alone
+const sxe = s => esc(s).replace(/"/g, "&quot;").replace(/>/g, "&gt;");
+
+const SX_DOC = "https://solr.apache.org/guide/solr/latest/";
+
+/* What changing a property on a POPULATED index does. Every line below was
+   checked against Solr 9.6 / Lucene 9.10 by making the change and writing
+   another document — not taken from memory. */
+const SX_FLIP = {
+  breaks: `Solr accepts the change, but Lucene 9 requires every segment to agree on
+    a field's structure, so the next document written with this field is rejected
+    ("cannot change field … to inconsistent …"). Flipping it back makes writes work
+    again. Actually changing it needs an empty index: delete everything, commit,
+    reload the collection, reindex — deleting alone is not enough, because the open
+    IndexWriter remembers the old shape. In production: reindex into a new
+    collection and move an alias.`,
+  newOnly: `Accepted, and writes keep working. It applies to documents written from
+    now on; documents already indexed keep what they were written with until they
+    are reindexed (checked here: after stored=false, an old document still returned
+    its value).`,
+  readTime: `Safe on a populated index: it changes no on-disk structure, so it takes
+    effect on the next request after the automatic core reload.`,
+  vectorDetail: `Accepted, and writes keep working: a segment only records whether a
+    field has term vectors at all, not their detail. New documents get the new
+    detail; old ones keep theirs.`,
+  required: `Accepted immediately — and from then on every add without this field is
+    rejected ("missing required field"), including documents from existing
+    indexing jobs that never sent it.`,
+};
+
+const SX_FLIP_OF = {
+  indexed: "breaks", docValues: "breaks", omitNorms: "breaks",
+  omitTermFreqAndPositions: "breaks", omitPositions: "breaks", termVectors: "breaks",
+  storeOffsetsWithPositions: "breaks", type: "breaks",
+  stored: "newOnly", default: "newOnly",
+  useDocValuesAsStored: "readTime", uninvertible: "readTime", large: "readTime",
+  sortMissingFirst: "readTime", sortMissingLast: "readTime",
+  termPositions: "vectorDetail", termOffsets: "vectorDetail", termPayloads: "vectorDetail",
+  required: "required",
+};
+
+function sxFlip(prop) {
+  if (prop === "multiValued") return `With docValues on, the column type changes (SORTED
+    ↔ SORTED_SET for strings, NUMERIC ↔ SORTED_NUMERIC for numbers), so the next
+    document written with this field is rejected — checked here. Flipping it back makes
+    writes work again; really changing it means reindexing into an empty index.`;
+  return SX_FLIP[SX_FLIP_OF[prop]] || null;
+}
+
+const FP = "indexing-guide/field-type-definitions-and-properties.html";
+const TOK = "indexing-guide/tokenizers.html", FIL = "indexing-guide/filters.html";
+const LANG = "indexing-guide/language-analysis.html";
+
+/* key -> [explanation, doc path]. Keys: attr:<property>, class:<ClassName>,
+   tokenizer:/filter:/charFilter:<name, lowercased>, param:<name>, top:<topic>,
+   special:<field name>. */
+const SCHEMA_HELP = {
+  // ---- field properties ----
+  "attr:name": [`A declared field matches this exact name and wins over any dynamic
+    rule. A dynamic rule is a pattern with one * at the start or end; an undeclared
+    field name takes the longest pattern that matches it.`, "indexing-guide/fields.html"],
+  "attr:type": [`The field type this inherits its class, analyzers and default
+    properties from. On a populated field, changing it almost always changes the
+    index structure — checked here: string → text_general rejects the next write
+    (index options DOCS → DOCS_AND_FREQS_AND_POSITIONS).`, "indexing-guide/fields.html"],
+  "attr:indexed": [`Writes the value into the inverted index: a term dictionary and,
+    per term, the documents containing it (postings). Point types (pint, pfloat,
+    pdate…) build a BKD tree instead. It is what makes term, phrase and range
+    queries fast. Without it a field that has docValues can still be queried — Solr
+    falls back to scanning the docValues column segment by segment (checked here),
+    fine on small indexes and a trap on large ones.`, FP],
+  "attr:stored": [`Keeps the original value in the stored-fields file (.fdt),
+    compressed in blocks, so it can be returned in fl and highlighted. It is read
+    only for the documents you return, so it costs disk and decompression, not
+    search speed. A field with docValues can be returned without it (see
+    useDocValuesAsStored).`, FP],
+  "attr:docValues": [`A column-oriented, per-segment structure written at index time:
+    for each document, its value(s). Sorting, faceting, grouping, function queries,
+    collapse and /export read this instead of the inverted index. Types: NUMERIC,
+    SORTED (one string, ordinal-mapped), SORTED_SET, SORTED_NUMERIC, BINARY — the
+    on-disk line under each field shows which one a segment really has. It is
+    memory-mapped off heap, unlike the un-inverted FieldCache it replaces.`,
+    "indexing-guide/docvalues.html"],
+  "attr:multiValued": [`Whether a document may hold several values. With docValues it
+    also picks the column type — SORTED vs SORTED_SET, NUMERIC vs SORTED_NUMERIC —
+    which is why changing it on a populated field breaks writes. A multi-valued
+    field cannot be sorted on directly, only through a function such as
+    field(name,min).`, FP],
+  "attr:required": [`Rejects any add that does not carry this field, checked when the
+    update is processed. The uniqueKey field is required whether or not it says so.`, FP],
+  "attr:default": [`The value used when a document arrives without this field. It is
+    applied at update time, so it is indexed and stored like a value you sent.`, FP],
+  "attr:omitNorms": [`Norms are one byte per document per field, encoding the field's
+    length for BM25's length normalisation (plus any index-time boost). Omitting them
+    saves that space and makes length irrelevant to scoring: right for strings, IDs
+    and short fields you filter on; wrong for text you rank by, where a match in a
+    short title then scores no higher than one buried in a long body.`, FP],
+  "attr:omitTermFreqAndPositions": [`Index only which documents contain each term
+    (IndexOptions DOCS): no frequencies, no positions. Postings shrink a lot, but
+    phrase and span queries stop working on the field and BM25 sees every match as
+    tf = 1. The default for strings and points, where there is one term per value
+    anyway.`, FP],
+  "attr:omitPositions": [`Keep term frequencies but drop positions (IndexOptions
+    DOCS_AND_FREQS). Scoring by term frequency still works; phrase, proximity and
+    span queries do not.`, FP],
+  "attr:termVectors": [`Stores a small inverted index per document for this field —
+    that document's own terms and counts (.tvd/.tvx). Used by the FastVector
+    highlighter, MoreLikeThis and the TermVectorComponent. Costs disk roughly
+    comparable to the field's postings.`, FP],
+  "attr:termPositions": [`With termVectors on, also store each term's positions in
+    the document's vector — what the FastVector highlighter needs for phrases.`, FP],
+  "attr:termOffsets": [`With termVectors on, also store the character offsets of each
+    occurrence, so a highlighter can find matches in the stored text without
+    re-analysing it.`, FP],
+  "attr:termPayloads": [`With termVectors on, also store per-position payloads — only
+    meaningful when the analyzer emits payloads (delimitedPayload, for one).`, FP],
+  "attr:storeOffsetsWithPositions": [`Store character offsets inside the postings
+    themselves (IndexOptions …_AND_OFFSETS). This lets the unified highlighter read
+    offsets from the postings instead of re-analysing stored text: faster
+    highlighting on big fields, paid for in disk.`, FP],
+  "attr:useDocValuesAsStored": [`For a field with docValues and stored=false: return
+    its value anyway (in fl=* and when named in fl) by reading the docValues column.
+    The catch is order — values come back the way the column holds them, so a
+    multi-valued string returns sorted and de-duplicated, not as you sent it.`, FP],
+  "attr:uninvertible": [`Whether Solr may "un-invert" the field — walk its postings and
+    build a per-document value array on the Java heap (the FieldCache) — to sort,
+    facet or group on a field without docValues. It works (checked here: an
+    indexed-only field still sorted), but the array is built per segment on first
+    use, lives on heap and is rebuilt as segments change: a classic cause of heap
+    pressure and slow first queries. false makes those requests fail instead.`, FP],
+  "attr:large": [`Treats the stored value as large: loaded lazily and kept out of the
+    documentCache, so fetching a document does not pull a huge text into cache. Only
+    for stored, single-valued fields.`, FP],
+  "attr:sortMissingFirst": [`When sorting on this field, documents with no value go
+    first, whether the sort is ascending or descending.`, FP],
+  "attr:sortMissingLast": [`When sorting on this field, documents with no value go
+    last, whether the sort is ascending or descending.`, FP],
+  "attr:tokenized": [`Follows from the type class and cannot be set. TextField runs an
+    analyzer and turns one value into many terms; StrField and point types index the
+    value as one term. TextField has no docValues at all — SortableTextField is the
+    exception, keeping a docValues copy of the raw value for sorting.`, FP],
+  "attr:positionIncrementGap": [`The position gap inserted between the values of a
+    multi-valued text field, so a phrase cannot match across two separate values —
+    "john smith" should not match authors ["John Adams", "Smith Jones"].`, FP],
+  "attr:autoGeneratePhraseQueries": [`When one query word analyses into several tokens
+    (wi-fi → wi, fi), search them as a phrase instead of as independent terms.`, FP],
+  "attr:enableGraphQueries": [`Whether a query-time token graph (multi-word synonyms,
+    wordDelimiterGraph output) becomes a proper graph query, so "united states" as a
+    synonym of "usa" matches the phrase rather than either word alone.`, FP],
+  "attr:synonymQueryStyle": [`How query-time synonyms stacked on one position are
+    scored: as_same_term (one blended term — the default, so rare synonyms do not
+    outscore common ones), pick_best (the best-scoring synonym), or
+    as_distinct_terms (each scored on its own and summed).`, FP],
+  "attr:maxCharsForDocValues": [`SortableTextField: how many leading characters of the
+    raw value go into its docValues copy. Longer values are truncated there, so
+    sorting only considers that prefix.`, "indexing-guide/field-types-included-with-solr.html"],
+  "attr:subFieldSuffix": [`Point/spatial types store each dimension in a hidden
+    sub-field; this is the dynamic-field suffix those sub-fields are created with.`,
+    "query-guide/spatial-search.html"],
+  "attr:dimension": [`How many numeric dimensions a PointType value has (2 for x,y).`,
+    "query-guide/spatial-search.html"],
+  "attr:geo": [`true: coordinates are latitude/longitude on a sphere, distances in the
+    distanceUnits. false: a flat Euclidean plane.`, "query-guide/spatial-search.html"],
+  "attr:distErrPct": [`RPT spatial: allowed error as a fraction of a shape's size when
+    indexing it as a grid of cells. Smaller is more precise and indexes more terms.`,
+    "query-guide/spatial-search.html"],
+  "attr:maxDistErr": [`RPT spatial: the finest grid precision indexed — the smallest
+    distance that can still be told apart.`, "query-guide/spatial-search.html"],
+  "attr:distanceUnits": [`The unit spatial distances are reported and accepted in.`,
+    "query-guide/spatial-search.html"],
+
+  // ---- schema-level topics ----
+  "top:version": [`The schema's version attribute changes the defaults Solr applies to
+    properties you did not set, not the file format — which is why this panel shows
+    effective values read from Solr rather than assuming them.`,
+    "indexing-guide/schema-elements.html"],
+  "top:uniqueKey": [`The field that identifies a document. Adding a document whose key
+    exists replaces it — really a delete plus an add, so the old copy lingers as a
+    deleted document until a merge. In SolrCloud it is also what compositeId routing
+    hashes to pick a shard. Must be single-valued and not tokenized; usually string.`,
+    "indexing-guide/schema-elements.html"],
+  "top:similarity": [`The scoring model. Unset means SchemaSimilarityFactory, which
+    scores with BM25 and lets an individual field type declare its own similarity.`,
+    "indexing-guide/schema-elements.html"],
+  "top:configset": [`A schema belongs to a configset in ZooKeeper, not to a collection.
+    Every collection created from the same configset shares one schema, so a Schema
+    API edit made through one collection changes all of them — this panel names them
+    before you change anything.`, "configuration-guide/config-sets.html"],
+  "top:dynamic-source": [`This field is not declared anywhere. It came into being when
+    a document arrived with a name matching the dynamic rule shown, and every
+    property comes from that rule — change the rule and you change every field it
+    matches.`, "indexing-guide/dynamic-fields.html"],
+  "top:declared-source": [`This field is declared by name in the schema, so its
+    properties come from that declaration (and its type), not from any dynamic rule.`,
+    "indexing-guide/fields.html"],
+  "top:on-disk": [`What this segment physically holds for the field, read from its
+    Lucene FieldInfos (segments API with fieldInfo=true). A segment's FieldInfos are
+    written once and never change. Anything that disagrees with the schema above is
+    flagged: it means the schema was changed after this data was written, and the
+    next write of this field will be rejected.`, "configuration-guide/index-segments-merging.html"],
+  "top:copyField": [`At update time, copies the raw source value into dest before any
+    analysis; dest then analyses it with its own type. Used for catch-all search
+    fields and to index one value two ways (text to search, string to facet).
+    maxChars truncates the copy.`, "indexing-guide/copy-fields.html"],
+  "top:analyzer": [`One analyzer for both indexing and querying.`, "indexing-guide/analyzers.html"],
+  "top:analyzer-index": [`Runs on every value when it is indexed; its output is exactly
+    what lands in the postings. It must agree with the query analyzer on how terms
+    are normalised, or queries silently miss.`, "indexing-guide/analyzers.html"],
+  "top:analyzer-query": [`Runs on query text for this field. It may legitimately differ
+    from the index analyzer — the classic case is synonyms at query time only (as in
+    text_general), which keeps the index small and lets synonym lists change without
+    reindexing.`, "indexing-guide/analyzers.html"],
+  "top:analyzer-multiTerm": [`Used for wildcard, prefix, fuzzy and range terms, which
+    are not tokenized: only one-token-in, one-token-out filters (lowercasing, folding)
+    apply.`, "indexing-guide/analyzers.html"],
+
+  // ---- special fields ----
+  "special:_version_": [`Written on every update: the document's version, used for
+    optimistic concurrency (_version_ in an update), by real-time get, and by
+    replicas to order and reconcile updates during recovery.`,
+    "indexing-guide/partial-document-updates.html"],
+  "special:_root_": [`For nested documents: every child carries its root parent's id,
+    so a parent and its children are indexed as one contiguous block — what block
+    join queries rely on.`, "indexing-guide/indexing-nested-documents.html"],
+  "special:_nest_path_": [`For nested documents: the path from the root to this child,
+    so child documents can be queried and returned by where they sit in the tree.`,
+    "indexing-guide/indexing-nested-documents.html"],
+  "special:_text_": [`The _default configset's catch-all search field (the default df
+    for queries that name no field). It is empty unless a copyField sends data into it
+    — the Copy fields tab shows whether one does.`, "indexing-guide/copy-fields.html"],
+
+  // ---- field type classes ----
+  "class:TextField": [`Analysed text: an analyzer turns each value into a stream of
+    terms with positions, so it supports full-text, phrase and proximity search.
+    No docValues, so no sorting or faceting on it without un-inverting.`,
+    "indexing-guide/field-types-included-with-solr.html"],
+  "class:StrField": [`An exact string, indexed as one term, not analysed. What you
+    facet, sort, filter and group on. Case and whitespace matter.`,
+    "indexing-guide/field-types-included-with-solr.html"],
+  "class:SortableTextField": [`TextField plus a docValues copy of the raw value
+    (truncated at maxCharsForDocValues), so one field can be searched as text and
+    still sorted or faceted on.`, "indexing-guide/field-types-included-with-solr.html"],
+  "class:BoolField": [`true/false, indexed as a single term.`,
+    "indexing-guide/field-types-included-with-solr.html"],
+  "class:IntPointField": [`A 32-bit integer indexed as a point in a BKD tree: fast
+    ranges, but exact-value lookups are also range lookups. Sort and facet need
+    docValues.`, "indexing-guide/field-types-included-with-solr.html"],
+  "class:LongPointField": [`A 64-bit integer indexed as a BKD point.`,
+    "indexing-guide/field-types-included-with-solr.html"],
+  "class:FloatPointField": [`A 32-bit float indexed as a BKD point.`,
+    "indexing-guide/field-types-included-with-solr.html"],
+  "class:DoublePointField": [`A 64-bit float indexed as a BKD point.`,
+    "indexing-guide/field-types-included-with-solr.html"],
+  "class:DatePointField": [`A date stored as epoch milliseconds in a BKD point: fast
+    range queries and date math (NOW/DAY-7DAYS).`,
+    "indexing-guide/working-with-dates.html"],
+  "class:BinaryField": [`Arbitrary bytes, sent base64-encoded. Stored only; not
+    searchable.`, "indexing-guide/field-types-included-with-solr.html"],
+  "class:NestPathField": [`Holds the nested-document path (_nest_path_).`,
+    "indexing-guide/indexing-nested-documents.html"],
+  "class:RandomSortField": [`Not stored or indexed: sorting on it gives a pseudo-random
+    order seeded by the field name, e.g. random_1234 asc — stable for a given seed
+    and index version.`, "indexing-guide/field-types-included-with-solr.html"],
+  "class:RankField": [`Holds numeric features for ranking (the rank_feature query):
+    indexed as term frequencies, not searchable as values.`,
+    "indexing-guide/field-types-included-with-solr.html"],
+  "class:LatLonPointSpatialField": [`A latitude/longitude point in a BKD tree: the
+    default choice for geo filtering and distance sorting.`, "query-guide/spatial-search.html"],
+  "class:SpatialRecursivePrefixTreeFieldType": [`RPT: indexes shapes (not only points)
+    as grid cells of a prefix tree, for polygons, intersects/within queries and heat
+    maps.`, "query-guide/spatial-search.html"],
+  "class:PointType": [`A multi-dimensional point stored as one hidden sub-field per
+    dimension (see subFieldSuffix). Largely superseded by LatLonPointSpatialField.`,
+    "query-guide/spatial-search.html"],
+  "class:DenseVectorField": [`A float or byte vector indexed in an HNSW graph for
+    approximate nearest-neighbour search ({!knn}).`, "query-guide/dense-vector-search.html"],
+
+  // ---- tokenizers ----
+  "tokenizer:standard": [`Unicode UAX#29 word boundaries: splits on whitespace and
+    punctuation, keeps words, numbers and e-mail-free tokens; drops most punctuation.
+    The default choice for Western text.`, TOK],
+  "tokenizer:whitespace": [`Splits on whitespace only — punctuation stays attached
+    ("end." is a token). Predictable, useful before wordDelimiterGraph.`, TOK],
+  "tokenizer:keyword": [`Emits the whole value as one token. Used to apply filters
+    (lowercasing, folding) to a value while still matching it as a whole.`, TOK],
+  "tokenizer:pathhierarchy": [`Turns a/b/c into a, a/b, a/b/c — so a query for a path
+    matches everything beneath it.`, TOK],
+  "tokenizer:japanese": [`Kuromoji morphological analysis: segments Japanese, which is
+    written without spaces, using a dictionary.`, LANG],
+  "tokenizer:korean": [`Nori morphological analysis for Korean, including decompounding.`, LANG],
+  "tokenizer:thai": [`Dictionary-based word segmentation for Thai, written without spaces.`, LANG],
+
+  // ---- filters ----
+  "filter:lowercase": [`Lowercases every token. Must run at both index and query time,
+    or case differences silently stop matching.`, FIL],
+  "filter:stop": [`Removes stopwords listed in the words file. Note that the _default
+    stopwords.txt is empty, so in text_general this filter removes nothing until you
+    fill it — try the write-path analyzer above to see.`, FIL],
+  "filter:synonymgraph": [`Adds synonyms from a file as a token graph, so multi-word
+    synonyms (usa ↔ united states) work in phrase queries. At query time it is exact;
+    at index time the graph has to be flattened (flattenGraph), which loses precision.
+    That is why text_general applies it at query time only.`, FIL],
+  "filter:flattengraph": [`Squashes a token graph into a linear stream the index can
+    store. Required at index time after any graph filter (synonymGraph,
+    wordDelimiterGraph); never needed at query time.`, FIL],
+  "filter:porterstem": [`The classic Porter algorithm for English: aggressive
+    (running, runs → run; but also university → univers).`, LANG],
+  "filter:snowballporter": [`Snowball stemmers, one per language (the language
+    parameter), algorithmic rather than dictionary-based.`, LANG],
+  "filter:englishminimalstem": [`A light English stemmer that mostly handles plurals —
+    fewer false matches than Porter, fewer recalls too.`, LANG],
+  "filter:englishpossessive": [`Removes a trailing 's (Solr's → Solr).`, LANG],
+  "filter:keywordmarker": [`Marks tokens listed in the protected file as keywords, so
+    stemmers after it leave them alone.`, LANG],
+  "filter:stemmeroverride": [`Maps specific words to a fixed stem from a dictionary
+    file, bypassing the algorithmic stemmer for them.`, LANG],
+  "filter:removeduplicates": [`Drops a token identical to one at the same position —
+    typically after stemming produced the same term twice.`, FIL],
+  "filter:worddelimitergraph": [`Splits and joins on intra-word delimiters and case
+    changes: Wi-Fi → Wi, Fi (and WiFi with catenateWords), PowerShot → Power, Shot,
+    SD500 → SD, 500. Produces a graph, so index time needs flattenGraph after it.`, FIL],
+  "filter:reversedwildcard": [`Also indexes each token reversed, so leading wildcards
+    (*ing) become fast prefix queries on the reversed form. Roughly doubles the
+    field's terms.`, FIL],
+  "filter:elision": [`Removes elided articles from the start of a token (French l',
+    d', …) using the articles file.`, LANG],
+  "filter:doublemetaphone": [`Encodes tokens by how they sound, so misspellings with
+    the same pronunciation match. inject="false" replaces the token with its code.`,
+    "indexing-guide/phonetic-matching.html"],
+  "filter:delimitedpayload": [`Splits token|value and stores value as the token's
+    payload (a float, integer or identity-encoded bytes) — per-term weights you can
+    score with payload functions.`, FIL],
+  "filter:cjkbigram": [`Turns runs of Chinese, Japanese or Korean characters into
+    overlapping two-character tokens — recall-oriented segmentation without a
+    dictionary.`, LANG],
+  "filter:cjkwidth": [`Folds full-width Latin and half-width Katakana to their normal
+    forms.`, LANG],
+  "filter:japanesebaseform": [`Replaces inflected Japanese verbs and adjectives with
+    their dictionary form.`, LANG],
+  "filter:japanesepartofspeechstop": [`Removes tokens whose part of speech (from the
+    tags file) is on the stop list — particles, auxiliaries.`, LANG],
+  "filter:japanesekatakanastem": [`Normalises the trailing long-vowel mark on Katakana
+    words.`, LANG],
+  "filter:koreanpartofspeechstop": [`Removes Korean tokens by part of speech.`, LANG],
+  "filter:koreanreadingform": [`Replaces Hanja with their Hangul reading.`, LANG],
+  "filter:turkishlowercase": [`Lowercases with Turkish rules — dotted and dotless i
+    are different letters, which plain lowercase gets wrong.`, LANG],
+  "filter:greeklowercase": [`Lowercases Greek and removes accents.`, LANG],
+  "filter:irishlowercase": [`Lowercases with Irish rules (initial mutations such as
+    nAthair).`, LANG],
+  "charFilter:persian": [`Normalises the zero-width non-joiner in Persian text to a
+    space before tokenizing.`, LANG],
+
+  // ---- analyzer parameters ----
+  "param:words": [`The word-list file, a resource in the configset (editable through
+    the configset, not the Schema API).`, FIL],
+  "param:ignorecase": [`Compare case-insensitively against the word list.`, FIL],
+  "param:synonyms": [`The synonyms file in the configset, in Solr format (a, b, c or
+    a => b) unless format says otherwise.`, FIL],
+  "param:expand": [`For equivalent synonyms (a, b, c): true adds all of them for any
+    one; false maps them all to the first.`, FIL],
+  "param:format": [`The file format of the resource — solr or wordnet for synonyms,
+    snowball for stopwords.`, FIL],
+  "param:protected": [`A file of words the filter must leave untouched.`, FIL],
+  "param:dictionary": [`A dictionary file the filter reads, from the configset.`, FIL],
+  "param:language": [`Which language's rules the stemmer or filter applies.`, LANG],
+  "param:articles": [`The file of articles to strip.`, LANG],
+  "param:generatewordparts": [`Emit the alphabetic parts: PowerShot → Power, Shot.`, FIL],
+  "param:generatenumberparts": [`Emit the numeric parts: 500-42 → 500, 42.`, FIL],
+  "param:catenatewords": [`Also emit joined word parts: wi-fi → wifi.`, FIL],
+  "param:catenatenumbers": [`Also emit joined number parts: 500-42 → 50042.`, FIL],
+  "param:catenateall": [`Also emit every part joined together.`, FIL],
+  "param:splitoncasechange": [`Treat a lower-to-upper case change as a delimiter.`, FIL],
+  "param:delimiter": [`The character separating a token from its payload.`, FIL],
+  "param:encoder": [`How the payload is encoded: float, integer or identity.`, FIL],
+  "param:inject": [`true adds the phonetic code next to the original token; false
+    replaces the token with it.`, "indexing-guide/phonetic-matching.html"],
+  "param:maxfractionasterisk": [`reversedWildcard: use the reversed form when the first
+    asterisk is at most this far into the term.`, FIL],
+  "param:maxposasterisk": [`reversedWildcard: use the reversed form when an asterisk is
+    within this many leading positions.`, FIL],
+  "param:maxposquestion": [`reversedWildcard: the same rule for ? wildcards.`, FIL],
+  "param:withoriginal": [`reversedWildcard: keep the original token as well as the
+    reversed one (needed for normal queries to keep matching).`, FIL],
+  "param:minimumlength": [`Tokens shorter than this are left alone.`, LANG],
+  "param:mode": [`Kuromoji segmentation mode: normal, search (splits compounds too) or
+    extended.`, LANG],
+  "param:decompoundmode": [`Nori: whether compounds are kept, split, or both.`, LANG],
+  "param:outputunknownunigrams": [`Nori: split unknown words into single characters.`, LANG],
+  "param:tags": [`The file of part-of-speech tags to remove.`, LANG],
+  "param:stemderivational": [`Also strip derivational suffixes, not only inflections.`, LANG],
+};
+
+function sxNorm(name) {
+  // SPI name or class, e.g. "synonymGraph" or "solr.SynonymGraphFilterFactory"
+  return String(name || "").split(".").pop()
+    .replace(/(Tokenizer|CharFilter|Filter)?Factory$/, "").toLowerCase();
+}
+
+function schemaHelp(key) {
+  if (SCHEMA_HELP[key]) return SCHEMA_HELP[key];
+  const [role, name] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+  // language stemmers and normalisers share one explanation per kind
+  if (role === "filter") {
+    const lang = name.replace(/(lightstem|minimalstem|stem|normalization|lowercase)$/, "");
+    if (/stem$/.test(name)) return [`A ${lang} stemmer: reduces inflected words to a
+      common stem so they match each other. "Light" stemmers remove less and make
+      fewer wrong conflations.`, LANG];
+    if (/normalization$/.test(name)) return [`Normalises ${lang} spelling variants
+      (letter forms, diacritics) to one canonical form before matching.`, LANG];
+  }
+  if (role === "tokenizer") return [`A tokenizer: splits the value into tokens.`, TOK];
+  if (role === "filter") return [`A token filter: transforms, adds or removes tokens.`, FIL];
+  if (role === "charFilter") return [`A char filter: rewrites the text before it is
+    tokenized.`, "indexing-guide/charfilterfactories.html"];
+  if (role === "param") return [`A parameter of this analysis component.`, FIL];
+  return null;
+}
+
+let schemaData = null, schemaFor = null, schemaView = "data", sxPending = null;
+
+function sxTypeClass(type) {
+  const t = schemaData && schemaData.field_types.find(x => x.name === type);
+  return t ? String(t.class).replace(/^solr\./, "") : "its class";
+}
+
+function sxAttr(prop, p, edit) {
+  if (!$("sx-inherited").checked && p.from !== "field" && p.from !== "type-own") return "";
+  const from = p.from === "field" || p.from === "type-own" ? "" : " from-" + p.from;
+  const editable = edit && typeof p.value === "boolean";
+  return `<span class="sx-a${from}${editable ? " sx-edit" : ""}" data-sh="attr:${sxe(prop)}"
+    data-prop="${sxe(prop)}" data-v="${sxe(String(p.value))}" data-from="${sxe(p.from)}"
+    >${sxe(prop)}=<span class="sx-v">"${sxe(String(p.value))}"</span></span>`;
+}
+
+function sxFieldLine(f, opts) {
+  // opts: {tag, edit, owner: {kind, name}}
+  const special = SCHEMA_HELP["special:" + f.name] ? ` data-sh="special:${sxe(f.name)}"` : "";
+  // hovering a special field's name explains the field; the attribute, the rule
+  const nameAttr = `<span class="sx-a" data-sh="attr:name">name=<span
+    class="sx-v"${special}>"${sxe(f.name)}"</span></span>`;
+  const typeAttr = `<span class="sx-a" data-sh="attr:type">type=<span class="sx-v">"${sxe(f.type)}"</span></span>`;
+  const attrs = Object.entries(f.props || {}).map(([k, p]) => sxAttr(k, p, opts.edit)).join("");
+  return `<div class="sx-el" data-owner-kind="${sxe(opts.owner.kind)}"
+      data-owner-name="${sxe(opts.owner.name)}" data-type="${sxe(f.type)}">
+    <span class="sx-tag">&lt;${opts.tag}</span>${nameAttr}${typeAttr}${attrs}<span class="sx-tag">/&gt;</span>
+    ${opts.extra || ""}
+    ${sxPending && sxPending.kind === opts.owner.kind && sxPending.name === opts.owner.name
+      ? sxPending.html : ""}
+  </div>`;
+}
+
+function sxOnDisk(f) {
+  if (!f.segments || !f.segments.length) return `<div class="sx-com">&lt;!-- no segment holds
+    this field yet --&gt;</div>`;
+  const eff = k => f.props[k] && f.props[k].value;
+  return f.segments.map(s => {
+    const parts = [], bad = [];
+    const idx = s.indexed || !!s.points;
+    parts.push(s.points ? `points (${s.points.dims}d, ${s.points.bytes} bytes)`
+      : s.indexed ? "postings" : "no postings");
+    parts.push(s.docValues ? "docValues " + s.docValues : "no docValues");
+    if (s.indexed) parts.push(s.omitNorms ? "no norms" : "norms");
+    if (s.termVectors) parts.push("term vectors");
+    if (s.docs != null) parts.push(`${Number(s.terms).toLocaleString()} terms in
+      ${Number(s.docs).toLocaleString()} docs`);
+    if (eff("docValues") !== undefined && !!eff("docValues") !== !!s.docValues) bad.push("docValues");
+    if (eff("indexed") !== undefined && !!eff("indexed") !== idx) bad.push("indexed");
+    if (s.indexed && eff("omitNorms") !== undefined && !!eff("omitNorms") !== s.omitNorms) bad.push("omitNorms");
+    if (eff("termVectors") !== undefined && !!eff("termVectors") !== s.termVectors) bad.push("termVectors");
+    return `<div class="sx-com" data-sh="top:on-disk" data-title="on disk — segment ${sxe(s.segment)}">
+      &lt;!-- on disk, segment <b>${sxe(s.segment)}</b>: ${parts.join(" · ")}
+      ${bad.length ? `<span class="sx-bad">— schema now says otherwise for ${bad.join(", ")}:
+        the next write of this field will be rejected</span>` : ""} --&gt;</div>`;
+  }).join("");
+}
+
+function sxRenderData(d) {
+  if (!d.in_index.length) return `<span class="desc">No fields hold data yet — index some
+    documents, or look at Declared fields and Dynamic rules.</span>`;
+  return d.in_index.map(f => {
+    const src = f.source.kind === "dynamic"
+      ? `<div class="sx-com" data-sh="top:dynamic-source" data-title="created by a dynamic rule">
+          &lt;!-- not declared: created by dynamicField <b>${sxe(f.source.name)}</b>,
+          ${f.docs != null ? Number(f.docs).toLocaleString() + " docs" : "no docs counted"} --&gt;</div>`
+      : `<div class="sx-com" data-sh="top:declared-source" data-title="declared field">
+          &lt;!-- declared field${f.docs != null ? ", " + Number(f.docs).toLocaleString() + " docs" : ""} --&gt;</div>`;
+    return sxFieldLine(f, { tag: "field", edit: false, owner: f.source, extra: src + sxOnDisk(f) });
+  }).join("");
+}
+
+function sxRenderFields(list, kind, tag) {
+  const all = $("sx-all").checked;
+  const shown = kind === "dynamic" && !all ? list.filter(f => f.matches && f.matches.length) : list;
+  const note = kind === "dynamic" && !all ? `<div class="sx-com">&lt;!-- ${shown.length} of
+    ${list.length} rules match a field in your data; tick "show all" for the rest --&gt;</div>` : "";
+  return note + shown.map(f => sxFieldLine(f, {
+    tag, edit: true, owner: { kind, name: f.name },
+    extra: kind === "dynamic" && f.matches && f.matches.length
+      ? `<div class="sx-com">&lt;!-- matches: ${f.matches.map(esc).join(", ")} --&gt;</div>` : "",
+  })).join("");
+}
+
+function sxAnalyzer(kind, a) {
+  const line = (role, c) => {
+    const name = c.name || c.class;
+    const params = Object.entries(c).filter(([k]) => k !== "name" && k !== "class")
+      .map(([k, v]) => `<span class="sx-a" data-sh="param:${sxe(k.toLowerCase())}"
+        data-title="${sxe(k)}">${sxe(k)}=<span class="sx-v">"${sxe(String(v))}"</span></span>`).join("");
+    return `<div class="sx-el"><span class="sx-tag">&lt;${role}</span>
+      <span class="sx-a" data-sh="${role}:${sxe(sxNorm(name))}" data-title="${sxe(name)}">${
+        c.name ? "name" : "class"}=<span class="sx-v">"${sxe(name)}"</span></span>${params}
+      <span class="sx-tag">/&gt;</span></div>`;
+  };
+  const typeAttr = kind === "analyzer" ? "" : ` type="${kind.replace("Analyzer", "")}"`;
+  const key = kind === "analyzer" ? "top:analyzer" : "top:analyzer-" + kind.replace("Analyzer", "");
+  return `<div class="sx-el"><span class="sx-tag" data-sh="${key}"
+      data-title="${sxe(kind)}">&lt;analyzer${sxe(typeAttr)}&gt;</span>
+    <div class="sx-kids">
+      ${(a.charFilters || []).map(c => line("charFilter", c)).join("")}
+      ${a.tokenizer ? line("tokenizer", a.tokenizer) : ""}
+      ${(a.filters || []).map(c => line("filter", c)).join("")}
+    </div><span class="sx-tag">&lt;/analyzer&gt;</span></div>`;
+}
+
+function sxAnalyzerDiff(t) {
+  const names = a => a ? [...(a.charFilters || []), ...(a.tokenizer ? [a.tokenizer] : []),
+    ...(a.filters || [])].map(c => c.name || c.class) : [];
+  const i = names(t.analyzers.indexAnalyzer), q = names(t.analyzers.queryAnalyzer);
+  if (!i.length || !q.length) return "";
+  const onlyQ = q.filter(n => !i.includes(n)), onlyI = i.filter(n => !q.includes(n));
+  if (!onlyQ.length && !onlyI.length) return "";
+  return `<div class="sx-com">&lt;!-- index and query differ:
+    ${onlyQ.length ? "query-time only: <b>" + onlyQ.map(esc).join(", ") + "</b>" : ""}
+    ${onlyQ.length && onlyI.length ? "; " : ""}
+    ${onlyI.length ? "index-time only: <b>" + onlyI.map(esc).join(", ") + "</b>" : ""} --&gt;</div>`;
+}
+
+function sxRenderTypes(d) {
+  const all = $("sx-all").checked;
+  const shown = all ? d.field_types : d.field_types.filter(t => t.in_use);
+  const note = all ? "" : `<div class="sx-com">&lt;!-- ${shown.length} of ${d.field_types.length}
+    types are used by fields in your data; tick "show all" for the rest --&gt;</div>`;
+  return note + shown.map(t => {
+    const cls = String(t.class).replace(/^solr\./, "");
+    const attrs = Object.entries(t.props).map(([k, p]) =>
+      sxAttr(k, { value: p.value, from: p.from === "type" ? "type-own" : "default" }, false)).join("");
+    const kids = Object.entries(t.analyzers).map(([k, a]) => sxAnalyzer(k, a)).join("");
+    return `<div class="sx-el" data-owner-kind="type" data-owner-name="${sxe(t.name)}"
+        data-type="${sxe(t.name)}">
+      <span class="sx-tag">&lt;fieldType</span>
+      <span class="sx-a">name=<span class="sx-v">"${sxe(t.name)}"</span></span>
+      <span class="sx-a" data-sh="class:${sxe(cls)}" data-title="${sxe(t.class)}">class=<span
+        class="sx-v">"${sxe(t.class)}"</span></span>${attrs}<span class="sx-tag">${kids ? "&gt;" : "/&gt;"}</span>
+      ${t.used_by.length ? `<div class="sx-com">&lt;!-- used by: ${t.used_by.map(esc).join(", ")} --&gt;</div>` : ""}
+      ${sxAnalyzerDiff(t)}
+      ${kids ? `<div class="sx-kids">${kids}</div><span class="sx-tag">&lt;/fieldType&gt;</span>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function sxRenderCopy(d) {
+  if (!d.copy_fields.length) return `<div class="sx-com" data-sh="top:copyField"
+    data-title="copyField">&lt;!-- no copyField rules in this schema — so _text_, the
+    catch-all field, receives nothing --&gt;</div>`;
+  return d.copy_fields.map(c => `<div class="sx-el"><span class="sx-tag" data-sh="top:copyField"
+      data-title="copyField">&lt;copyField</span>
+    <span class="sx-a">source=<span class="sx-v">"${sxe(c.source)}"</span></span>
+    <span class="sx-a">dest=<span class="sx-v">"${sxe(c.dest)}"</span></span>
+    ${c.maxChars ? `<span class="sx-a">maxChars=<span class="sx-v">"${sxe(String(c.maxChars))}"</span></span>` : ""}
+    <span class="sx-tag">/&gt;</span></div>`).join("");
+}
+
+function renderSchema() {
+  const d = schemaData;
+  if (!d) return;
+  const shared = d.shared_with.length
+    ? ` — <span class="sx-bad">shared with ${d.shared_with.map(esc).join(", ")}</span>` : " — used by this collection only";
+  $("sx-head").innerHTML = `&lt;schema name="${sxe(d.name)}"
+    <span data-sh="top:version" data-title="schema version">version="${sxe(String(d.version))}"</span>&gt;
+    · <span data-sh="top:uniqueKey" data-title="uniqueKey">uniqueKey <b>${sxe(d.uniqueKey)}</b></span>
+    · <span data-sh="top:similarity" data-title="similarity">similarity <b>${sxe(d.similarity
+      ? (d.similarity.class || JSON.stringify(d.similarity)) : "default (BM25)")}</b></span>
+    <br><span data-sh="top:configset" data-title="configset">configset <b>${sxe(d.configset || "?")}</b></span>${shared}`;
+  const inUseDyn = d.dynamic_fields.filter(f => f.matches.length).length;
+  const counts = { data: d.in_index.length, fields: d.fields.length,
+    dynamic: `${inUseDyn} in use / ${d.dynamic_fields.length}`,
+    types: `${d.field_types.filter(t => t.in_use).length} in use / ${d.field_types.length}`,
+    copy: d.copy_fields.length };
+  for (const b of $("sx-tabs").querySelectorAll("button")) {
+    b.classList.toggle("on", b.dataset.view === schemaView);
+    b.textContent = b.textContent.replace(/\s*\(.*\)$/, "") + ` (${counts[b.dataset.view]})`;
+  }
+  $("sx-all-wrap").style.display = ["dynamic", "types"].includes(schemaView) ? "" : "none";
+  $("sx-body").innerHTML =
+    schemaView === "data" ? sxRenderData(d)
+    : schemaView === "fields" ? sxRenderFields(d.fields, "field", "field")
+    : schemaView === "dynamic" ? sxRenderFields(d.dynamic_fields, "dynamic", "dynamicField")
+    : schemaView === "types" ? sxRenderTypes(d) : sxRenderCopy(d);
+}
+
+async function loadSchema() {
+  const c = coll();
+  if (!c) return;
+  if (schemaFor !== c) sxPending = null;     // a preview built for another collection
+  schemaFor = c;
+  const out = await post("/api/schema", { collection: c });
+  if (!out.ok) {
+    $("sx-body").innerHTML = `<span class="desc">${sxe(out.error || "Could not read the schema.")}</span>`;
+    return;
+  }
+  schemaData = out;
+  renderSchema();
+}
+
+// one card for both explorers: title, explanation, then [class, text] lines
+function fillExplorerHelp(el, key, title, text, lines, docPath) {
+  if (!paramHelpOn) return;        // the ? toggle in the header governs every help card
+  clearTimeout(helpHideTimer);
+  helpCard.textContent = "";
+  const add = (tag, cls, t) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    n.textContent = String(t).replace(/\s+/g, " ").trim();
+    helpCard.append(n);
+  };
+  add("b", "", title);
+  add("p", "", text);
+  for (const [cls, t] of lines) if (t) add("div", cls, t);
+  if (docPath) {
+    const link = document.createElement("a");
+    link.className = "doclink";
+    link.href = SX_DOC + docPath;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Solr reference guide";
+    helpCard.append(link);
+  }
+  helpCard.hidden = false;
+  helpFor = { anchor: el, key };
+  placeParamHelp(el, key);
+}
+
+function showSchemaHelp(el) {
+  const key = el.dataset.sh;
+  if (key.startsWith("cfg:")) return showConfigHelp(el);
+  const h = schemaHelp(key);
+  if (!h) return;
+  const prop = el.dataset.prop;
+  const lines = [];
+  if (prop) {
+    const owner = el.closest("[data-owner-kind]");
+    const kind = owner ? owner.dataset.ownerKind : "";
+    const name = owner ? owner.dataset.ownerName : "";
+    const type = owner ? owner.dataset.type : "";
+    const from = el.dataset.from;
+    lines.push(["sx-card-val",
+      from === "field" ? (kind === "dynamic" ? `Set by dynamicField "${name}".` : `Declared on field "${name}".`)
+      : from === "type" ? `Inherited from field type "${type}".`
+      : from === "type-own" ? `Declared on this field type.`
+      : `Set nowhere: Solr's built-in default for ${sxTypeClass(type)}.`]);
+    const flip = kind === "type" ? null : sxFlip(prop);
+    if (flip) lines.push(["sx-card-flip", "Changing it on a populated index: " + flip]);
+  }
+  fillExplorerHelp(el, key,
+    el.dataset.title || (prop ? `${prop} = "${el.dataset.v}"` : key.split(":").pop()),
+    h[0], lines, h[1]);
+}
+
+async function sxEdit(el) {
+  const owner = el.closest("[data-owner-kind]");
+  const kind = owner.dataset.ownerKind, name = owner.dataset.ownerName;
+  const prop = el.dataset.prop, value = el.dataset.v !== "true";
+  // the preview is for this collection, and Send goes to this collection,
+  // whatever is selected by the time it's pressed
+  const c = coll();
+  const out = await post("/api/schema/set",
+    { collection: c, kind, name, prop, value, dry_run: true });
+  if (!out.ok || coll() !== c) return;
+  const d = schemaData;
+  const rule = kind === "dynamic" && d.dynamic_fields.find(f => f.name === name);
+  sxPending = { collection: c, kind, name, prop, value, html: `<div class="sx-confirm">
+    <p>Set <b>${sxe(prop)}="${value}"</b> on ${kind === "dynamic" ? "dynamicField" : "field"}
+      <b>${sxe(name)}</b>. The exact Schema API call:</p>
+    <pre>POST /solr/${sxe(c)}/schema
+${sxe(JSON.stringify(out.command, null, 2))}</pre>
+    <p class="${SX_FLIP_OF[prop] === "breaks" || prop === "multiValued" ? "sx-warn" : ""}">${sxFlip(prop) || ""}</p>
+    ${rule && rule.matches.length ? `<p>This rule defines ${rule.matches.length} field(s) in your
+      data: ${rule.matches.map(esc).join(", ")}.</p>` : ""}
+    ${d.shared_with.length ? `<p class="sx-warn">Configset "${sxe(d.configset)}" is shared: this
+      also changes the schema of ${d.shared_with.map(esc).join(", ")}.</p>` : ""}
+    <div class="btns"><button class="btn primary" data-sx="send">Send to Solr</button>
+      <button class="btn" data-sx="cancel">Cancel</button></div></div>` };
+  renderSchema();
+}
+
+async function sxSend() {
+  const p = sxPending;
+  sxPending = null;
+  const out = await post("/api/schema/set", { collection: p.collection, kind: p.kind,
+    name: p.name, prop: p.prop, value: p.value, dry_run: false });
+  if (out.ok) showStrip(`Schema changed: ${p.name} ${p.prop}=${p.value}. Solr reloaded the
+    cores; the on-disk lines under "In your data" show whether existing segments still agree.`, false);
+  await loadSchema();
+}
+
+$("sx-body").addEventListener("mouseover", e => {
+  const el = e.target.closest("[data-sh]");
+  if (el && (!helpFor || helpFor.anchor !== el)) showSchemaHelp(el);
+});
+$("sx-body").addEventListener("mouseout", e => {
+  const el = e.target.closest("[data-sh]");
+  if (el && !el.contains(e.relatedTarget)) scheduleHideParamHelp();
+});
+$("sx-head").addEventListener("mouseover", e => {
+  const el = e.target.closest("[data-sh]");
+  if (el && (!helpFor || helpFor.anchor !== el)) showSchemaHelp(el);
+});
+$("sx-head").addEventListener("mouseout", e => {
+  const el = e.target.closest("[data-sh]");
+  if (el && !el.contains(e.relatedTarget)) scheduleHideParamHelp();
+});
+$("sx-body").addEventListener("click", e => {
+  const b = e.target.closest("[data-sx]");
+  if (b) {
+    if (b.dataset.sx === "send") sxSend();
+    else { sxPending = null; renderSchema(); }
+    return;
+  }
+  const v = e.target.closest(".sx-edit");
+  if (v && e.target.closest(".sx-v")) sxEdit(v);
+});
+$("sx-tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-view]");
+  if (!b) return;
+  schemaView = b.dataset.view;
+  sxPending = null;
+  renderSchema();
+});
+$("sx-inherited").addEventListener("change", renderSchema);
+$("sx-all").addEventListener("change", renderSchema);
+$("btn-sx-reload").addEventListener("click", loadSchema);
+
+/* ---------- config explorer ---------- */
+
+const CG = "configuration-guide/";
+const CF_CACHE = CG + "caches-warming.html", CF_UH = CG + "commits-transaction-logs.html";
+const CF_IX = CG + "index-segments-merging.html", CF_RH = CG + "requesthandlers-searchcomponents.html";
+const CF_UP = CG + "update-request-processors.html", CF_API = CG + "config-api.html";
+
+/* key "cfg:<path>" -> [explanation, doc path]. Map members are keyed by
+   their name (requestHandler./select); caches share "query.*Cache.<leaf>". */
+const CONFIG_HELP = {
+  "cfg:luceneMatchVersion": [`Which Lucene version's behaviour analysers and some
+    components emulate. An index built under one value only matches queries analysed
+    the same way, so raising it after an upgrade can change tokens and calls for a
+    reindex.`, CG + "configuring-solrconfig-xml.html"],
+
+  // ---- updates, commits, transaction log ----
+  "cfg:updateHandler": [`How updates become durable and visible: the update handler,
+    its automatic hard and soft commits, and how commitWithin behaves.`, CF_UH],
+  "cfg:updateHandler.autoCommit": [`Automatic hard commits: flush the buffer to
+    segments, fsync them, and start a new transaction-log file. They are about
+    durability and keeping the tlog short — with openSearcher=false they make nothing
+    new searchable.`, CF_UH],
+  "cfg:updateHandler.autoCommit.maxTime": [`Milliseconds after the first uncommitted
+    update before a hard commit fires. Mostly bounds the transaction log, whose
+    length is what a restart has to replay. -1 disables.`, CF_UH],
+  "cfg:updateHandler.autoCommit.maxDocs": [`Also hard-commit once this many documents
+    are pending. -1 disables.`, CF_UH],
+  "cfg:updateHandler.autoCommit.openSearcher": [`false: a hard commit only makes
+    segments durable; visibility is left to soft commits. true: every hard commit
+    also opens a new searcher — discarding every cache and paying autowarm each
+    time.`, CF_UH],
+  "cfg:updateHandler.autoSoftCommit": [`Automatic soft commits: open a new searcher
+    over freshly flushed, not-yet-fsynced segments. This is what makes new documents
+    searchable — the visibility setting, and the one the Write path walkthrough above
+    watches fire.`, CF_UH],
+  "cfg:updateHandler.autoSoftCommit.maxTime": [`Milliseconds from a pending update to
+    the soft commit that makes it searchable. Shorter means fresher results — but each
+    soft commit throws away every searcher cache, pays autowarm, and flushes a small
+    segment that merging must clean up later. -1 disables.`, CF_UH],
+  "cfg:updateHandler.autoSoftCommit.maxDocs": [`Also soft-commit once this many
+    documents are pending. -1 disables.`, CF_UH],
+  "cfg:updateHandler.commitWithin": [`What a request's commitWithin parameter
+    triggers.`, CF_UH],
+  "cfg:updateHandler.commitWithin.softCommit": [`true: commitWithin makes updates
+    visible with a soft commit. false: it performs a hard commit. searchlab's
+    indexer sends commitWithin.`, CF_UH],
+  "cfg:updateHandlerupdateLog": [`The transaction log (tlog), reported by the Config API
+    under this run-together name. Every update is appended to it before being
+    acknowledged; it is what real-time get reads, what replicas use to catch up
+    (peer sync), and what is replayed after a crash. SolrCloud requires it.`, CF_UH],
+  "cfg:updateHandlerupdateLog.dir": [`Where tlog files are written; empty means the
+    core's data directory.`, CF_UH],
+  "cfg:updateHandlerupdateLog.numVersionBuckets": [`Buckets used to track _version_
+    while concurrent updates hit the same leader: more buckets, less lock contention,
+    slightly more memory.`, CF_UH],
+
+  // ---- query-time: caches and limits ----
+  "cfg:query": [`Searcher-level settings: the caches, and limits on how queries run.
+    Most of these can be changed through the Config API.`, CF_CACHE],
+  "cfg:query.filterCache": [`Caches the set of documents each fq matches, as a bitset or
+    sorted id list. A repeated filter becomes a lookup — usually the most valuable
+    cache there is. Discarded whenever a commit opens a new searcher.`, CF_CACHE],
+  "cfg:query.queryResultCache": [`Caches the ordered list of document ids for a
+    query + sort + filters, a window at a time (see queryResultWindowSize), so the
+    next page of the same search is a hit.`, CF_CACHE],
+  "cfg:query.documentCache": [`Caches stored fields of documents by internal id.
+    Cannot be autowarmed: internal ids change between searchers.`, CF_CACHE],
+  "cfg:query.fieldValueCache": [`Holds un-inverted multi-valued fields for faceting
+    when they have no docValues. With docValues everywhere it stays empty.`, CF_CACHE],
+  "cfg:query.*Cache.size": [`Maximum number of entries. For filterCache an entry can
+    be as large as maxDoc/8 bytes (one bit per document), so the real memory bound is
+    size × index size, not size alone.`, CF_CACHE],
+  "cfg:query.*Cache.initialSize": [`Initial capacity of the underlying map — only
+    affects allocation, not behaviour.`, CF_CACHE],
+  "cfg:query.*Cache.autowarmCount": [`When a commit opens a new searcher, this many of
+    the most recently used entries are re-run against it before it serves queries.
+    Warm caches after commits, paid for with slower commits — and later visibility,
+    because the new searcher is not used until warming ends. Also accepts a
+    percentage, e.g. 10%.`, CF_CACHE],
+  "cfg:query.*Cache.maxRamMB": [`Cap the cache by estimated memory rather than entry
+    count — the safer bound for filterCache on large indexes.`, CF_CACHE],
+  "cfg:query.*Cache.name": [`The cache's name, as it appears in metrics.`, CF_CACHE],
+  "cfg:query.*Cache.class": [`The cache implementation (CaffeineCache in Solr 9).`, CF_CACHE],
+  "cfg:query.*Cache.regenerator": [`Custom logic for autowarming this cache's entries.`, CF_CACHE],
+  "cfg:query.useFilterForSortedQuery": [`Use the filterCache to find the matching set
+    for sorted queries that do not sort by score — helps when many sorted requests
+    share the same q.`, CF_CACHE],
+  "cfg:query.queryResultWindowSize": [`When caching a result list, round the rows asked
+    for up to a multiple of this. rows=10 then caches the top 20, and page 2 comes
+    from cache.`, CF_CACHE],
+  "cfg:query.queryResultMaxDocsCached": [`Do not cache result lists longer than this —
+    deep pages are never cached.`, CF_CACHE],
+  "cfg:query.enableLazyFieldLoading": [`Load only the stored fields a request asks for
+    (fl) and defer the rest — saves decompression on documents with many or large
+    fields.`, CF_CACHE],
+  "cfg:query.maxBooleanClauses": [`Cap on clauses in one boolean query for this
+    collection (the node-wide solr.max.booleanClauses also applies). Huge id lists,
+    big synonym expansions and some wildcard expansions hit it, and the request fails
+    with "too many clauses".`, CG + "configuring-solrconfig-xml.html"],
+  "cfg:query.boolTofilterOptimizer": [`A legacy switch still on the Config API's
+    editable list; the current reference guide does not describe an effect.`, CF_API],
+
+  // ---- index writer ----
+  "cfg:indexConfig": [`How Lucene's IndexWriter builds segments: the RAM buffer, the
+    merge policy, locking. Not editable through set-property — the lab reaches four of
+    these through \${searchlab.*} user properties instead.`, CF_IX],
+  "cfg:indexConfig.ramBufferSizeMB": [`How much memory indexing uses before flushing a
+    new segment. The main lever on flushed-segment size: bigger means fewer, larger
+    segments and less merging, paid in heap. A commit flushes whatever is buffered
+    regardless.`, CF_IX],
+  "cfg:indexConfig.maxBufferedDocs": [`Also flush after this many buffered documents;
+    -1 leaves it to ramBufferSizeMB.`, CF_IX],
+  "cfg:indexConfig.ramPerThreadHardLimitMB": [`Force a flush when one indexing thread's
+    buffer reaches this, whatever the total. -1 means Lucene's default.`, CF_IX],
+  "cfg:indexConfig.useCompoundFile": [`Pack each flushed segment's files into one .cfs
+    file: far fewer open file handles, slightly slower access. The merge policy
+    decides separately for merged segments.`, CF_IX],
+  "cfg:indexConfig.maxCommitMergeWaitTime": [`How long a commit may wait for small
+    segments to be merged first (merge-on-commit). -1 disables.`, CF_IX],
+  "cfg:indexConfig.writeLockTimeout": [`How long to wait to obtain the index write
+    lock.`, CF_IX],
+  "cfg:indexConfig.lockType": [`How the index is protected from a second writer:
+    native (OS file locks), simple (a lock file), single (in-process only).`, CF_IX],
+  "cfg:indexConfig.infoStreamEnabled": [`Log IndexWriter's own diagnostics — every
+    flush and merge decision. Very verbose, and the real way to see why a merge
+    happened.`, CF_IX],
+  "cfg:indexConfig.metrics": [`Extra IndexWriter metrics (merge counts and sizes);
+    empty means off.`, CF_IX],
+  "cfg:indexConfig.mergePolicyFactory": [`Decides which segments merge and when.
+    TieredMergePolicy merges segments of similar size a tier at a time and favours
+    merges that reclaim deleted documents.`, CF_IX],
+  "cfg:indexConfig.mergePolicyFactory.class": [`The merge policy implementation.`, CF_IX],
+  "cfg:indexConfig.mergePolicyFactory.segmentsPerTier": [`How many similar-sized
+    segments may pile up before they are merged. Lower: fewer segments and faster
+    search, more merge I/O while indexing — the setting the merge-storm scenario
+    turns.`, CF_IX],
+  "cfg:indexConfig.mergePolicyFactory.maxMergedSegmentMB": [`The largest segment normal
+    merging produces. Segments near it are only merged again to reclaim deletes, so a
+    very high cap means rare but huge merges.`, CF_IX],
+  "cfg:indexConfig.mergePolicyFactory.deletesPctAllowed": [`The share of deleted
+    documents the policy tries to stay under by choosing merges. Lower keeps the index
+    leaner and costs more merging (20 is the minimum).`, CF_IX],
+
+  // ---- storage and codec ----
+  "cfg:directoryFactory": [`How index files are accessed. NRTCachingDirectoryFactory
+    wraps memory-mapped files and keeps small freshly flushed segments in RAM, so
+    near-real-time reopens do not wait on disk.`, CG + "index-location-format.html"],
+  "cfg:directoryFactory.class": [`The directory implementation.`, CG + "index-location-format.html"],
+  "cfg:directoryFactory.name": [`The plugin's name.`, CG + "index-location-format.html"],
+  "cfg:codecFactory": [`SchemaCodecFactory lets field types choose their own postings
+    and docValues formats (postingsFormat, docValuesFormat in the schema).`, CG + "codec-factory.html"],
+  "cfg:codecFactory.class": [`The codec factory implementation.`, CG + "codec-factory.html"],
+
+  // ---- HTTP ----
+  "cfg:requestDispatcher": [`How HTTP requests are parsed and which HTTP caching headers
+    Solr sends.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.handleSelect": [`Legacy: whether /select?qt=… may dispatch to
+    another handler. false in modern configs.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.httpCaching": [`HTTP caching headers for responses.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.httpCaching.never304": [`true: never answer a conditional GET
+    with 304 Not Modified, and send no caching headers.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.httpCaching.etagSeed": [`A value mixed into ETags, changed to
+    invalidate clients' cached responses.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.httpCaching.lastModFrom": [`What Last-Modified reports: when
+    the searcher opened, or the index's last change.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.httpCaching.cacheControl": [`A Cache-Control header value to
+    send.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers": [`Limits and switches for how request bodies
+    are read.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers.multipartUploadLimitKB": [`Maximum size of a
+    multipart (file upload) request.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers.multipartUploadLimitInKB": [`Maximum size of a
+    multipart (file upload) request.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers.formUploadLimitKB": [`Maximum size of a
+    form-encoded POST body — long queries sent as POST hit this.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers.formdataUploadLimitInKB": [`Maximum size of a
+    form-encoded POST body — long queries sent as POST hit this.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers.addHttpRequestToContext": [`Expose the raw HTTP
+    request to components, for custom plugins that need headers.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers.enableRemoteStreaming": [`Allow stream.url and
+    stream.file: Solr itself fetches a URL or reads a local file as request content.
+    A security risk on anything reachable, so off unless needed.`, CG + "requestdispatcher.html"],
+  "cfg:requestDispatcher.requestParsers.enableStreamBody": [`Allow the stream.body
+    parameter as request content.`, CG + "requestdispatcher.html"],
+
+  // ---- handlers and components ----
+  "cfg:requestHandler": [`Request handlers: each maps a URL path under the collection to
+    a class. defaults can be overridden by the request, invariants cannot, appends are
+    added to what the request sends.`, CF_RH],
+  "cfg:requestHandler.*.class": [`The class that serves this path.`, CF_RH],
+  "cfg:requestHandler.*.name": [`The path clients call, under /solr/<collection>.`, CF_RH],
+  "cfg:requestHandler.*.defaults": [`Parameters applied unless the request sends its
+    own.`, CF_RH],
+  "cfg:requestHandler.*.invariants": [`Parameters forced on every request — the
+    request cannot override them.`, CF_RH],
+  "cfg:requestHandler.*.appends": [`Parameters added to whatever the request sends
+    (e.g. an extra fq on every query).`, CF_RH],
+  "cfg:requestHandler.*.useParams": [`Parameter sets pulled from the Request
+    Parameters API, so they can be changed without editing the handler.`, CG + "request-parameters-api.html"],
+  "cfg:requestHandler.*.components": [`The search components this handler runs, in
+    order, replacing the default list.`, CF_RH],
+  "cfg:requestHandler.*.last-components": [`Components run after the defaults.`, CF_RH],
+  "cfg:requestHandler.*.first-components": [`Components run before the defaults.`, CF_RH],
+  "cfg:requestHandler.*.startup": [`lazy: the handler is created on first use rather
+    than when the core loads.`, CF_RH],
+  "cfg:requestHandler./select": [`The standard search handler: runs the query, facet,
+    highlight, stats and debug components in order.`, CF_RH],
+  "cfg:requestHandler./query": [`A search handler with JSON-friendly defaults.`, CF_RH],
+  "cfg:requestHandler./update": [`Takes adds, deletes and commits (JSON, XML, CSV,
+    javabin). Documents go through the default update processor chain.`, CF_RH],
+  "cfg:requestHandler./get": [`Real-time get: fetch documents by id from the
+    transaction log and index without waiting for a commit — what the Write path
+    walkthrough's visibility check calls.`, "query-guide/realtime-get.html"],
+  "cfg:requestHandler./export": [`Streams entire sorted result sets from docValues —
+    for exports and streaming expressions, not ranked search.`, "query-guide/exporting-result-sets.html"],
+  "cfg:requestHandler./replication": [`Index replication — how TLOG and PULL replicas
+    copy segments, and how backups read them.`, "deployment-guide/user-managed-index-replication.html"],
+  "cfg:requestHandler./admin/luke": [`Index and field introspection. The Schema panel
+    reads it.`, CF_RH],
+  "cfg:requestHandler./admin/segments": [`Per-segment detail. The segment and schema
+    panels read it.`, CF_RH],
+  "cfg:requestHandler./analysis/field": [`Runs a field's analyzers over given text — the
+    Write path walkthrough's Analyze step.`, "indexing-guide/analyzers.html"],
+  "cfg:requestHandler./analysis/document": [`Analyses whole documents field by field.`,
+    "indexing-guide/analyzers.html"],
+  "cfg:requestHandler./config": [`The Config API — what this panel reads and writes.`, CF_API],
+  "cfg:requestHandler./schema": [`The Schema API — what the Schema panel reads and
+    writes.`, "indexing-guide/schema-api.html"],
+  "cfg:requestHandler./stream": [`Streaming expressions.`, "query-guide/streaming-expressions.html"],
+  "cfg:requestHandler./sql": [`Parallel SQL over the collection.`, "query-guide/sql-query.html"],
+  "cfg:requestHandler./graph": [`Graph traversal queries.`, "query-guide/graph-traversal.html"],
+  "cfg:requestHandler./terms": [`Enumerates indexed terms of a field.`, "query-guide/terms-component.html"],
+  "cfg:requestHandler./spell": [`A search handler with the spellcheck component
+    attached.`, "query-guide/spell-checking.html"],
+  "cfg:requestHandler./debug/dump": [`Echoes the request back — shows exactly how
+    parameters arrived.`, CF_RH],
+  "cfg:requestHandler./admin/ping": [`Health check.`, CF_RH],
+  "cfg:requestHandler./admin/file": [`Serves files from the configset.`, CF_RH],
+  "cfg:requestHandler./admin/mbeans": [`Component statistics — the older interface to
+    what the metrics API now exposes.`, CF_RH],
+  "cfg:requestHandler./admin/plugins": [`Lists the core's plugins.`, CF_RH],
+  "cfg:requestHandler./admin/system": [`JVM and system information for the node.`, CF_RH],
+  "cfg:requestHandler./tasks/list": [`Lists running cancellable queries.`, "query-guide/task-management.html"],
+  "cfg:requestHandler./tasks/cancel": [`Cancels a running query by its queryUUID.`, "query-guide/task-management.html"],
+  "cfg:requestHandler./update/json": [`Update entry point for JSON.`, "indexing-guide/indexing-with-update-handlers.html"],
+  "cfg:requestHandler./update/json/docs": [`Indexes arbitrary JSON, mapping it onto
+    documents.`, "indexing-guide/transforming-and-indexing-custom-json.html"],
+  "cfg:requestHandler./update/csv": [`Update entry point for CSV.`, "indexing-guide/indexing-with-update-handlers.html"],
+  "cfg:requestHandler./update/cbor": [`Update entry point for CBOR.`, "indexing-guide/indexing-with-update-handlers.html"],
+  "cfg:requestHandler.update": [`The legacy update handler name without a slash.`, CF_RH],
+  "cfg:param.echoParams": [`Which parameters to echo in the response header:
+    explicit (the ones sent), all (including defaults), none.`, "query-guide/common-query-parameters.html"],
+  "cfg:param.rows": [`Default number of results returned.`, "query-guide/common-query-parameters.html"],
+  "cfg:param.df": [`Default field for query terms that name no field.`, "query-guide/standard-query-parser.html"],
+  "cfg:param.wt": [`Default response format.`, "query-guide/response-writers.html"],
+  "cfg:param.indent": [`Pretty-print the response.`, "query-guide/response-writers.html"],
+  "cfg:searchComponent": [`Search components: the pieces a search handler runs
+    (query, facet, highlight, spellcheck…). Listed here are the ones this config
+    defines beyond the built-in defaults.`, CF_RH],
+  "cfg:searchComponent.spellcheck": [`Suggests corrections from an index-based
+    dictionary; attached to /spell here.`, "query-guide/spell-checking.html"],
+
+  // ---- update processing ----
+  "cfg:updateProcessor": [`Named update processors that chains refer to. In the
+    _default configset they implement schemaless mode.`, CF_UP],
+  "cfg:updateProcessor.uuid": [`Fills in the id with a UUID when a document has none.`, CF_UP],
+  "cfg:updateProcessor.remove-blank": [`Drops empty-string values before indexing.`, CF_UP],
+  "cfg:updateProcessor.field-name-mutating": [`Rewrites field names that contain
+    characters Solr does not allow.`, CF_UP],
+  "cfg:updateProcessor.parse-boolean": [`Schemaless type guessing: a value that looks
+    like a boolean becomes one.`, "indexing-guide/schemaless-mode.html"],
+  "cfg:updateProcessor.parse-long": [`Schemaless type guessing: a value that parses as
+    an integer becomes one.`, "indexing-guide/schemaless-mode.html"],
+  "cfg:updateProcessor.parse-double": [`Schemaless type guessing: a value that parses
+    as a decimal becomes one.`, "indexing-guide/schemaless-mode.html"],
+  "cfg:updateProcessor.parse-date": [`Schemaless type guessing: a value matching one of
+    the listed date formats becomes a date.`, "indexing-guide/schemaless-mode.html"],
+  "cfg:updateProcessor.add-schema-fields": [`Adds any unknown field name to the managed
+    schema, typed by the parse-* guesses above. The first value seen decides the type
+    for good — a field first sent as "42" is numeric, and a later "n/a" is rejected.
+    Convenient in a lab, risky in production (typos become fields). This lab's
+    *_s/*_t names match dynamic rules first, so it rarely fires here.`,
+    "indexing-guide/schemaless-mode.html"],
+  "cfg:updateRequestProcessorChain": [`The pipeline every update passes through.
+    Processors before DistributedUpdateProcessor run once on the node that received
+    the request; it forwards to the shard leader and replicas, where the rest (Run:
+    actually index) run on each copy.`, CF_UP],
+  "cfg:updateRequestProcessorChain.name": [`The chain's name, used with
+    update.chain=… on a request.`, CF_UP],
+  "cfg:updateRequestProcessorChain.default": [`true: /update uses this chain unless a
+    request names another.`, CF_UP],
+  "cfg:updateRequestProcessorChain.processor": [`Named updateProcessor entries run
+    first, in this order.`, CF_UP],
+  "cfg:updateRequestProcessorChain.processors": [`Processors defined inline in the
+    chain: Log (records the update), Distributed (routes it to the leader and
+    replicas), Run (indexes it).`, CF_UP],
+  "cfg:initParams": [`Parameters applied to every handler whose path matches, as if
+    written into each one.`, CG + "initparams.html"],
+  "cfg:initParams.path": [`Handler paths these parameters apply to (globs allowed).`,
+    CG + "initparams.html"],
+  "cfg:initParams.defaults": [`Default parameters for the matching handlers. Here df=_text_
+    — a query naming no field searches _text_, which is empty unless a copyField fills
+    it (see the Schema panel's Copy fields).`, CG + "initparams.html"],
+  "cfg:listener": [`Event hooks. A QuerySenderListener on newSearcher or firstSearcher
+    runs its listed queries against the new searcher before it serves traffic —
+    explicit warming, beside cache autowarming. The list is empty here.`, CF_CACHE],
+  "cfg:listener.event": [`newSearcher: after each commit that opens a searcher.
+    firstSearcher: when the core starts, when there is no previous searcher to warm
+    from.`, CF_CACHE],
+  "cfg:listener.class": [`The listener implementation.`, CF_CACHE],
+  "cfg:listener.queries": [`The warming queries to run.`, CF_CACHE],
+};
+
+function configHelp(key) {
+  if (CONFIG_HELP[key]) return CONFIG_HELP[key];
+  const path = key.slice(4);
+  const cache = path.match(/^query\.\w+Cache\.(\w+)$/);
+  if (cache) return CONFIG_HELP["cfg:query.*Cache." + cache[1]] || null;
+  const rh = path.match(/^requestHandler\.([^.]+)\.(.+)$/);
+  if (rh) {
+    const [, , rest] = rh;
+    const leaf = rest.split(".").pop();
+    return CONFIG_HELP["cfg:requestHandler.*." + rest]
+      || CONFIG_HELP["cfg:param." + leaf]
+      || CONFIG_HELP["cfg:requestHandler.*." + rest.split(".")[0]] || null;
+  }
+  if (/^requestHandler\./.test(path)) return CONFIG_HELP["cfg:requestHandler"];
+  if (/^updateProcessor\.[^.]+\./.test(path)) return CONFIG_HELP["cfg:updateProcessor." + path.split(".")[1]]
+    || CONFIG_HELP["cfg:updateProcessor"];
+  if (/^updateProcessor\./.test(path)) return CONFIG_HELP["cfg:updateProcessor"];
+  if (/^searchComponent\.[^.]+\./.test(path)) return CONFIG_HELP["cfg:searchComponent." + path.split(".")[1]]
+    || CONFIG_HELP["cfg:searchComponent"];
+  if (/^initParams\.defaults\./.test(path)) return CONFIG_HELP["cfg:param." + path.split(".").pop()]
+    || CONFIG_HELP["cfg:initParams.defaults"];
+  if (/^updateRequestProcessorChain\.processors\./.test(path))
+    return CONFIG_HELP["cfg:updateRequestProcessorChain.processors"];
+  return null;
+}
+
+const CF_OPEN = new Set(["updateHandler", "updateHandlerupdateLog", "query", "indexConfig"]);
+const CF_ATTRS = ["name", "class", "event", "path", "default", "processor", "useParams", "startup"];
+let configData = null, configFor = null, cfEditing = null;
+
+// the Config API reports these under one name and sets them under another
+// (checked: setting the right-hand name changes the left-hand value)
+const CF_ALIAS = {
+  "requestDispatcher.requestParsers.multipartUploadLimitKB":
+    "requestDispatcher.requestParsers.multipartUploadLimitInKB",
+  "requestDispatcher.requestParsers.formUploadLimitKB":
+    "requestDispatcher.requestParsers.formdataUploadLimitInKB",
+};
+
+function cfSource(path) {
+  const d = configData;
+  if (d.overlay.includes(path)) return "overlay";
+  if (d.lab_props[path]) return "labprop";
+  return "file";
+}
+
+function cfEditable(path) {
+  return configData.editable.includes(CF_ALIAS[path] || path) || !!configData.lab_props[path];
+}
+
+function cfHasEditable(node, path) {
+  if (node === null || typeof node !== "object") return cfEditable(path);
+  if (Array.isArray(node)) return false;
+  return Object.entries(node).some(([k, v]) => cfHasEditable(v, path + "." + k));
+}
+
+// editable properties solrconfig.xml leaves out still exist — with Solr's default
+function cfWithAbsent(cfg) {
+  const tree = JSON.parse(JSON.stringify(cfg));
+  const aliased = new Set(Object.values(CF_ALIAS));
+  for (const p of configData.editable) {
+    if (aliased.has(p)) continue;         // shown under the name Solr reports
+    const parts = p.split(".");
+    let node = tree;
+    for (const part of parts.slice(0, -1)) {
+      if (node[part] === undefined || node[part] === null) node[part] = {};
+      node = node[part];
+    }
+    const leaf = parts[parts.length - 1];
+    if (node[leaf] === undefined) node[leaf] = { __absent: true };
+  }
+  return tree;
+}
+
+function cfLeaf(tag, value, path, hpath) {
+  const absent = value && value.__absent;
+  const ep = CF_ALIAS[path] || path;      // the name set-property accepts
+  const from = absent ? "absent" : cfSource(ep);
+  const shown = absent ? "—" : value === null ? "" : String(value);
+  const editable = cfEditable(path);
+  const lab = configData.lab_props[ep];
+  const resettable = from === "overlay" || (lab && lab.set);
+  const editing = cfEditing && cfEditing.path === ep;
+  return `<div class="sx-el">
+    <span class="sx-a${from === "file" ? "" : " from-" + from}${editable ? " sx-edit" : ""}"
+      data-sh="cfg:${sxe(hpath)}" data-title="${sxe(ep)}" data-cf-path="${sxe(ep)}"
+      data-v="${sxe(shown)}" data-from="${from}">&lt;${sxe(tag)}&gt;<span
+      class="sx-v">${sxe(shown)}</span>&lt;/${sxe(tag)}&gt;</span>
+    ${resettable ? `<button class="btn" data-cf="reset" data-cf-path="${sxe(ep)}">reset to file</button>` : ""}
+    ${editing ? cfEditing.html : ""}
+  </div>`;
+}
+
+function cfNode(tag, node, path, hpath, onlyEditable) {
+  if (node === null || typeof node !== "object" || node.__absent) {
+    if (onlyEditable && !cfEditable(path)) return "";
+    return cfLeaf(tag, node, path, hpath);
+  }
+  if (Array.isArray(node)) {
+    if (onlyEditable) return "";
+    if (!node.length) return `<div class="sx-el"><span class="sx-tag" data-sh="cfg:${sxe(hpath)}"
+      data-title="${sxe(tag)}">&lt;${sxe(tag)}/&gt;</span>
+      <span class="sx-com">&lt;!-- empty --&gt;</span></div>`;
+    return node.map(item => typeof item === "object" && item !== null
+      ? cfNode(tag, item, path, hpath, false)
+      : cfLeaf(tag, item, path, hpath)).join("");
+  }
+  if (onlyEditable && !cfHasEditable(node, path)) return "";
+  const attrs = CF_ATTRS.filter(k => node[k] !== undefined && typeof node[k] !== "object")
+    .map(k => `<span class="sx-a" data-sh="cfg:${sxe(hpath + "." + k)}" data-title="${sxe(k)}"
+      >${sxe(k)}=<span class="sx-v">"${sxe(String(node[k]))}"</span></span>`).join("");
+  const kids = Object.entries(node).filter(([k, v]) => !(CF_ATTRS.includes(k) && typeof v !== "object"))
+    .map(([k, v]) => {
+      // the chain's inline processors come back under an empty key
+      const [ktag, kh] = k === "" ? ["processor", hpath + ".processors"] : [k, hpath + "." + k];
+      return cfNode(ktag, v, path + "." + k, kh, onlyEditable);
+    }).join("");
+  const open = `<span class="sx-tag" data-sh="cfg:${sxe(hpath)}" data-title="${sxe(tag)}">&lt;${sxe(tag)}</span>${attrs}`;
+  return kids
+    ? `<div class="sx-el">${open}<span class="sx-tag">&gt;</span><div class="sx-kids">${kids}</div>
+        <span class="sx-tag">&lt;/${sxe(tag)}&gt;</span></div>`
+    : `<div class="sx-el">${open}<span class="sx-tag">/&gt;</span></div>`;
+}
+
+// map sections hold named members: requestHandler./select, updateProcessor.uuid
+const CF_MAPS = { requestHandler: "requestHandler", updateProcessor: "updateProcessor",
+                  searchComponent: "searchComponent" };
+
+function cfSection(key, node, onlyEditable) {
+  let body;
+  if (CF_MAPS[key] && node && typeof node === "object") {
+    if (onlyEditable) return "";
+    body = Object.entries(node).map(([name, v]) =>
+      cfNode(CF_MAPS[key], v, `${key}.${name}`, `${key}.${name}`, false)).join("");
+  } else {
+    body = cfNode(key === "updateHandlerupdateLog" ? "updateLog" : key, node, key, key, onlyEditable);
+  }
+  if (!body) return "";
+  const count = CF_MAPS[key] && node ? ` (${Object.keys(node).length})` : "";
+  const open = CF_OPEN.has(key) || onlyEditable;
+  return `<details class="cf-sec" data-cf-sec="${sxe(key)}"${open ? " open" : ""}>
+    <summary><span class="sx-tag" data-sh="cfg:${sxe(key)}" data-title="${sxe(key)}">${sxe(key)}${count}</span></summary>
+    <div class="sx-kids">${body}</div></details>`;
+}
+
+function renderConfig() {
+  const d = configData;
+  if (!d) return;
+  const shared = d.shared_with.length
+    ? ` — <span class="sx-bad">shared with ${d.shared_with.map(sxe).join(", ")}</span>` : " — used by this collection only";
+  const nOverlay = d.overlay.length, nUser = Object.keys(d.user_props).length;
+  $("cf-head").innerHTML = `<span data-sh="top:configset" data-title="configset">configset
+    <b>${sxe(d.configset || "?")}</b></span>${shared}
+    · ${nOverlay} value${nOverlay === 1 ? "" : "s"} set through the Config API
+    · ${nUser} user propert${nUser === 1 ? "y" : "ies"}`;
+  const only = $("cf-settable").checked;
+  const tree = cfWithAbsent(d.config);
+  const order = ["luceneMatchVersion", "indexConfig", "updateHandler", "updateHandlerupdateLog",
+    "query", "requestDispatcher", "directoryFactory", "codecFactory", "updateRequestProcessorChain",
+    "updateProcessor", "initParams", "requestHandler", "searchComponent", "listener"];
+  const keys = [...order.filter(k => k in tree), ...Object.keys(tree).filter(k => !order.includes(k))];
+  $("cf-body").innerHTML = keys.map(k => cfSection(k, tree[k], only)).join("")
+    || `<span class="desc">Nothing here can be changed through the Config API.</span>`;
+}
+
+async function loadConfig() {
+  const c = coll();
+  if (!c) return;
+  if (configFor !== c) cfEditing = null;     // an edit opened on another collection
+  configFor = c;
+  const out = await post("/api/config", { collection: c });
+  if (!out.ok) {
+    $("cf-body").innerHTML = `<span class="desc">${sxe(out.error || "Could not read the config.")}</span>`;
+    return;
+  }
+  configData = out;
+  renderConfig();
+}
+
+const CF_OVERLAY_NOTE = `Written to configoverlay.json in the configset in ZooKeeper,
+  which takes precedence over solrconfig.xml; Solr then reloads every core using the
+  configset. A reload opens a new searcher, so every cache starts empty and pays
+  autowarm — expect a short cold-cache bump in latency. Reset removes the overlay entry
+  and solrconfig.xml's value applies again.`;
+
+function showConfigHelp(el) {
+  const key = el.dataset.sh;
+  const h = configHelp(key);
+  if (!h) return;
+  const path = el.dataset.cfPath;
+  const lines = [];
+  if (path) {
+    const from = el.dataset.from, lab = configData.lab_props[path];
+    lines.push(["sx-card-val",
+      from === "overlay" ? `Set through the Config API: the overlay overrides solrconfig.xml here.`
+      : from === "labprop" ? `solrconfig.xml reads \${${lab.prop}:${lab.file_default}}` +
+          (lab.set ? ` — the user property is set to ${lab.value}.` : ` — the property is not set, so the file's default applies.`)
+      : from === "absent" ? `Not in solrconfig.xml: Solr's built-in default applies.`
+      : `From solrconfig.xml.`]);
+    lines.push(["sx-card-flip",
+      configData.editable.includes(path) ? "Changing it: " + CF_OVERLAY_NOTE
+      : lab ? `Changing it: sets the user property ${lab.prop} in the configset overlay and
+          reloads the cores — the same route the Tuning panel's merge settings take.`
+      : `Not a set-property value. Handlers, search components and update processors
+          can be replaced whole with the Config API's update-* commands; anything else
+          means editing solrconfig.xml in the configset and reloading.`]);
+  }
+  fillExplorerHelp(el, key, el.dataset.title || key.slice(4), h[0], lines, h[1]);
+}
+
+function cfEditorHtml(path, current) {
+  return `<div class="sx-confirm"><div class="cf-editor">
+    <label>New value for <b>${sxe(path)}</b>:
+      <input id="cf-input" type="text" value="${sxe(current === "—" ? "" : current)}"></label>
+    <button class="btn primary" data-cf="preview">Preview</button>
+    <button class="btn" data-cf="cancel">Cancel</button></div></div>`;
+}
+
+async function cfPreview(path, value, reset) {
+  const c = coll();
+  const out = await post("/api/config/set",
+    { collection: c, path, value, reset, dry_run: true });
+  if (!out.ok || coll() !== c) return;
+  const d = configData, lab = d.lab_props[path];
+  cfEditing = { collection: c, path, value, reset, html: `<div class="sx-confirm">
+    <p>${reset ? `Reset <b>${sxe(path)}</b> to solrconfig.xml` : `Set <b>${sxe(path)}</b> to
+      <b>${sxe(String(value))}</b>`}. The exact Config API call:</p>
+    <pre>POST /solr/${sxe(c)}/config
+${sxe(JSON.stringify(out.command, null, 2))}</pre>
+    <p>${lab ? `solrconfig.xml reads this through \${${sxe(lab.prop)}}; the command
+      ${reset ? "removes" : "sets"} that user property, and Solr reloads the cores.`
+      : sxe(CF_OVERLAY_NOTE)}</p>
+    ${d.shared_with.length ? `<p class="sx-warn">Configset "${sxe(d.configset)}" is shared: this
+      also changes ${d.shared_with.map(sxe).join(", ")}.</p>` : ""}
+    <div class="btns"><button class="btn primary" data-cf="send">Send to Solr</button>
+      <button class="btn" data-cf="cancel">Cancel</button></div></div>` };
+  renderConfig();
+}
+
+async function cfSend() {
+  const e = cfEditing;
+  cfEditing = null;
+  const out = await post("/api/config/set", { collection: e.collection, path: e.path,
+    value: e.value, reset: e.reset, dry_run: false });
+  if (out.ok) {
+    showStrip(e.reset ? `Config: ${e.path} is back to solrconfig.xml's value.`
+                      : `Config: ${e.path} = ${e.value}. Solr reloaded the cores.`, false);
+    knobsFor = null;                  // the Tuning sliders show some of these too
+    loadTuning(coll());
+  }
+  await loadConfig();
+}
+
+for (const id of ["cf-body", "cf-head"]) {
+  $(id).addEventListener("mouseover", e => {
+    const el = e.target.closest("[data-sh]");
+    if (el && (!helpFor || helpFor.anchor !== el)) showSchemaHelp(el);
+  });
+  $(id).addEventListener("mouseout", e => {
+    const el = e.target.closest("[data-sh]");
+    if (el && !el.contains(e.relatedTarget)) scheduleHideParamHelp();
+  });
+}
+$("cf-body").addEventListener("click", e => {
+  const b = e.target.closest("[data-cf]");
+  if (b) {
+    const act = b.dataset.cf;
+    if (act === "cancel") { cfEditing = null; renderConfig(); }
+    else if (act === "send") cfSend();
+    else if (act === "preview") cfPreview(cfEditing.path, $("cf-input").value, false);
+    else if (act === "reset") cfPreview(b.dataset.cfPath, null, true);
+    return;
+  }
+  const leaf = e.target.closest(".sx-edit");
+  if (!leaf || !e.target.closest(".sx-v")) return;
+  const path = leaf.dataset.cfPath, v = leaf.dataset.v;
+  // a boolean has one other value, so go straight to the preview
+  if (v === "true" || v === "false") return cfPreview(path, v !== "true", false);
+  cfEditing = { path, html: cfEditorHtml(path, v) };
+  renderConfig();
+  const input = $("cf-input");
+  if (input) { input.focus(); input.select(); }
+});
+$("cf-body").addEventListener("keydown", e => {
+  if (e.target.id === "cf-input" && e.key === "Enter") cfPreview(cfEditing.path, e.target.value, false);
+});
+// details toggles do not bubble; capture them to remember what is open
+$("cf-body").addEventListener("toggle", e => {
+  const sec = e.target.dataset && e.target.dataset.cfSec;
+  if (sec) e.target.open ? CF_OPEN.add(sec) : CF_OPEN.delete(sec);
+}, true);
+$("cf-settable").addEventListener("change", renderConfig);
+$("btn-cf-reload").addEventListener("click", loadConfig);
+$("btn-cf-expand").addEventListener("click", () => {
+  const secs = $("cf-body").querySelectorAll(".cf-sec");
+  const allOpen = [...secs].every(s => s.open);
+  for (const s of secs) s.open = !allOpen;
+  $("btn-cf-expand").textContent = allOpen ? "Expand all" : "Collapse all";
+});
 
 /* ---------- topology ---------- */
 
@@ -3879,6 +5808,12 @@ async function poll() {
     const r = await fetch("/api/snapshot" + (historySeeded ? "" : "?history=1"));
     if (!r.ok) throw 0;
     render(await r.json());
+    // flush/merge provenance and real-time get are Solr's; ES/OS lack both
+    $("writepath-section").style.display = isES() ? "none" : "";
+    $("schema-section").style.display = isES() ? "none" : "";
+    $("config-section").style.display = isES() ? "none" : "";
+    if (!demo && !isES() && coll() && schemaFor !== coll()) loadSchema();
+    if (!demo && !isES() && coll() && configFor !== coll()) loadConfig();
     lastOk = Date.now();
     $("chip").className = "chip live"; $("chiplabel").textContent = "Live";
   } catch (e) {
@@ -4032,6 +5967,8 @@ async function pollLogs() {
 (function () {
   const btn = document.getElementById("help-toggle");
   const sync = () => {
+    // explorer panels only look hoverable while there is something to show
+    document.documentElement.classList.toggle("help-on", paramHelpOn);
     btn.setAttribute("aria-pressed", String(paramHelpOn));
     btn.title = paramHelpOn ? "Parameter hover help: on — click to turn off"
                             : "Parameter hover help: off — click to turn on";

@@ -1,6 +1,6 @@
 # searchlab
 
-Disposable search clusters — **SolrCloud, Elasticsearch, or OpenSearch** — with synthetic data of controllable shape, open-loop load tests, and a control panel that drives the whole thing from a browser. Built for two jobs: **learning search-engine internals** and **reproducing production performance issues** on demand.
+Disposable search clusters — **SolrCloud, Elasticsearch, or OpenSearch** — with synthetic data of controllable shape, open-loop load tests, and a control panel that drives the whole thing from a browser. Built first for **learning how search engines actually work** — look inside a live cluster, change one thing, watch what moves — and for **reproducing production performance issues** on demand.
 
 Two ways in. The CLI, for scripting, CI gates and sweeps:
 
@@ -9,7 +9,7 @@ pip install -e .
 searchlab quickstart              # up + collection + gen + index + load
 ```
 
-…or the control panel, where you can ramp load, tune a live cluster, force merges, build queries and watch a failure unfold without touching a terminal:
+…or the control panel, where you can follow one document through the write path, read the live schema and config, ramp load, tune a live cluster, force merges, build queries and watch a failure unfold without touching a terminal:
 
 ```
 searchlab up --engine opensearch --nodes 2
@@ -115,13 +115,25 @@ A single self-contained page (no CDN, no build step) that both *shows* the clust
 
 **Incident timeline:** the differentiator. Rather than a wall of independent alerts, it links events into a causal chain across a time window — GC pause → ZooKeeper session lost → replica down → thread pool saturated → queries failing — so a drop gets a story instead of a metric. It distinguishes server-rejected from client-dropped, which matters: a load test can report tens of thousands of client drops while the server reports zero errors, and the difference tells you whether the cluster refused the work or was merely slow.
 
-**Look inside Lucene:** per-shard segment detail — sizes, deleted-document share, and where each segment came from (a flush or a merge on Solr; committed and searchable state on ES/OS, which is a different and equally instructive fact), plus maxDoc, searchers opened, warmup time and sort statistics.
+**Look inside Lucene:** per-shard segment detail — sizes, deleted-document share, and where each segment came from (a flush or a merge on Solr; committed and searchable state on ES/OS, which is a different and equally instructive fact), plus maxDoc, searchers opened, warmup time and sort statistics. **Snapshot**, then **what changed?** after any write, diffs the segments: which appeared, which were merged away, and why.
 
 **Live log panel:** the engine's own logs, tailed into the page and lexed, so you can watch what the cluster says about itself as you press the buttons.
 
 **Live load-test streaming:** while `searchlab load` runs, it writes rolling stats to `.searchlab/live-load.json` and the top panel comes alive automatically — client-observed p50/p99 traces, target vs achieved RPS, progress, errors, dropped. The client-side p99 next to the server-side `/select` p99 is the whole story of a saturation event on one screen: queueing shows up in the client trace before the server metric moves.
 
 Under all that, the original strip-chart recorder on millimeter graph paper: pen traces for p99 latency (red), per-node heap sawtooth (blue), and query rate (green), with hover readouts and a selectable window.
+
+## Look inside: write path, schema, config (Solr)
+
+Three panels that treat the cluster as something to learn from rather than something to describe. Each one asks the live cluster, so what it shows is what happened, not what the docs say should have. Solr only for now; on ES/OS the panels say so.
+
+**Write path.** One document, one stage at a time. Type a value and see the analysis chain turn it into terms, field by field. Index it, and the panel asks Solr twice: real-time get finds it straight away (it's in the transaction log and the in-memory buffer), search doesn't (no new searcher has opened). Commit, and a segment diff shows the new segment appear, labelled as a flush; keep writing and the merge policy folds segments together, each labelled as a merge. This is the "I indexed it, where is it?" surprise, taken apart.
+
+**Schema.** The managed schema laid out the way `managed-schema.xml` reads, with every property labelled by the layer it comes from — the field or dynamic rule, its field type, or the type class's built-in default — which is the question the Schema API alone doesn't answer. Luke adds which fields actually hold data and which dynamic rule made each one, and per-segment FieldInfos show what each segment physically holds, which is not always what the schema says *now*. Edits are previewed as the exact Schema API request before they run. What each change does to an already-populated index was checked on Solr 9.6 rather than recalled: most structural changes (flipping `docValues`, `multiValued`, the type) are accepted by the Schema API and then make the **next write** fail, and the panel says so before you press the button.
+
+**Config.** The effective solrconfig, with each value marked by where it comes from: `solrconfig.xml`, the configset overlay (`configoverlay.json`, where `set-property` writes), or a lab `${searchlab.*}` user property. Edit commit timing, caches and the lab's merge/buffer settings through `set-property` / `set-user-property`, then **reset to file**. The editable list is the 29 properties Solr 9.6 actually accepted when each was set to its current value — `indexConfig.*`, `directoryFactory.*` and the update log were refused. The lab configset reaches its merge and buffer settings through `${searchlab.*}` user properties instead; everything else is shown but not editable.
+
+Hover explanations on all three follow the header's help toggle.
 
 ## Query builder
 
