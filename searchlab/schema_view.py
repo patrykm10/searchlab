@@ -86,6 +86,26 @@ def _match_dynamic(name: str, patterns: list[str]) -> str | None:
     return max(hits, key=len) if hits else None
 
 
+def one_replica_per_shard(state: dict) -> list[tuple[str, str, int]]:
+    """(shard, core, node index) for one active replica of each active shard,
+    the leader when there is one. Luke and the segments API answer for a
+    single core, so asking the collection covers whichever replica Solr
+    happened to route to; on a multi-shard collection that is part of the
+    data, and a Reload could land on a different part."""
+    out = []
+    for shard, sh in sorted((state.get("shards") or {}).items()):
+        if sh.get("state", "active") != "active":
+            continue
+        reps = [r for r in (sh.get("replicas") or {}).values() if r.get("state") == "active"]
+        if not reps:
+            continue
+        rep = next((r for r in reps if str(r.get("leader")) == "true"), reps[0])
+        node = (rep.get("node_name") or "").split(":")[0]
+        digits = "".join(ch for ch in node if ch.isdigit())
+        out.append((shard, rep.get("core", ""), max(0, int(digits) - 1) if digits else 0))
+    return out
+
+
 def read_schema(spec: ClusterSpec, collection: str, timeout: float = 20.0) -> dict:
     base = f"{spec.base_url()}/{collection}"
     with httpx.Client(timeout=timeout) as client:
@@ -95,10 +115,24 @@ def read_schema(spec: ClusterSpec, collection: str, timeout: float = 20.0) -> di
                        showDefaults="true")["dynamicFields"]
         eff_types = _get(client, f"{base}/schema/fieldtypes",
                          showDefaults="true")["fieldTypes"]
-        luke = _get(client, f"{base}/admin/luke", numTerms=0).get("fields", {})
-        segs = _get(client, f"{base}/admin/segments", fieldInfo="true").get("segments", {})
         colls = (_get(client, f"{spec.base_url()}/admin/collections", action="CLUSTERSTATUS")
                  .get("cluster", {}).get("collections", {}))
+        replicas = one_replica_per_shard(colls.get(collection) or {})
+        multi = len(replicas) > 1
+        luke: dict[str, dict] = {}
+        segs: dict[str, dict] = {}
+        # every shard's data, summed: document counts add up, and segment
+        # names repeat across shards, so they carry the shard's name
+        for shard, core, node in replicas or [("", collection, 0)]:
+            url = f"{spec.base_url(node)}/{core}"
+            for name, info in _get(client, f"{url}/admin/luke", numTerms=0).get("fields", {}).items():
+                if name in luke:
+                    luke[name]["docs"] = (luke[name].get("docs") or 0) + (info.get("docs") or 0)
+                else:
+                    luke[name] = dict(info)
+            for name, seg in _get(client, f"{url}/admin/segments",
+                                  fieldInfo="true").get("segments", {}).items():
+                segs[f"{shard} {name}" if multi else name] = seg
 
     # a schema belongs to a configset, not a collection: an edit made
     # through one collection changes every collection sharing it
@@ -172,6 +206,7 @@ def read_schema(spec: ClusterSpec, collection: str, timeout: float = 20.0) -> di
         "in_index": in_index, "fields": fields, "dynamic_fields": dynamic,
         "field_types": types, "copy_fields": declared.get("copyFields", []),
         "segments": sorted(segs),
+        "read_from": [core for _, core, _ in replicas],
     }
 
 

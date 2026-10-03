@@ -80,6 +80,34 @@ def index_single_doc(spec: ClusterSpec, collection: str, field: str, value: str,
     return {"id": doc_id, "took_ms": round((time.perf_counter() - t0) * 1000, 1)}
 
 
+def locate_doc(spec: ClusterSpec, collection: str, doc_id: str, cores: list[str],
+               timeout: float = 10.0) -> str | None:
+    """Which leader holds the document. Asked of each core alone
+    (distrib=false), real-time get answers from that core's transaction log,
+    so it knows before any commit. The walkthrough then watches that shard,
+    rather than taking any new segment on any shard for this document."""
+    with httpx.Client(timeout=timeout) as client:
+        for core in cores:
+            r = client.get(f"{spec.base_url()}/{core}/get",
+                           params={"id": doc_id, "distrib": "false", "wt": "json"})
+            if r.status_code == 200 and r.json().get("doc") is not None:
+                return core
+    return None
+
+
+def commit_settings(spec: ClusterSpec, collection: str, timeout: float = 10.0) -> dict:
+    """The automatic commits that could make the document flush or appear,
+    so the walkthrough can name what did instead of assuming the soft one."""
+    r = httpx.get(f"{spec.base_url()}/{collection}/config",
+                  params={"wt": "json"}, timeout=timeout)
+    r.raise_for_status()
+    uh = (r.json().get("config") or {}).get("updateHandler") or {}
+    soft, hard = uh.get("autoSoftCommit") or {}, uh.get("autoCommit") or {}
+    return {"soft_ms": int(soft.get("maxTime") or -1),
+            "hard_ms": int(hard.get("maxTime") or -1),
+            "hard_opens_searcher": str(hard.get("openSearcher")).lower() == "true"}
+
+
 def doc_visibility(spec: ClusterSpec, collection: str, doc_id: str,
                    timeout: float = 10.0) -> dict:
     """Two answers to "is it there yet?", which differ until a commit.

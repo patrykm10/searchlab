@@ -79,6 +79,22 @@ def test_baselines_are_per_replica():
     assert not r.writepath_diff("products", "core2")["ok"]
 
 
+def test_each_owner_rolls_its_own_baseline():
+    # The segment panel and the walkthrough diff the same replica. With one
+    # shared baseline, whichever diffed first used up the other's change.
+    a, b = [seg("_a", "flush")], [seg("_a", "flush"), seg("_b", "flush")]
+    r = runner_with([a, a, b, b])
+    r.writepath_snapshot("products", "core1", owner="panel:t1")
+    r.writepath_snapshot("products", "core1", owner="wp:t1")
+    assert [s["name"] for s in r.writepath_diff("products", "core1", owner="wp:t1")
+            ["diff"]["new"]] == ["_b"]
+    # the walkthrough's diff didn't move the panel's baseline
+    assert [s["name"] for s in r.writepath_diff("products", "core1", owner="panel:t1")
+            ["diff"]["new"]] == ["_b"]
+    # and an owner that never took a snapshot still has to
+    assert not r.writepath_diff("products", "core1", owner="panel:t2")["ok"]
+
+
 def test_refused_on_es_and_os():
     for engine in ("opensearch", "elasticsearch"):
         r = runner_with([[]], engine=engine)
@@ -187,6 +203,15 @@ def test_submit_refuses_missing_inputs():
     assert "collection" in r.writepath_submit("", "f", "x")["error"]
 
 
+def test_submit_refuses_the_id_and_internal_fields():
+    # field="id" replaced the generated id: the document went in under the
+    # user's value (maybe over a real one) and the walkthrough waited forever
+    r = ActionRunner(ClusterSpec())
+    for field in ("id", "_version_", "_root_"):
+        out = r.writepath_submit("products", field, "x")
+        assert not out["ok"] and "text field" in out["error"], field
+
+
 # ---- the dashboard section ---------------------------------------------------
 
 from pathlib import Path
@@ -213,3 +238,15 @@ def test_walkthrough_calls_only_routes_the_server_has():
     assert literal and built
     for kind in set(literal) | set(built):
         assert f'"/api/writepath/{kind}"' in server, kind
+
+
+def test_page_keeps_its_runs_and_baselines_apart():
+    page = (Path(__file__).parent.parent / "searchlab" / "templates" / "dashboard.html").read_text()
+    # each consumer names its own baseline
+    assert 'owner: "panel:" + TAB' in page and 'owner: "wp:" + TAB' in page
+    # the watcher looks only at the shard holding the document
+    assert "run.docCore ? [run.docCore] : run.cores" in page
+    # every timer-driven step drops out once its run is gone (Start over, a new run)
+    body = page[page.index("function wpWatchFlush"):page.index("async function wpCommit")]
+    assert body.count("if (wp !== run) return;") >= 2
+    assert "A new searcher opened" in body and "On disk, still not searchable" in body

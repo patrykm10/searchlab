@@ -3845,7 +3845,7 @@ function segDiffStory(d) {
 }
 
 async function segDiffAction(kind, core) {
-  const out = await post("/api/writepath/" + kind, { collection: coll(), core });
+  const out = await post("/api/writepath/" + kind, { collection: coll(), core, owner: "panel:" + TAB });
   const at = new Date().toLocaleTimeString();
   if (!out.ok) {
     segDiff = { core, hasBaseline: segDiff.core === core && segDiff.hasBaseline,
@@ -3880,7 +3880,11 @@ $("topo").addEventListener("click", e => {
 /* ---------- write path walkthrough ---------- */
 
 const WP_WATCH_S = 120, WP_MERGE_WATCH_S = 300;
-let wp = null;   // {collection, field, docId, cores, t0, timer, committed}
+let wp = null;   // {collection, field, docId, cores, docCore, commits, t0, timer, committed}
+// Names this tab's diff baselines on the server, so the segment panel, the
+// walkthrough and a second tab each roll their own forward instead of using
+// up one another's changes.
+const TAB = Math.random().toString(36).slice(2, 10);
 
 function wpStage(name, state) {
   // every box before `name` is done, `name` is current, the rest are ahead
@@ -3915,8 +3919,8 @@ function wpButtons(stage) {
   $("btn-wp-analyze").disabled = !["idle", "analyzed"].includes(stage);
 }
 
-function wpStopTimer() {
-  if (wp && wp.timer) { clearInterval(wp.timer); wp.timer = null; }
+function wpStopTimer(run = wp) {
+  if (run && run.timer) { clearInterval(run.timer); run.timer = null; }
 }
 
 function wpReset() {
@@ -3969,9 +3973,11 @@ async function wpAnalyze() {
   if (!coll()) return showStrip("Pick a collection first.", true);
   if (!field || !value) return showStrip("Choose a text field and type a value.", true);
   wpReset();
-  wp = { collection: coll(), field, value, t0: null, timer: null, committed: false };
-  const out = await post("/api/writepath/analyze", { collection: wp.collection, field, value });
-  if (!out.ok) return;
+  const run = wp = { collection: coll(), field, value, t0: null, timer: null, committed: false };
+  const out = await post("/api/writepath/analyze", { collection: run.collection, field, value });
+  // every await below can come back after Start over (or a new run): a reply
+  // for an old run must not touch the page
+  if (!out.ok || wp !== run) return;
   renderAnalyzerStages(out.stages);
   const terms = out.stages.length ? out.stages[out.stages.length - 1].tokens.map(t => t.text) : [];
   wpStage("analyze", "done");
@@ -3995,11 +4001,11 @@ async function wpLeaderCores() {
   return cores;
 }
 
-async function wpDiffAll() {
-  // the document lands on one shard, so watch every shard's leader and merge
+async function wpDiffAll(run, cores = run.cores) {
   const all = { new: [], gone: [], count: 0 };
-  for (const core of wp.cores) {
-    const out = await post("/api/writepath/diff", { collection: wp.collection, core });
+  for (const core of cores) {
+    const out = await post("/api/writepath/diff",
+      { collection: run.collection, core, owner: "wp:" + TAB });
     if (!out.ok) continue;
     all.new.push(...out.diff.new.map(g => ({ ...g, core })));
     all.gone.push(...out.diff.gone.map(g => ({ ...g, core })));
@@ -4009,16 +4015,22 @@ async function wpDiffAll() {
 }
 
 async function wpSubmit() {
-  wp.cores = await wpLeaderCores();
-  if (!wp.cores.length) return showStrip("Could not find the collection's shard leaders.", true);
-  for (const core of wp.cores)
-    await post("/api/writepath/snapshot", { collection: wp.collection, core });
+  const run = wp;
+  run.cores = await wpLeaderCores();
+  if (wp !== run) return;
+  if (!run.cores.length) return showStrip("Could not find the collection's shard leaders.", true);
+  for (const core of run.cores)
+    await post("/api/writepath/snapshot", { collection: run.collection, core, owner: "wp:" + TAB });
+  if (wp !== run) return;
   const out = await post("/api/writepath/submit",
-    { collection: wp.collection, field: wp.field, value: wp.value });
-  if (!out.ok) return;
-  wp.docId = out.id;
-  wp.t0 = performance.now();
-  wpLog("Indexed, not committed", `Solr acknowledged <b>${esc(out.id)}</b> in ${out.took_ms} ms.
+    { collection: run.collection, field: run.field, value: run.value, cores: run.cores });
+  if (!out.ok || wp !== run) return;
+  run.docId = out.id;
+  run.docCore = out.core;          // the leader holding it; the one shard worth watching
+  run.commits = out.commits;       // the automatic commits that could flush or show it
+  run.t0 = performance.now();
+  wpLog("Indexed, not committed", `Solr acknowledged <b>${esc(out.id)}</b> in ${out.took_ms} ms${
+    out.core ? ` on <b>${esc(out.core)}</b>, the leader of its shard` : ""}.
     It is now in the indexing buffer (RAM) and the transaction log — nothing on disk has changed
     in any segment yet.`);
   wpStage("buffer", "waiting");
@@ -4026,57 +4038,106 @@ async function wpSubmit() {
   wpWatchFlush();
 }
 
+// What made the document flush or appear, as far as the page can know: your
+// Commit, else the collection's own automatic commits. A segment without
+// visibility is a hard commit that opens no searcher, not the soft one.
+function wpTrigger(run, searchable) {
+  if (run.committed) return "your commit";
+  const c = run.commits;
+  if (!c) return "a commit nobody pressed here";
+  const sec = ms => `${(ms / 1000).toLocaleString()} s`;
+  if (searchable) {
+    if (c.soft_ms > 0) return `the automatic soft commit (autoSoftCommit every ${sec(c.soft_ms)},
+      "Search visibility delay" in Tuning) — nobody pressed Commit`;
+    if (c.hard_ms > 0 && c.hard_opens_searcher) return `the automatic hard commit (autoCommit
+      every ${sec(c.hard_ms)}, which opens a searcher) — nobody pressed Commit`;
+    return "a commit from elsewhere: another client, or a commitWithin on another request";
+  }
+  if (c.hard_ms > 0 && !c.hard_opens_searcher) return `the automatic hard commit (autoCommit
+    every ${sec(c.hard_ms)}, openSearcher=false)`;
+  return "a flush nobody asked for here: the indexing buffer filled, or another client committed";
+}
+
+function wpSegText(seg) {
+  const others = (seg.docs || 0) - 1;
+  return `New segment <b>${esc(seg.name)}</b> on ${esc(seg.core)}:
+    ${Number(seg.docs).toLocaleString()} doc${seg.docs === 1 ? "" : "s"}, ${esc(seg.size)},
+    source <b>${esc(seg.source)}</b>${others > 0 ? ` — your document and ${others.toLocaleString()}
+    more written to this shard since you submitted it` : ""}`;
+}
+
 function wpWatchFlush() {
+  const run = wp;
   let seenRtg = false, busy = false;
   const started = performance.now();
-  wpStopTimer();
-  wp.timer = setInterval(async () => {
-    if (busy || !wp) return;
+  wpStopTimer(run);
+  run.timer = setInterval(async () => {
+    if (busy || wp !== run) return;
     busy = true;
     try {
-      const vis = await post("/api/writepath/visibility", { collection: wp.collection, id: wp.docId });
-      if (vis.ok && vis.rtg && !vis.searchable && !seenRtg) {
+      const vis = await post("/api/writepath/visibility", { collection: run.collection, id: run.docId });
+      if (wp !== run) return;
+      const searchable = !!(vis.ok && vis.searchable);
+      if (vis.ok && vis.rtg && !searchable && !seenRtg) {
         seenRtg = true;
         wpLog("Visible to real-time get, invisible to search", `<code>/get?id=</code> finds it,
           because real-time get reads the transaction log. <code>/select?q=id:…</code> finds
           nothing, because search only reads segments opened by the current searcher —
           and no commit has opened a new one.`);
       }
-      const d = await wpDiffAll();
-      if (d.new.length || (vis.ok && vis.searchable)) {
-        wpStopTimer();
-        const seg = d.new.find(g => g.source === "flush") || d.new[0];
-        const how = wp.committed ? "your commit"
-          : "the autoSoftCommit timer — nobody pressed Commit (it is \"Search visibility delay\" in Tuning)";
-        wpLog("Flushed into a new segment", seg
-          ? `Triggered by ${how}. New segment <b>${esc(seg.name)}</b> on ${esc(seg.core)}:
-             ${Number(seg.docs).toLocaleString()} doc${seg.docs === 1 ? "" : "s"}, ${esc(seg.size)},
-             source <b>${esc(seg.source)}</b>. A new searcher opened over it, so search sees the
-             document too: <b>${vis.searchable ? "yes" : "not yet"}</b>.`
-          : `Triggered by ${how}. Search now finds the document, but no new segment showed up on
-             the leaders — another write may have flushed it into a segment between checks.`);
+      // only the document's own shard: a new segment on another one is
+      // somebody else's write, not this document flushing
+      const d = await wpDiffAll(run, run.docCore ? [run.docCore] : run.cores);
+      if (wp !== run) return;
+      const seg = d.new.find(g => g.source === "flush") || d.new[0];
+      if (seg && !run.flushed) run.flushed = seg;
+      if (run.flushed && !searchable && !run.flushLogged) {
+        run.flushLogged = true;
+        wpLog("On disk, still not searchable", `${wpSegText(run.flushed)}. It came from
+          ${wpTrigger(run, false)}: the document is now durable in a segment, but no new
+          searcher opened over it, so search still can't see it.`);
+        wpStage("segment", "waiting");
+      }
+      if (searchable) {
+        wpStopTimer(run);
+        if (run.flushed && !run.flushLogged)
+          wpLog("Flushed into a new segment", `${wpSegText(run.flushed)}. Triggered by
+            ${wpTrigger(run, true)}. A new searcher opened over it, so search sees the document.`);
+        else if (run.flushed)
+          wpLog("Searchable", `A new searcher opened, from ${wpTrigger(run, true)}, so search
+            sees the document now.`);
+        else
+          wpLog("Searchable", `Triggered by ${wpTrigger(run, true)}. Search finds the document,
+            but no new segment showed up on its shard between checks — another write may have
+            flushed it in the meantime.`);
         wpStage("segment", "done");
         wpButtons("flushed");
       } else if ((performance.now() - started) / 1000 > WP_WATCH_S) {
-        wpStopTimer();
-        wpLog("Still only in the buffer", `After ${WP_WATCH_S}s nothing has flushed it. This
-          collection probably has no automatic soft commit — press <b>Commit now</b>.`, "warn");
+        wpStopTimer(run);
+        wpLog(run.flushed ? "Durable, still not searchable" : "Still only in the buffer",
+          run.flushed
+            ? `After ${WP_WATCH_S}s no commit that opens a searcher has run. Press <b>Commit now</b>.`
+            : `After ${WP_WATCH_S}s nothing has flushed it. This collection probably has no
+               automatic soft commit — press <b>Commit now</b>.`, "warn");
       }
     } finally { busy = false; }
   }, POLL_MS);
 }
 
 async function wpCommit() {
-  wp.committed = true;
+  const run = wp;
+  run.committed = true;
   wpLog("Commit requested", `A hard commit: flush the buffer to a segment, fsync it, and open a
     new searcher.`);
-  await post("/api/commit", { collection: wp.collection });
-  if (!wp.timer) wpWatchFlush();
+  await post("/api/commit", { collection: run.collection });
+  if (wp === run && !run.timer) wpWatchFlush();
 }
 
 async function wpForceMerge() {
-  const d = await wpDiffAll();       // also moves the baseline to right now
-  if (d.count <= wp.cores.length) {
+  const run = wp;
+  const d = await wpDiffAll(run);    // also moves every shard's baseline to right now
+  if (wp !== run) return;
+  if (d.count <= run.cores.length) {
     wpLog("Nothing to merge", `Each shard already holds a single segment, so a forced merge
       would have nothing to combine. Index this document a few more times (Start over keeps the
       field and value) and try again.`, "warn");
@@ -4086,18 +4147,21 @@ async function wpForceMerge() {
     expensive operation the merge policy normally does a little at a time in the background.`);
   wpStage("merge", "waiting");
   $("btn-wp-merge").disabled = true;
-  if (!(await post("/api/optimize", { collection: wp.collection })).ok) return wpButtons("flushed");
+  const ok = (await post("/api/optimize", { collection: run.collection })).ok;
+  if (wp !== run) return;
+  if (!ok) return wpButtons("flushed");
   const started = performance.now();
   let busy = false;
-  wpStopTimer();
-  wp.timer = setInterval(async () => {
-    if (busy || !wp) return;
+  wpStopTimer(run);
+  run.timer = setInterval(async () => {
+    if (busy || wp !== run) return;
     busy = true;
     try {
-      const m = await wpDiffAll();
+      const m = await wpDiffAll(run);
+      if (wp !== run) return;
       const merged = m.new.filter(g => g.source === "merge");
       if (merged.length) {
-        wpStopTimer();
+        wpStopTimer(run);
         const docs = merged.reduce((n, g) => n + (g.docs || 0), 0);
         wpLog("Merged", `${m.gone.length} segment${m.gone.length === 1 ? "" : "s"} (including
           the one your document was flushed into) rewritten into ${merged.length}:
@@ -4107,7 +4171,7 @@ async function wpForceMerge() {
         wpStage("merge", "done");
         wpButtons("merged");
       } else if ((performance.now() - started) / 1000 > WP_MERGE_WATCH_S) {
-        wpStopTimer();
+        wpStopTimer(run);
         wpLog("No merge seen", `Nothing merged within ${WP_MERGE_WATCH_S / 60} minutes.`, "warn");
         wpButtons("flushed");
       }
@@ -4727,6 +4791,7 @@ function renderSchema() {
 async function loadSchema() {
   const c = coll();
   if (!c) return;
+  if (schemaFor !== c) sxPending = null;     // a preview built for another collection
   schemaFor = c;
   const out = await post("/api/schema", { collection: c });
   if (!out.ok) {
@@ -4795,15 +4860,18 @@ async function sxEdit(el) {
   const owner = el.closest("[data-owner-kind]");
   const kind = owner.dataset.ownerKind, name = owner.dataset.ownerName;
   const prop = el.dataset.prop, value = el.dataset.v !== "true";
+  // the preview is for this collection, and Send goes to this collection,
+  // whatever is selected by the time it's pressed
+  const c = coll();
   const out = await post("/api/schema/set",
-    { collection: coll(), kind, name, prop, value, dry_run: true });
-  if (!out.ok) return;
+    { collection: c, kind, name, prop, value, dry_run: true });
+  if (!out.ok || coll() !== c) return;
   const d = schemaData;
   const rule = kind === "dynamic" && d.dynamic_fields.find(f => f.name === name);
-  sxPending = { kind, name, prop, value, html: `<div class="sx-confirm">
+  sxPending = { collection: c, kind, name, prop, value, html: `<div class="sx-confirm">
     <p>Set <b>${sxe(prop)}="${value}"</b> on ${kind === "dynamic" ? "dynamicField" : "field"}
       <b>${sxe(name)}</b>. The exact Schema API call:</p>
-    <pre>POST /solr/${sxe(coll())}/schema
+    <pre>POST /solr/${sxe(c)}/schema
 ${sxe(JSON.stringify(out.command, null, 2))}</pre>
     <p class="${SX_FLIP_OF[prop] === "breaks" || prop === "multiValued" ? "sx-warn" : ""}">${sxFlip(prop) || ""}</p>
     ${rule && rule.matches.length ? `<p>This rule defines ${rule.matches.length} field(s) in your
@@ -4818,7 +4886,7 @@ ${sxe(JSON.stringify(out.command, null, 2))}</pre>
 async function sxSend() {
   const p = sxPending;
   sxPending = null;
-  const out = await post("/api/schema/set", { collection: coll(), kind: p.kind,
+  const out = await post("/api/schema/set", { collection: p.collection, kind: p.kind,
     name: p.name, prop: p.prop, value: p.value, dry_run: false });
   if (out.ok) showStrip(`Schema changed: ${p.name} ${p.prop}=${p.value}. Solr reloaded the
     cores; the on-disk lines under "In your data" show whether existing segments still agree.`, false);
@@ -5347,6 +5415,7 @@ function renderConfig() {
 async function loadConfig() {
   const c = coll();
   if (!c) return;
+  if (configFor !== c) cfEditing = null;     // an edit opened on another collection
   configFor = c;
   const out = await post("/api/config", { collection: c });
   if (!out.ok) {
@@ -5397,14 +5466,15 @@ function cfEditorHtml(path, current) {
 }
 
 async function cfPreview(path, value, reset) {
+  const c = coll();
   const out = await post("/api/config/set",
-    { collection: coll(), path, value, reset, dry_run: true });
-  if (!out.ok) return;
+    { collection: c, path, value, reset, dry_run: true });
+  if (!out.ok || coll() !== c) return;
   const d = configData, lab = d.lab_props[path];
-  cfEditing = { path, value, reset, html: `<div class="sx-confirm">
+  cfEditing = { collection: c, path, value, reset, html: `<div class="sx-confirm">
     <p>${reset ? `Reset <b>${sxe(path)}</b> to solrconfig.xml` : `Set <b>${sxe(path)}</b> to
       <b>${sxe(String(value))}</b>`}. The exact Config API call:</p>
-    <pre>POST /solr/${sxe(coll())}/config
+    <pre>POST /solr/${sxe(c)}/config
 ${sxe(JSON.stringify(out.command, null, 2))}</pre>
     <p>${lab ? `solrconfig.xml reads this through \${${sxe(lab.prop)}}; the command
       ${reset ? "removes" : "sets"} that user property, and Solr reloads the cores.`
@@ -5419,7 +5489,7 @@ ${sxe(JSON.stringify(out.command, null, 2))}</pre>
 async function cfSend() {
   const e = cfEditing;
   cfEditing = null;
-  const out = await post("/api/config/set", { collection: coll(), path: e.path,
+  const out = await post("/api/config/set", { collection: e.collection, path: e.path,
     value: e.value, reset: e.reset, dry_run: false });
   if (out.ok) {
     showStrip(e.reset ? `Config: ${e.path} is back to solrconfig.xml's value.`
