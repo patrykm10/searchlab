@@ -5303,6 +5303,10 @@ function cfNode(tag, node, path, hpath, onlyEditable) {
 const CF_MAPS = { requestHandler: "requestHandler", updateProcessor: "updateProcessor",
                   searchComponent: "searchComponent" };
 
+// Solr's Config API names the update log section "updateHandlerupdateLog",
+// two names run together; show where it actually lives
+const cfLabel = key => key === "updateHandlerupdateLog" ? "updateHandler › updateLog" : key;
+
 function cfSection(key, node, onlyEditable) {
   let body;
   if (CF_MAPS[key] && node && typeof node === "object") {
@@ -5316,7 +5320,7 @@ function cfSection(key, node, onlyEditable) {
   const count = CF_MAPS[key] && node ? ` (${Object.keys(node).length})` : "";
   const open = CF_OPEN.has(key) || onlyEditable;
   return `<details class="cf-sec" data-cf-sec="${sxe(key)}"${open ? " open" : ""}>
-    <summary><span class="sx-tag" data-sh="cfg:${sxe(key)}" data-title="${sxe(key)}">${sxe(key)}${count}</span></summary>
+    <summary><span class="sx-tag" data-sh="cfg:${sxe(key)}" data-title="${sxe(key)}">${sxe(cfLabel(key))}${count}</span></summary>
     <div class="sx-kids">${body}</div></details>`;
 }
 

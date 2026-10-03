@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import statistics
+import textwrap
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -318,23 +319,28 @@ def _format_rounds(res: dict) -> str:
     for name, key in (("p50", "p50_ms"), ("p99", "p99_ms")):
         v = verdict_rounds([p.get(key) for p in a_ph], [p.get(key) for p in b_ph])
         if v["kind"] == "unknown":
-            lines.append(f"  {name}: no verdict (a phase returned no successful requests)")
+            lines.append(_note(f"{name}: no verdict (a phase returned no successful requests)"))
         elif v["kind"] == "real":
             side = "slower" if v["effect_pct"] > 0 else "faster"
-            lines.append(f"  {name}: all {n} B runs were {side} than every A run "
-                         f"(median {_pct(v['effect_pct'])}): a real effect.")
+            lines.append(_note(f"{name}: all {n} B runs were {side} than every A run "
+                         f"(median {_pct(v['effect_pct'])}): a real effect."))
         elif not v["apart"]:
-            lines.append(f"  {name}: B runs and A runs overlap (median {_pct(v['effect_pct'])}): "
-                         "no effect you can rely on.")
+            lines.append(_note(f"{name}: B runs and A runs overlap (median {_pct(v['effect_pct'])}): "
+                         "no effect you can rely on."))
         elif abs(v["effect_pct"]) < 5:
-            lines.append(f"  {name}: B is consistently on one side, but only by "
-                         f"{_pct(v['effect_pct'])}: too small to matter.")
+            lines.append(_note(f"{name}: B is consistently on one side, but only by "
+                         f"{_pct(v['effect_pct'])}: too small to matter."))
         else:
-            lines.append(f"  {name}: B is consistently on one side ({_pct(v['effect_pct'])}), "
+            lines.append(_note(f"{name}: B is consistently on one side ({_pct(v['effect_pct'])}), "
                          f"but by less than the A runs spread among themselves "
                          f"({v['noise_pct']:.0f}%): too close to call. More rounds or "
-                         "longer phases would settle it.")
+                         "longer phases would settle it."))
     return "\n".join(lines)
+
+
+def _note(text: str) -> str:
+    # verdicts are sentences; wrapped, they read in a terminal and in the panel
+    return textwrap.fill(text, width=100, initial_indent="  ", subsequent_indent="    ")
 
 
 def format_report(res: dict) -> str:
@@ -342,6 +348,11 @@ def format_report(res: dict) -> str:
         return _format_rounds(res)
     ph = {p["name"]: p for p in res["phases"]}
     a, b, a2 = ph.get("A"), ph.get("B"), ph.get("A'")
+    p99 = verdict(*(p.get("p99_ms") if p else None for p in (a, b, a2)))
+    steady = verdict(*(p.get("p99_without_worst_s") if p else None for p in (a, b, a2)))
+    # p99 "moved", but only because of one bad second: the table must say so
+    # too, not "real" above a sentence explaining that it isn't
+    burst = p99["kind"] == "real" and steady["kind"] == "noise"
     fmt_v = (lambda v: f"{v:g}" if v is not None else "default")
     lines = [
         f"experiment: {res['label']} ({res['knob']}) {fmt_v(res['from'])} -> "
@@ -359,8 +370,9 @@ def format_report(res: dict) -> str:
         if judged:
             v = verdict(*vals)
             if v["kind"] != "unknown":
-                tail = (f"   {v['effect_pct']:+6.1f}%     {v['noise_pct']:5.1f}%"
-                        f"   {'real' if v['kind'] == 'real' else 'within noise'}")
+                label = ("burst" if key == "p99_ms" and burst else
+                         "real" if v["kind"] == "real" else "within noise")
+                tail = f"   {v['effect_pct']:+6.1f}%     {v['noise_pct']:5.1f}%   {label}"
         lines.append(f"  {name:<22}{cells}{tail}")
 
     ms = lambda v: f"{v:.1f}"  # noqa: E731
@@ -380,44 +392,42 @@ def format_report(res: dict) -> str:
                          + "".join(f"{(f'{v:.2f}' if v is not None else '—'):>11}" for v in vals))
 
     lines.append("")
-    p99 = verdict(*(p.get("p99_ms") if p else None for p in (a, b, a2)))
     p50 = verdict(*(p.get("p50_ms") if p else None for p in (a, b, a2)))
     if p50["kind"] == "unknown":
         lines.append("  no verdict: a phase returned no successful requests")
     else:
-        steady = verdict(*(p.get("p99_without_worst_s") if p else None for p in (a, b, a2)))
         for name, v in (("p50", p50), ("p99", p99)):
-            if name == "p99" and v["kind"] == "real" and steady["kind"] == "noise":
+            if name == "p99" and burst:
                 src = max((p for p in (a, b, a2) if p),
                           key=lambda p: (p.get("p99_ms") or 0) - (p.get("p99_without_worst_s") or 0))
-                lines.append(
-                    f"  p99: B moved {_pct(v['effect_pct'])}, but it came from one burst: "
+                lines.append(_note(
+                    f"p99: B moved {_pct(v['effect_pct'])}, but it came from one burst: "
                     f"{src.get('worst_slow')} of phase {src['name']}'s slowest requests fell in "
                     f"the second starting at {src.get('worst_s')}s. Leave each phase's worst "
                     f"second out and B moves {_pct(steady['effect_pct'])}, within the "
                     f"{steady['noise_pct']:.0f}% noise. A stall (GC, a merge, a reload "
-                    "elsewhere), not the setting.")
+                    "elsewhere), not the setting."))
             elif v["kind"] == "real":
-                lines.append(f"  {name}: B moved {_pct(v['effect_pct'])}, more than twice the "
-                             f"{v['noise_pct']:.1f}% that A and A′ differ by: likely a real effect.")
+                lines.append(_note(f"{name}: B moved {_pct(v['effect_pct'])}, more than twice the "
+                             f"{v['noise_pct']:.1f}% that A and A′ differ by: likely a real effect."))
             elif abs(v["effect_pct"]) < 5 and v["noise_pct"] < 5:
                 lines.append(f"  {name}: B moved {_pct(v['effect_pct'])}: no measurable change.")
             else:
-                lines.append(f"  {name}: B moved {_pct(v['effect_pct'])}, but A and A′ (same "
-                             f"setting) differ by {v['noise_pct']:.1f}%. Can't tell it from noise.")
+                lines.append(_note(f"{name}: B moved {_pct(v['effect_pct'])}, but A and A′ (same "
+                             f"setting) differ by {v['noise_pct']:.1f}%. Can't tell it from noise."))
         # a cache that clearly moved, read against whether latency did: the
         # likely mechanism when it did, and a cheap miss when it didn't
-        moved_latency = "real" in (p50["kind"], p99["kind"])
+        moved_latency = p50["kind"] == "real" or (p99["kind"] == "real" and not burst)
         for cache in CACHES:
             ha, hb, ha2 = (((p or {}).get("hitratio") or {}).get(cache) for p in (a, b, a2))
             if None in (ha, hb, ha2) or abs(hb - ha) < 0.05 or abs(ha2 - ha) >= 0.03:
                 continue
             way = "fell" if hb < ha else "rose"
-            lines.append(
-                f"  {cache} hit ratio {way} from {ha:.2f} to {hb:.2f}"
+            lines.append(_note(
+                f"{cache} hit ratio {way} from {ha:.2f} to {hb:.2f}"
                 + (", the likely mechanism." if moved_latency else
                    ", and latency didn't notice: on this index and workload, a miss costs "
-                   "about what a hit does."))
+                   "about what a hit does.")))
     lines.append("  (one A/A′ pair is a rough measure of noise; run it again before "
                  "acting on a small effect)")
     n = min((p["requests"] for p in res["phases"]), default=0)

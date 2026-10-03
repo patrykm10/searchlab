@@ -38,6 +38,14 @@
   runs the same A/B/A from the page; a load test, a second experiment and
   knob turns are refused while one runs, since they'd be measured with it
 - Landing page: the command list covers all 28 commands
+- README: screenshots of the control panel (lessons, write path, experiment,
+  schema, config, live signals) in docs/screenshots
+- Experiment report: the p99 row says `burst` when the summary explains the
+  move as one stall (it said `real` above a sentence saying it wasn't), a
+  burst no longer counts as latency moving when reading cache changes, and
+  verdicts wrap at 100 columns instead of running off the panel
+- Config explorer: Solr's `updateHandlerupdateLog` section is labelled
+  `updateHandler › updateLog`
 - `experiment --rounds N` (and a Rounds choice in the panel): A B A B … A,
   where a change counts only if every B run is on the same side of every A
   run and further from them than the A runs spread

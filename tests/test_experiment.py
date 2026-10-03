@@ -54,7 +54,12 @@ def test_one_stall_in_b_is_reported_as_a_burst_not_an_effect():
     # p99 jump 36x; running the same experiment again, it didn't happen.
     out = xp.format_report(_result([_phase("A"), _phase("B", stall=True, seed=2),
                                     _phase("A'", seed=3)]))
-    assert "came from one burst" in out and "phase B" in out and "starting at 12s" in out
+    flat = " ".join(out.split())
+    assert "came from one burst" in flat and "phase B" in flat and "starting at 12s" in flat
+    # the table agrees with the sentence below it
+    p99_row = next(line for line in out.splitlines() if "latency p99" in line)
+    assert p99_row.endswith("burst")
+    assert max(len(line) for line in out.splitlines() if not line.startswith("  latency")) <= 100
     assert "likely a real effect" not in out
     assert "queryResultCache hits" in out
 
@@ -65,6 +70,7 @@ def test_steady_shift_is_reported_as_likely_real():
     for k in ("p50_ms", "p90_ms", "p99_ms", "p99_without_worst_s"):
         b[k] *= 1.5                               # everything 50% slower, evenly
     out = xp.format_report(_result([a, b, a2]))
+    out = " ".join(out.split())
     assert "p50: B moved +50%" in out and "likely a real effect" in out
     assert "burst" not in out
 
@@ -73,6 +79,7 @@ def test_no_change_is_said_plainly():
     out = xp.format_report(_result([_phase("A"), _phase("B", seed=2), _phase("A'", seed=3)]))
     assert "no measurable change" in out
     # the cache clearly moved and latency didn't: say what that means
+    out = " ".join(out.split())
     assert "queryResultCache hit ratio fell from 0.66 to 0.54" in out
     assert "latency didn't notice" in out
 
@@ -196,9 +203,10 @@ def test_round_report_reads_as_rounds():
                       ph("B2", 9.3, 9.1), ph("A3", 6.0, 8.8)]}
     out = xp.format_report(res)
     assert "order: A1 B1 A2 B2 A3" in out
-    assert "p50: all 2 B runs were slower than every A run" in out
-    assert "p99: B runs and A runs overlap" in out
+    flat = " ".join(out.split())
+    assert "p50: all 2 B runs were slower than every A run" in flat
+    assert "p99: B runs and A runs overlap" in flat
     # one side but within A's spread
     res["phases"] = [ph("A1", 6.1, 9), ph("B1", 6.92, 9), ph("A2", 6.9, 9),
                      ph("B2", 7.2, 9), ph("A3", 6.5, 9)]
-    assert "too close to call" in xp.format_report(res)
+    assert "too close to call" in " ".join(xp.format_report(res).split())

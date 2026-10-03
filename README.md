@@ -30,6 +30,44 @@ searchlab down
 
 Requires Docker (with the compose plugin) and Python 3.10+.
 
+## What it looks like
+
+Real screenshots of the control panel (`searchlab dashboard`) on a single-node Solr 9.6 cluster with 20,000 generated documents, taken by driving the page in a headless browser.
+
+**Lessons**, run a step at a time against the live cluster. This one waits for you to trigger a merge, then shows it:
+
+![A lesson in progress: a merge the learner triggered, the segment table, and a question](docs/screenshots/lesson.png)
+
+<details>
+<summary>The eight lessons, in course order</summary>
+
+![The lesson list](docs/screenshots/lessons-list.png)
+</details>
+
+**Write path**: one document from analyzer to buffer to segment, each step confirmed by asking Solr:
+
+![The write-path explorer after analyzing, indexing and committing one document](docs/screenshots/write-path.png)
+
+**An experiment** on one tuning knob, A/B/A, with the noise measured and the knob put back:
+
+![An experiment report for the filter cache size](docs/screenshots/experiment.png)
+
+<details>
+<summary>Schema and config explorers, and the live signals</summary>
+
+The live managed schema, each property marked by where its value comes from, with what each segment holds on disk:
+
+![The schema explorer](docs/screenshots/schema.png)
+
+The effective solrconfig, with what the Config API can change underlined:
+
+![The config explorer](docs/screenshots/config.png)
+
+Live signals under a 60 req/s open-loop load test:
+
+![Live signals: latency, heap, query rate, CPU, GC and segments](docs/screenshots/signals.png)
+</details>
+
 ## Engines
 
 ```
