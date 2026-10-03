@@ -596,22 +596,32 @@ class ActionRunner:
             return {"ok": False, "error": "The write-path walkthrough is Solr-only for now."}
         return self.segments(collection, core)
 
-    def writepath_snapshot(self, collection: str, core: str) -> dict:
-        """Remember this replica's segments as the baseline for the next diff."""
+    @staticmethod
+    def _baseline_key(owner: str, collection: str, core: str) -> str:
+        # One baseline per caller: the segment panel and the walkthrough (and
+        # a second tab) each roll their own forward. Shared, whichever diffed
+        # first used up the other's change.
+        return f"{owner}|{collection}:{core}"
+
+    def writepath_snapshot(self, collection: str, core: str, owner: str = "") -> dict:
+        """Remember this replica's segments as the caller's baseline."""
         out = self._wp_segments(collection, core)
         if out.get("ok"):
-            self._wp_baseline[f"{collection}:{core}"] = out["segments"]
+            if len(self._wp_baseline) > 500:       # abandoned tabs: forget the oldest
+                self._wp_baseline.pop(next(iter(self._wp_baseline)))
+            self._wp_baseline[self._baseline_key(owner, collection, core)] = out["segments"]
         return out
 
-    def writepath_diff(self, collection: str, core: str) -> dict:
-        """Segments that appeared or vanished since the last snapshot or diff.
+    def writepath_diff(self, collection: str, core: str, owner: str = "") -> dict:
+        """Segments that appeared or vanished since this caller's last
+        snapshot or diff.
 
         The baseline rolls forward on every diff, so after a forced merge a
         second diff shows the flush segments going and the merge one arriving.
         """
         from .segments import diff_segments
 
-        key = f"{collection}:{core}"
+        key = self._baseline_key(owner, collection, core)
         if key not in self._wp_baseline:
             return {"ok": False, "error": "Take a snapshot first."}
         out = self._wp_segments(collection, core)
@@ -641,15 +651,31 @@ class ActionRunner:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    def writepath_submit(self, collection: str, field: str, value: str) -> dict:
+    def writepath_submit(self, collection: str, field: str, value: str,
+                         cores: list[str] | None = None) -> dict:
         if err := self._wp_guard(collection, field=field, value=value):
             return err
-        from .writepath import index_single_doc
+        if field == "id" or field.startswith("_"):
+            # the walkthrough sets the id itself; a value here would replace
+            # it (possibly overwriting a real document) while the page waited
+            # for an id that was never indexed
+            return {"ok": False, "error": f"'{field}' can't be the walkthrough's field: "
+                    "pick a text field."}
+        from .writepath import commit_settings, index_single_doc, locate_doc
 
         try:
-            return {"ok": True, **index_single_doc(self.spec, collection, field, value)}
+            out = index_single_doc(self.spec, collection, field, value)
         except Exception as e:
             return {"ok": False, "error": str(e)}
+        try:
+            out["core"] = locate_doc(self.spec, collection, out["id"], cores or [])
+            out["commits"] = commit_settings(self.spec, collection)
+        except Exception:
+            # the document is in; without these the page watches every
+            # leader and names no trigger, which is less, not wrong
+            out.setdefault("core", None)
+            out["commits"] = None
+        return {"ok": True, **out}
 
     # --------------------------------------------------------------- schema --
 

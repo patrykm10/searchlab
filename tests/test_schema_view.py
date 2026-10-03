@@ -201,3 +201,89 @@ def test_every_editable_property_says_what_changing_it_does():
     block = HTML[HTML.index("const SX_FLIP_OF"):HTML.index("function sxFlip")]
     covered = set(re.findall(r"(\w+):", block)) | {"multiValued"}
     assert EDITABLE <= covered, EDITABLE - covered
+
+
+# ---- every shard, not whichever replica answered ----------------------------
+
+def test_one_replica_per_shard_prefers_the_leader_and_skips_the_inactive():
+    from searchlab.schema_view import one_replica_per_shard
+    state = {"shards": {
+        "shard2": {"state": "active", "replicas": {
+            "r3": {"core": "c_s2_n3", "node_name": "solr2:8983_solr", "state": "active"},
+            "r4": {"core": "c_s2_n4", "node_name": "solr3:8983_solr", "state": "active",
+                   "leader": "true"}}},
+        "shard1": {"state": "active", "replicas": {
+            "r1": {"core": "c_s1_n1", "node_name": "solr1:8983_solr", "state": "down",
+                   "leader": "true"},
+            "r2": {"core": "c_s1_n2", "node_name": "solr2:8983_solr", "state": "active"}}},
+        "shard3": {"state": "inactive", "replicas": {
+            "r5": {"core": "c_s3", "node_name": "solr1:8983_solr", "state": "active"}}}}}
+    # shard1's leader is down, so its live replica answers; shard3 was split away
+    assert one_replica_per_shard(state) == [("shard1", "c_s1_n2", 1), ("shard2", "c_s2_n4", 2)]
+
+
+@pytest.fixture
+async def two_shard_solr(aiohttp_server):
+    async def empty_schema(request):
+        return web.json_response({"schema": {"name": "s", "fields": [], "dynamicFields": [
+            {"name": "*_s", "type": "string"}], "fieldTypes": []}})
+
+    async def eff(key):
+        async def h(request):
+            return web.json_response({key: [{"name": "*_s", "type": "string"}]
+                                      if key == "dynamicFields" else []})
+        return h
+
+    def luke(docs):
+        async def h(request):
+            return web.json_response({"fields": {
+                "color_s": {"type": "string", "dynamicBase": "*_s", "docs": docs}}})
+        return h
+
+    def segments(count):
+        async def h(request):
+            return web.json_response({"segments": {"_0": {"fields": {
+                "color_s": {"flags": "IDsrt-OF----", "docCount": count, "termCount": 2}}}}})
+        return h
+
+    async def clusterstatus(request):
+        return web.json_response({"cluster": {"collections": {"products": {
+            "configName": "searchlab", "shards": {
+                "shard1": {"state": "active", "replicas": {"r1": {
+                    "core": "products_shard1_replica_n1", "node_name": "solr1:8983_solr",
+                    "state": "active", "leader": "true"}}},
+                "shard2": {"state": "active", "replicas": {"r2": {
+                    "core": "products_shard2_replica_n2", "node_name": "solr1:8983_solr",
+                    "state": "active", "leader": "true"}}}}}}}})
+
+    app = web.Application()
+    r = app.router
+    r.add_get("/solr/products/schema", empty_schema)
+    r.add_get("/solr/products/schema/fields", await eff("fields"))
+    r.add_get("/solr/products/schema/dynamicfields", await eff("dynamicFields"))
+    r.add_get("/solr/products/schema/fieldtypes", await eff("fieldTypes"))
+    r.add_get("/solr/products_shard1_replica_n1/admin/luke", luke(7))
+    r.add_get("/solr/products_shard2_replica_n2/admin/luke", luke(5))
+    r.add_get("/solr/products_shard1_replica_n1/admin/segments", segments(7))
+    r.add_get("/solr/products_shard2_replica_n2/admin/segments", segments(5))
+    r.add_get("/solr/admin/collections", clusterstatus)
+    return await aiohttp_server(app)
+
+
+async def test_in_your_data_covers_every_shard(two_shard_solr):
+    s = await asyncio.to_thread(read_schema, ClusterSpec(base_port=two_shard_solr.port), "products")
+    color = next(f for f in s["in_index"] if f["name"] == "color_s")
+    assert color["docs"] == 12                      # 7 + 5, not whichever shard answered
+    assert [g["segment"] for g in color["segments"]] == ["shard1 _0", "shard2 _0"]
+    assert s["read_from"] == ["products_shard1_replica_n1", "products_shard2_replica_n2"]
+
+
+def test_edits_go_to_the_collection_they_were_previewed_for():
+    page = (Path(__file__).parent.parent / "searchlab" / "templates" / "dashboard.html").read_text()
+    send = page[page.index("async function sxSend"):page.index("async function sxSend") + 400]
+    assert "collection: p.collection" in send and "coll()" not in send
+    cf = page[page.index("async function cfSend"):page.index("async function cfSend") + 400]
+    assert "collection: e.collection" in cf and "coll()" not in cf.split("loadTuning")[0]
+    # a pending preview is dropped when the collection changes
+    assert "if (schemaFor !== c) sxPending = null;" in page
+    assert "if (configFor !== c) cfEditing = null;" in page

@@ -359,15 +359,18 @@ def make_handler(spec: ClusterSpec, demo: bool,
             if path == "/api/segments":
                 return runner.segments(coll, str(body.get("core", "")))
             if path == "/api/writepath/snapshot":
-                return runner.writepath_snapshot(coll, str(body.get("core", "")))
+                return runner.writepath_snapshot(coll, str(body.get("core", "")),
+                                                 str(body.get("owner", "")))
             if path == "/api/writepath/diff":
-                return runner.writepath_diff(coll, str(body.get("core", "")))
+                return runner.writepath_diff(coll, str(body.get("core", "")),
+                                             str(body.get("owner", "")))
             if path == "/api/writepath/analyze":
                 return runner.writepath_analyze(coll, str(body.get("field", "")),
                                                 str(body.get("value", "")))
             if path == "/api/writepath/submit":
                 return runner.writepath_submit(coll, str(body.get("field", "")),
-                                               str(body.get("value", "")))
+                                               str(body.get("value", "")),
+                                               [str(c) for c in body.get("cores") or []])
             if path == "/api/writepath/visibility":
                 return runner.writepath_visibility(coll, str(body.get("id", "")))
             if path == "/api/schema":
